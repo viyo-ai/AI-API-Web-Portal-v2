@@ -213,9 +213,9 @@
 - [x] Fix Draft memory note button no-op and verify the memory-note draft workflow through an interactive UX loop.
 - [x] Correct prior validation gap by documenting and performing the affected end-to-end UX loop before checkpointing again.
 
-- [ ] Run a full browser-based Fix → Review → Fix → Review → Confirm UX loop on the live workspace flow, including task selection, Task Inspector tabs, Global Memory, Draft memory note, composer focus, provider controls, file controls, and visible error states.
-- [ ] Document concrete browser-loop evidence before checkpointing again, including screenshots or machine-readable results from each pass.
-- [ ] Fix any issue found during the browser loop, add focused regression coverage where feasible, then re-run automated validation and the confirmation browser pass.
+- [x] Run a full browser-based Fix → Review → Fix → Review → Confirm UX loop on the live workspace flow, including task selection, Task Inspector tabs, Global Memory, Draft memory note, composer focus, provider controls, file controls, and visible error states.
+- [x] Document concrete browser-loop evidence before checkpointing again, including screenshots or machine-readable results from each pass.
+- [x] Fix any issue found during the browser loop, add focused regression coverage where feasible, then re-run automated validation and the confirmation browser pass.
 
 - [x] Read `PORTAL_PHASE_1_DIRECTIVE.md` completely, with no skimming, and enforce Section 1-only scope before implementation.
 - [x] Implement Section 1 Build Targets additively without refactoring or modifying shipped features from commit `e01f66e`.
