@@ -41,7 +41,7 @@ import {
   writeWorkspaceFile,
 } from "./filesystem";
 import { getUserWorkspaceRoot } from "./terminal";
-import { CLAUDE_DEFAULT_MODEL, CLAUDE_OWNER_MODEL_LABEL, executeWrapperTurn, getWrapperRuntimeCredentialStates, KIMI_K26_CLOUDFLARE_MODEL, KIMI_OWNER_MODEL_LABEL } from "./wrapperLLM";
+import { CLAUDE_DEFAULT_MODEL, CLAUDE_OWNER_MODEL_LABEL, orchestrateWithOpenAI, executeWrapperTurn, getWrapperRuntimeCredentialStates, KIMI_K26_CLOUDFLARE_MODEL, KIMI_OWNER_MODEL_LABEL, resolveEffectiveRoute } from "./wrapperLLM";
 
 const routeModes = ["auto", "claude", "kimi", "dual"] as const;
 const taskStatuses = ["active", "waiting", "blocked", "completed", "archived", "error"] as const;
@@ -109,27 +109,20 @@ function modelIdentityAnswer(route: RouteMode) {
 }
 
 
-export function resolveWrapperRoute(message: string, preferredRoute: RouteMode = "auto"): WrapperRouteDecision {
+export async function resolveWrapperRoute(message: string, preferredRoute: RouteMode = "auto"): Promise<WrapperRouteDecision> {
   const override = detectRouteOverride(message);
-  const requestedRoute = override.route === "auto" ? preferredRoute : override.route;
+  let requestedRoute = override.route === "auto" ? preferredRoute : override.route;
   const credentialStates = getRuntimeCredentialStates();
+  
+  // If route is auto and no explicit tag was used, use OpenAI to determine optimal provider
+  if (requestedRoute === "auto" && !override.forcedByTag) {
+    const decision = await orchestrateWithOpenAI(message);
+    const effectiveRoute = resolveEffectiveRoute(decision.route, credentialStates);
+    requestedRoute = effectiveRoute;
+  }
+  
   const requiredProviders = providersRequiredForRoute(requestedRoute);
   const missing = requiredProviders.filter((provider) => !credentialStates.find((state) => state.provider === provider)?.configured);
-
-  if (requestedRoute === "auto") {
-    const claude = credentialStates.find((state) => state.provider === "claude");
-    const kimi = credentialStates.find((state) => state.provider === "kimi");
-    if (claude?.configured && kimi?.configured) {
-      return {
-        requestedRoute,
-        effectiveRoute: "dual",
-        forcedByTag: override.forcedByTag,
-        credentialStates,
-        isRunnable: true,
-        reason: "AUTO first-message initialization will start Claude Opus 4.7 through the Claude API and Kimi K2.6 through Cloudflare Workers AI. Task creation alone does not call either provider.",
-      };
-    }
-  }
 
   if (missing.length > 0) {
     return {
@@ -276,7 +269,7 @@ export const appRouter = router({
         const override = detectRouteOverride(input.message);
         const userContent = override.cleanedMessage || input.message.trim();
         const selectedRoute = input.routeMode ?? (task.routeMode as RouteMode);
-        const decision = resolveWrapperRoute(input.message, selectedRoute);
+        const decision = await resolveWrapperRoute(input.message, selectedRoute);
         await recordRuntimeCredentialSnapshots(ctx.user.id, decision.credentialStates);
 
         await appendTaskEvent({

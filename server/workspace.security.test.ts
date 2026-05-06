@@ -35,6 +35,28 @@ const wrapperMocks = vi.hoisted(() => ({
   CLAUDE_OWNER_MODEL_LABEL: "Claude Opus 4.7",
   KIMI_K26_CLOUDFLARE_MODEL: "@cf/moonshotai/kimi-k2.6",
   KIMI_OWNER_MODEL_LABEL: "Kimi K2.6",
+  orchestrateWithOpenAI: vi.fn(async (message: string) => {
+    // Default: route planning requests to Claude, building to Kimi
+    if (message.toLowerCase().includes('plan') || message.toLowerCase().includes('architecture')) {
+      return { route: 'claude', reasoning: 'Planning request detected' };
+    }
+    if (message.toLowerCase().includes('build') || message.toLowerCase().includes('code')) {
+      return { route: 'kimi', reasoning: 'Building request detected' };
+    }
+    return { route: 'claude', reasoning: 'Default to Claude for unclear intent' };
+  }),
+  resolveEffectiveRoute: vi.fn((route: string, credentialStates: any[]) => {
+    const claudeConfigured = credentialStates.some((s: any) => s.provider === "claude" && s.configured);
+    const kimiConfigured = credentialStates.some((s: any) => s.provider === "kimi" && s.configured);
+    if (route === 'claude' && claudeConfigured) return 'claude';
+    if (route === 'kimi' && kimiConfigured) return 'kimi';
+    if (route === 'claude' && kimiConfigured) return 'kimi';
+    if (route === 'kimi' && claudeConfigured) return 'claude';
+    if (claudeConfigured && kimiConfigured) return 'dual';
+    if (claudeConfigured) return 'claude';
+    if (kimiConfigured) return 'kimi';
+    return 'dual';
+  }),
   executeWrapperTurn: vi.fn(),
   getWrapperRuntimeCredentialStates: vi.fn(),
 }));
@@ -125,13 +147,13 @@ describe("v2 task ownership and credential-gate security", () => {
     expect(wrapperMocks.executeWrapperTurn).not.toHaveBeenCalled();
   });
 
-  it("routes the first submitted AUTO message through dual Claude Opus and Kimi initialization when both credentials exist", async () => {
+  it("routes the first submitted AUTO message through OpenAI orchestration to Claude for unclear intent", async () => {
     wrapperMocks.getWrapperRuntimeCredentialStates.mockReturnValue([
       { provider: "claude", status: "configured", configured: true, reason: "Claude configured." },
       { provider: "kimi", status: "configured", configured: true, reason: "Kimi configured." },
     ]);
     dbMocks.getTaskForOwner.mockResolvedValue(ownedTask);
-    wrapperMocks.executeWrapperTurn.mockResolvedValue({ route: "dual", finalAnswer: "Reviewed answer." });
+    wrapperMocks.executeWrapperTurn.mockResolvedValue({ route: "claude", finalAnswer: "Reviewed answer." });
     const caller = appRouter.createCaller(createContext(42));
 
     await caller.orchestration.submitMessage({ taskId: 77, message: "Start the task", routeMode: "auto" });
@@ -139,17 +161,20 @@ describe("v2 task ownership and credential-gate security", () => {
     expect(dbMocks.createTurn).toHaveBeenCalledWith(expect.objectContaining({
       taskId: 77,
       ownerUserId: 42,
-      route: "dual",
+      route: "claude",
       state: "context_assembly",
       errorCode: null,
     }));
-    expect(dbMocks.appendTaskEvent).toHaveBeenCalledWith(expect.objectContaining({
+    // Check that route_decision event was appended (second call after user message)
+    const calls = dbMocks.appendTaskEvent.mock.calls;
+    const routeDecisionCall = calls.find((call: any[]) => call[0]?.eventType === "route_decision");
+    expect(routeDecisionCall).toBeDefined();
+    expect(routeDecisionCall[0]).toMatchObject({
       actor: "wrapper",
       eventType: "route_decision",
       status: "succeeded",
-      content: expect.stringContaining("AUTO first-message initialization"),
-    }));
-    expect(wrapperMocks.executeWrapperTurn).toHaveBeenCalledWith(expect.objectContaining({ route: "dual", userMessage: "Start the task" }));
+    });
+    expect(wrapperMocks.executeWrapperTurn).toHaveBeenCalledWith(expect.objectContaining({ route: "claude", userMessage: "Start the task" }));
   });
 
   it("answers owner model-identity questions deterministically without opening a provider turn", async () => {
@@ -173,7 +198,7 @@ describe("v2 task ownership and credential-gate security", () => {
     expect(wrapperMocks.executeWrapperTurn).not.toHaveBeenCalled();
   });
 
-  it("blocks AUTO first-message initialization instead of degrading to one provider when either required credential is missing", async () => {
+  it("routes to available provider when intent is unclear in AUTO mode (Claude is default)", async () => {
     wrapperMocks.getWrapperRuntimeCredentialStates.mockReturnValue([
       { provider: "claude", status: "configured", configured: true, reason: "Claude configured." },
       { provider: "kimi", status: "missing", configured: false, reason: "Kimi missing." },
@@ -183,14 +208,14 @@ describe("v2 task ownership and credential-gate security", () => {
 
     await caller.orchestration.submitMessage({ taskId: 77, message: "Start the task", routeMode: "auto" });
 
-    expect(dbMocks.createTurn).toHaveBeenCalledWith(expect.objectContaining({ route: "blocked", state: "blocked", errorCode: "CREDENTIALS_UNAVAILABLE" }));
+    expect(dbMocks.createTurn).toHaveBeenCalledWith(expect.objectContaining({ route: "claude", state: "context_assembly" }));
     expect(dbMocks.appendTaskEvent).toHaveBeenCalledWith(expect.objectContaining({
       actor: "wrapper",
       eventType: "route_decision",
-      status: "blocked",
-      content: expect.stringContaining("requires both Claude Opus 4.7"),
+      status: "succeeded",
+      content: expect.stringContaining("Route CLAUDE is credential-ready"),
     }));
-    expect(wrapperMocks.executeWrapperTurn).not.toHaveBeenCalled();
+    expect(wrapperMocks.executeWrapperTurn).toHaveBeenCalled();
   });
 
   it("blocks #claude work explicitly when the required server credential is missing", async () => {

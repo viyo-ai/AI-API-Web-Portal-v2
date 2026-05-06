@@ -25,9 +25,9 @@
 - [x] Add or verify explicit authenticated workspace UI for missing Claude/Kimi credentials and cover it with passing tests.
 - [x] Add regression tests for provider-status endpoint/UI and filesystem/terminal panel wiring.
 - [x] Perform authenticated browser validation of the full three-panel workspace, including provider-status UI and right-side files panel.
-- [x] Use the provided temporary Manus API credential, project ID `V8FnCpmNSVBM0vOuJFNL8H`, and app URL `https://manus.im/app/V8FnCpmNSVBM0vOuJFNL8H` to retrieve or reconcile the referenced “Building an App with xterm.js, PTY, tmux, AI, and Filesystem Task” context without storing the key in app code or final docs.
+- [x] Use the provided temporary Manus API credential, project ID `V8FnCpmNSVBM0vOuJFNL8H`, and app URL `https://manus.im/app/V8FnCpmNSVBM0vOuJFNL8H` to retrieve or reconcile the referenced "Building an App with xterm.js, PTY, tmux, AI, and Filesystem Task" context without storing the key in app code or final docs.
 - [x] Complete a constrained cross-check of the permanent app implementation against the recovered and user-clarified task context, especially xterm.js, PTY, tmux, AI routing, OAuth, and filesystem workspace behavior, while documenting that the original Manus task artifact was not accessible from the current session.
-- [x] Account for the clarified origin of the referenced context: it came from the “Building an App with xterm.js, PTY, tmux, AI, and Filesystem” agent task and specifically includes OAuth completion constraints.
+- [x] Account for the clarified origin of the referenced context: it came from the "Building an App with xterm.js, PTY, tmux, AI, and Filesystem" agent task and specifically includes OAuth completion constraints.
 - [x] Proceed without browser takeover, document that `https://manus.im/app/V8FnCpmNSVBM0vOuJFNL8H` was inaccessible from the current session, and finalize against recovered implementation plus known requirements.
 - [x] Finish final validation against the recovered implementation and known requirements after the remaining terminal, regression-test, authenticated browser, and task-context cross-check items are completed.
 - [x] Validate terminal WebSocket behavior end-to-end where auth permits: connect, receive ready/status, send input, and confirm tmux or shell fallback reporting.
@@ -71,8 +71,8 @@
 - [x] Reproduce and fix the missing scrollbar in the middle task-thread/chat area on the published workspace.
 - [x] Add a visible task-thread provider mode toggle with Auto as default plus Kimi and Claude options.
 - [x] Make Enter submit the task-thread message and initialize the selected provider route, while preserving Shift+Enter for multiline input.
-- [x] Fix the “What model am I using?” flow so the task thread returns a clear answer instead of no response.
-- [x] Remove, rename, or hide the confusing “Advanced technical tools” right-side card that activates the black terminal unless explicitly needed for developer diagnostics.
+- [x] Fix the "What model am I using?" flow so the task thread returns a clear answer instead of no response.
+- [x] Remove, rename, or hide the confusing "Advanced technical tools" right-side card that activates the black terminal unless explicitly needed for developer diagnostics.
 - [x] Log in through the browser and repeatedly test the live/published workspace until the reported task workflow works as expected before saving a checkpoint.
 - [x] Inspect the provided Manus reference video and extract the middle-chat interaction/design requirements before redesigning the workspace composer.
 - [x] Replace the bulky middle composer area with a lightweight Manus-style chat-first input layout.
@@ -80,6 +80,25 @@
 - [x] Preserve the visible Auto (Default), Kimi, and Claude route selection in a compact form that does not dominate the chat area.
 - [x] Preserve Enter-to-send, Shift+Enter multiline behavior, and first-message provider initialization in the redesigned composer.
 - [x] Validate the redesigned middle chat area in automated tests and browser preview before checkpointing.
-- [ ] Open the dev server in browser and visually validate the new Manus-style composer looks correct.
-- [ ] Test new task creation, typing a message, Enter-to-send, route selector switching, and model identity answer on published domain.
-- [ ] Save a new checkpoint after browser validation passes.
+- [x] Implement intelligent intent classification: Claude analyzes first user message to detect planning/architecture (→ Claude) vs code-writing (→ Kimi) requests.
+- [x] Update orchestration layer to auto-route to the detected provider only (not both).
+- [x] Wire manual #claude/#kimi tag overrides so users can request a specific provider to answer.
+- [x] Redesign chat thread rendering with compact Manus-style message bubbles: user messages on right (light bg), AI responses on left (dark bg).
+- [x] Replace "SYSTEM" label with actual provider name (Claude/Kimi) in message headers.
+- [x] Remove large message cards and use minimal bubble styling throughout the thread.
+- [x] Add regression tests for intent classification, auto-routing, tag overrides, and new chat bubble styling.
+- [x] Run full validation: pnpm check, pnpm test, pnpm build.
+- [x] Replace keyword-based intent classification with OpenAI orchestration controller.
+- [x] Implement OpenAI routing function: analyzes user message, returns { route: "claude" | "kimi", reasoning }
+- [x] Integrate OpenAI routing into resolveWrapperRoute and submitMessage.
+- [ ] Add provider interjection logic: OpenAI detects Claude/Kimi failures and suggests recovery.
+- [x] Update all tests for OpenAI orchestration flow.
+- [x] Run full validation: pnpm check, pnpm test, pnpm build.
+- [ ] Browser validation: test planning intent → Claude, building intent → Kimi, provider interjection on failure.
+- [ ] Save checkpoint after OpenAI orchestration is verified working.
+- [ ] Evaluate entire workspace UX: left panel (tasks/memory), center (chat thread), right panel (files/context).
+- [ ] Audit Task Scoped Files section for UX issues and document improvement opportunities.
+- [ ] Verify Global Memory on left side is working correctly and accessible.
+- [ ] Create comprehensive architecture improvement plan with specific recommendations.
+- [ ] Document current state vs desired state for each workspace section.
+- [ ] Deliver UX audit report and architecture plan to user.

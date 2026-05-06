@@ -109,7 +109,8 @@ function isOwnerVisibleEvent(event: ThreadEvent) {
 
 function ownerEventTitle(event: ThreadEvent) {
   if (event.eventType === "message" && event.actor === "user") return "You";
-  if (event.actor === "claude" || event.actor === "kimi") return "AI answer";
+  if (event.actor === "claude") return "Claude";
+  if (event.actor === "kimi") return "Kimi";
   return eventTitle(event.actor, event.eventType);
 }
 
@@ -472,21 +473,23 @@ export default function Home() {
                   </article>
                 ) : null}
 
-                {ownerVisibleEvents.map((event) => (
-                  <article key={event.id} className={`rounded-3xl border p-4 shadow-sm ${actorTone[event.actor] ?? actorTone.system}`}>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        {event.status === "blocked" || event.status === "failed" ? <CircleAlert className="h-4 w-4 text-rose-600" /> : <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
-                        <h3 className="text-sm font-semibold text-[#2b2b27]">{ownerEventTitle(event)}</h3>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-[#77766e]">
-                        <Clock3 className="h-3.5 w-3.5" /> {compactDate(event.createdAt)}
-                        <Badge variant="outline" className="rounded-full text-[10px]">{event.status}</Badge>
+                {ownerVisibleEvents.map((event) => {
+                  const isUser = event.actor === "user";
+                  return (
+                    <div key={event.id} className={`flex gap-2 ${isUser ? "flex-row-reverse justify-end" : "flex-row justify-start"}`}>
+                      <div className={`flex-1 max-w-xl rounded-xl border p-3 shadow-sm text-sm leading-6 ${actorTone[event.actor] ?? actorTone.system}`}>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <h3 className="text-xs font-semibold text-[#2b2b27]">{ownerEventTitle(event)}</h3>
+                          <div className="flex items-center gap-1 text-[10px] text-[#77766e]">
+                            {event.status === "blocked" || event.status === "failed" ? <CircleAlert className="h-3 w-3 text-rose-600" /> : <CheckCircle2 className="h-3 w-3 text-emerald-600" />}
+                          </div>
+                        </div>
+                        <p className="whitespace-pre-wrap text-[#3e3e39]">{ownerEventBody(event)}</p>
+                        <div className="mt-1 text-[10px] text-[#77766e]">{compactDate(event.createdAt)}</div>
                       </div>
                     </div>
-                    <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[#3e3e39]">{ownerEventBody(event)}</p>
-                  </article>
-                ))}
+                  );
+                })}
 
                 {technicalEvents.length > 0 ? (
                   <div className="rounded-3xl border border-[#deded8] bg-white p-4 shadow-sm">

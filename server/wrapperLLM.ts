@@ -245,6 +245,132 @@ async function runClaudeReview(input: WrapperExecutionInput, contextJson: string
   ]);
 }
 
+/**
+ * Orchestrate routing decision using OpenAI as the intelligent controller.
+ * OpenAI analyzes the user message and determines if it's a planning/architecture request (Claude)
+ * or a code-writing/building request (Kimi).
+ */
+export async function orchestrateWithOpenAI(userMessage: string): Promise<{ route: 'claude' | 'kimi'; reasoning: string }> {
+  const openaiApiKey = process.env.OPENAI_API_KEY;
+  if (!openaiApiKey) {
+    // Fallback to keyword-based classification if OpenAI is not configured
+    const intent = await classifyUserIntent(userMessage);
+    const route = intent === 'planning' ? 'claude' : intent === 'building' ? 'kimi' : 'claude';
+    return { route, reasoning: `Fallback: keyword-based classification detected ${intent} intent` };
+  }
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openaiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are an intelligent orchestration controller for an AI coding workshop. Your job is to analyze user requests and route them to the appropriate AI provider:
+
+- Claude Opus 4.7: Best for planning, architecture, design, analysis, decision-making, and strategic thinking
+- Kimi K2.6: Best for code writing, implementation, debugging, optimization, and execution
+
+Analyze the user's message and decide which provider is best suited. Respond with ONLY a JSON object (no markdown, no extra text):
+{"route": "claude" or "kimi", "reasoning": "brief explanation"}`,
+          },
+          {
+            role: 'user',
+            content: userMessage,
+          },
+        ],
+        temperature: 0.3,
+        max_tokens: 200,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error(`OpenAI API error: ${response.status} ${response.statusText}`);
+      // Fallback to keyword-based classification
+      const intent = await classifyUserIntent(userMessage);
+      const route = intent === 'planning' ? 'claude' : intent === 'building' ? 'kimi' : 'claude';
+      return { route, reasoning: `Fallback (OpenAI error): keyword-based classification` };
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
+    
+    try {
+      const decision = JSON.parse(content);
+      if (decision.route === 'claude' || decision.route === 'kimi') {
+        return { route: decision.route, reasoning: decision.reasoning || 'OpenAI routing decision' };
+      }
+    } catch (e) {
+      console.error(`Failed to parse OpenAI response: ${content}`);
+    }
+
+    // Fallback to keyword-based classification
+    const intent = await classifyUserIntent(userMessage);
+    const route = intent === 'planning' ? 'claude' : intent === 'building' ? 'kimi' : 'claude';
+    return { route, reasoning: `Fallback (parse error): keyword-based classification` };
+  } catch (error) {
+    console.error(`OpenAI orchestration error: ${error}`);
+    // Fallback to keyword-based classification
+    const intent = await classifyUserIntent(userMessage);
+    const route = intent === 'planning' ? 'claude' : intent === 'building' ? 'kimi' : 'claude';
+    return { route, reasoning: `Fallback (exception): keyword-based classification` };
+  }
+}
+
+/**
+ * Classify user message intent to determine optimal provider routing.
+ * Returns 'planning' for planning/architecture/design requests → Claude
+ * Returns 'building' for code/implementation/execution requests → Kimi
+ * Returns 'unclear' if intent cannot be determined → use Auto/Dual
+ */
+export async function classifyUserIntent(userMessage: string): Promise<'planning' | 'building' | 'unclear'> {
+  const normalized = userMessage.toLowerCase().trim();
+  
+  // Planning/architecture keywords
+  const planningKeywords = ['plan', 'architecture', 'design', 'structure', 'organize', 'strategy', 'approach', 'framework', 'layout', 'outline', 'blueprint', 'roadmap', 'decision', 'analysis', 'review', 'evaluate', 'assess', 'think', 'consider', 'brainstorm', 'discuss', 'explain', 'understand', 'help me think', 'help me plan'];
+  const buildingKeywords = ['build', 'code', 'write', 'implement', 'create', 'develop', 'generate', 'make', 'construct', 'execute', 'run', 'deploy', 'fix', 'debug', 'refactor', 'optimize', 'script', 'function', 'class', 'component', 'module', 'api', 'database', 'schema'];
+  
+  const planningMatches = planningKeywords.filter(kw => normalized.includes(kw)).length;
+  const buildingMatches = buildingKeywords.filter(kw => normalized.includes(kw)).length;
+  
+  if (planningMatches > buildingMatches && planningMatches > 0) {
+    return 'planning';
+  }
+  if (buildingMatches > planningMatches && buildingMatches > 0) {
+    return 'building';
+  }
+  
+  return 'unclear';
+}
+
+/**
+ * Convert OpenAI routing decision to effective route based on available credentials.
+ */
+export function resolveEffectiveRoute(route: 'claude' | 'kimi', credentialStates: RuntimeCredentialState[]): 'claude' | 'kimi' | 'dual' {
+  const claudeConfigured = credentialStates.some(s => s.provider === 'claude' && s.configured);
+  const kimiConfigured = credentialStates.some(s => s.provider === 'kimi' && s.configured);
+  
+  // If OpenAI recommends a specific provider and it's available, use it
+  if (route === 'claude' && claudeConfigured) return 'claude';
+  if (route === 'kimi' && kimiConfigured) return 'kimi';
+  
+  // If recommended provider is not available, try the other
+  if (route === 'claude' && kimiConfigured) return 'kimi';
+  if (route === 'kimi' && claudeConfigured) return 'claude';
+  
+  // Fallback to dual if both available
+  if (claudeConfigured && kimiConfigured) return 'dual';
+  if (claudeConfigured) return 'claude';
+  if (kimiConfigured) return 'kimi';
+  
+  return 'dual';
+}
+
 export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<WrapperExecutionResult> {
   const context = buildContext(input);
   const contextJson = serializeJson(context);
