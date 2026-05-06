@@ -37,3 +37,5 @@
 - [x] Add deeper automated filesystem and terminal interaction validation beyond static source-string checks where feasible.
 - [x] Document the referenced Manus task-context limitation as a constrained validation against recovered implementation and known user requirements unless a concrete task artifact becomes accessible.
 - [x] Keep the referenced Manus task-context cross-check explicitly constrained by the documented API/browser access limitation unless a concrete artifact becomes available.
+- [x] Fix published terminal native-module failure so a missing `node-pty` binary does not cause repeated disconnect/reconnect loops and provides an explicit usable fallback.
+- [x] Include client behavior tests in the Vitest include pattern so terminal reconnect regressions run in automated validation.

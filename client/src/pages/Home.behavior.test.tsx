@@ -408,11 +408,33 @@ describe("Home v2 task-first workspace behavior", () => {
         sessionKey: "test-session",
         tmuxSessionName: "ai-workshop-test",
         tmuxEnabled: true,
+        terminalMode: "pty",
         cwd: "/workspace/task-7",
       });
     });
 
     expect(screen.getByText(/tmux PTY terminal/i)).toBeInTheDocument();
     expect(screen.getByText(/tmux · ai-workshop-test · \/workspace\/task-7/i)).toBeInTheDocument();
+  });
+
+  it("pauses terminal reconnects after fatal native-module initialization errors", async () => {
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    const socket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+
+    await act(async () => {
+      socket.dispatchJson({ type: "error", fatal: true, message: "Failed to load native module: pty.node" });
+      socket.close();
+    });
+    const instancesAfterFatalClose = FakeWebSocket.instances.length;
+
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 2600));
+    });
+
+    expect(FakeWebSocket.instances).toHaveLength(instancesAfterFatalClose);
+    expect(screen.getAllByText(/error/i).length).toBeGreaterThan(0);
   });
 });

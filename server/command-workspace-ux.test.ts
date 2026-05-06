@@ -34,7 +34,7 @@ describe("v2 task-first workspace production regressions", () => {
     expect(source).not.toMatch(/Draft safe plan|Approve and run|opencode\.ai background CLI/i);
     expect(terminalSource).toContain("@xterm/xterm");
     expect(terminalSource).toContain("/api/terminal");
-    expect(terminalSource).toContain("Authenticated tmux-backed terminal");
+    expect(terminalSource).toContain("Authenticated terminal with PTY or basic shell fallback");
     expect(filesystemSource).toContain("trpc.filesystem.tree.useQuery");
     expect(filesystemSource).toContain("trpc.filesystem.write.useMutation");
   });
@@ -45,6 +45,8 @@ describe("v2 task-first workspace production regressions", () => {
     expect(source).toContain("authenticateUpgradeRequest");
     expect(source).toContain("sdk.authenticateRequest");
     expect(source).toContain("await import(\"node-pty\")");
+    expect(source).toContain("Basic shell fallback connected. node-pty native module is unavailable");
+    expect(source).toContain("spawn(launchCommand.command, launchCommand.args");
     expect(source).toContain("args: [\"new-session\", \"-A\", \"-s\", tmuxSessionName]");
     expect(source).toContain("tmuxEnabled: false");
     expect(source).toContain("tmux is not installed in this runtime");

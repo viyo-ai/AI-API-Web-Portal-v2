@@ -5,11 +5,13 @@ import "@xterm/xterm/css/xterm.css";
 
 type ConnectionState = "connecting" | "connected" | "disconnected" | "error";
 
+type TerminalMode = "pty" | "basic";
+
 type TerminalMessage =
-  | { type: "ready"; sessionKey: string; tmuxSessionName: string; tmuxEnabled: boolean; cwd: string }
+  | { type: "ready"; sessionKey: string; tmuxSessionName: string; tmuxEnabled: boolean; cwd: string; terminalMode?: TerminalMode }
   | { type: "output"; data: string }
   | { type: "status"; status: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; fatal?: boolean };
 
 function createTerminalSocketUrl() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -23,9 +25,12 @@ export default function TerminalPanel() {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const tmuxEnabledRef = useRef(false);
+  const suppressReconnectRef = useRef(false);
+  const disposedRef = useRef(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
   const [sessionLabel, setSessionLabel] = useState("Starting secure terminal...");
   const [tmuxEnabled, setTmuxEnabled] = useState(false);
+  const [terminalMode, setTerminalMode] = useState<TerminalMode>("pty");
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -83,6 +88,7 @@ export default function TerminalPanel() {
       socketRef.current = socket;
 
       socket.addEventListener("open", () => {
+        suppressReconnectRef.current = false;
         setConnectionState("connected");
         terminal.writeln("\r\n\x1b[32mConnected. Type a command or use the guided task panel.\x1b[0m");
         fitAndResize();
@@ -95,10 +101,13 @@ export default function TerminalPanel() {
           if (message.type === "ready") {
             tmuxEnabledRef.current = message.tmuxEnabled;
             setTmuxEnabled(message.tmuxEnabled);
-            setSessionLabel(`${message.tmuxEnabled ? "tmux" : "shell fallback"} · ${message.tmuxSessionName} · ${message.cwd}`);
+            setTerminalMode(message.terminalMode ?? "pty");
+            const modeLabel = message.terminalMode === "basic" ? "basic shell fallback" : message.tmuxEnabled ? "tmux" : "node-pty shell fallback";
+            setSessionLabel(`${modeLabel} · ${message.tmuxSessionName} · ${message.cwd}`);
           }
           if (message.type === "status") terminal.writeln(`\r\n\x1b[90m${message.status}\x1b[0m`);
           if (message.type === "error") {
+            if (message.fatal) suppressReconnectRef.current = true;
             setConnectionState("error");
             terminal.writeln(`\r\n\x1b[31m${message.message}\x1b[0m`);
           }
@@ -108,6 +117,12 @@ export default function TerminalPanel() {
       });
 
       socket.addEventListener("close", () => {
+        if (disposedRef.current) return;
+        if (suppressReconnectRef.current) {
+          setConnectionState("error");
+          terminal.writeln("\r\n\x1b[33mTerminal stopped because the server reported a fatal initialization error. Reconnect is paused to avoid a failure loop; refresh after the runtime configuration is fixed.\x1b[0m");
+          return;
+        }
         setConnectionState("disconnected");
         terminal.writeln(`\r\n\x1b[33mTerminal disconnected. Reconnecting shortly; ${tmuxEnabledRef.current ? "tmux session is preserved" : "fallback shell state may not persist"}.\x1b[0m`);
         reconnectTimerRef.current = window.setTimeout(connect, 2500);
@@ -131,6 +146,7 @@ export default function TerminalPanel() {
     connect();
 
     return () => {
+      disposedRef.current = true;
       inputDisposable.dispose();
       resizeObserver.disconnect();
       if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
@@ -150,14 +166,14 @@ export default function TerminalPanel() {
     <section className="flex min-h-[520px] flex-col overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#070A12] shadow-2xl shadow-black/40">
       <header className="flex items-center justify-between border-b border-white/10 bg-white/[0.035] px-4 py-3">
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200/80">{tmuxEnabled ? "tmux PTY terminal" : "PTY shell terminal"}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200/80">{terminalMode === "basic" ? "basic shell terminal" : tmuxEnabled ? "tmux PTY terminal" : "PTY shell terminal"}</p>
           <p className="truncate text-sm text-slate-400">{sessionLabel}</p>
         </div>
         <span className={`rounded-full px-3 py-1 text-xs font-semibold capitalize ring-1 ${stateStyles[connectionState]}`}>
           {connectionState}
         </span>
       </header>
-      <div ref={containerRef} className="min-h-0 flex-1 p-3" aria-label="Authenticated tmux-backed terminal" />
+      <div ref={containerRef} className="min-h-0 flex-1 p-3" aria-label="Authenticated terminal with PTY or basic shell fallback" />
     </section>
   );
 }

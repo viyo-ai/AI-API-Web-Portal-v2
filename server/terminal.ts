@@ -1,3 +1,4 @@
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
@@ -27,6 +28,21 @@ type RegisteredTerminal = {
 type AuthenticatedSocket = WebSocket & {
   authenticatedUser?: Awaited<ReturnType<typeof sdk.authenticateRequest>>;
 };
+
+type TerminalMode = "pty" | "basic";
+
+type TerminalLaunchCommand = {
+  command: string;
+  args: string[];
+  tmuxSessionName: string;
+  tmuxEnabled: boolean;
+  terminalMode: TerminalMode;
+  status: string;
+};
+
+type NodePtyLoadResult =
+  | { pty: typeof NodePty; errorMessage: null }
+  | { pty: null; errorMessage: string };
 
 function sendJson(socket: WebSocket, value: unknown) {
   if (socket.readyState === socket.OPEN) {
@@ -85,33 +101,63 @@ async function resolveExecutable(command: string) {
   return null;
 }
 
-type TerminalLaunchCommand = {
-  command: string;
-  args: string[];
-  tmuxSessionName: string;
-  tmuxEnabled: boolean;
-  status: string;
-};
+function getInteractiveShellArgs(shellCommand: string) {
+  const shellName = path.basename(shellCommand);
+  if (shellName === "bash" || shellName === "zsh") return ["-il"];
+  if (shellName === "fish") return ["-i"];
+  return ["-i"];
+}
 
-async function buildTerminalLaunchCommand(ownerUserId: number): Promise<TerminalLaunchCommand> {
+async function resolveShellLaunch() {
+  const requestedShell = process.env.SHELL || "/bin/bash";
+  const shell = (await resolveExecutable(requestedShell)) || (await resolveExecutable("bash")) || (await resolveExecutable("sh")) || "/bin/sh";
+  return { command: shell, args: getInteractiveShellArgs(shell) };
+}
+
+function summarizeNativeLoadError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.split("\n").map(line => line.trim()).filter(Boolean)[0] || "node-pty native module could not be loaded.";
+}
+
+async function loadNodePty(): Promise<NodePtyLoadResult> {
+  try {
+    return { pty: await import("node-pty"), errorMessage: null };
+  } catch (error) {
+    return { pty: null, errorMessage: summarizeNativeLoadError(error) };
+  }
+}
+
+async function buildTerminalLaunchCommand(ownerUserId: number, terminalMode: TerminalMode, ptyLoadError: string | null): Promise<TerminalLaunchCommand> {
   const tmuxSessionName = `aicw-user-${ownerUserId}`;
-  const tmuxBinary = await resolveExecutable(process.env.AICW_TMUX_BINARY || DEFAULT_TMUX);
-  if (tmuxBinary) {
+
+  if (terminalMode === "pty") {
+    const tmuxBinary = await resolveExecutable(process.env.AICW_TMUX_BINARY || DEFAULT_TMUX);
+    if (tmuxBinary) {
+      return {
+        command: tmuxBinary,
+        args: ["new-session", "-A", "-s", tmuxSessionName],
+        tmuxSessionName,
+        tmuxEnabled: true,
+        terminalMode,
+        status: "Authenticated node-pty terminal connected to a persistent tmux session inside your private task workspace directory.",
+      };
+    }
+
     return {
-      command: tmuxBinary,
-      args: ["new-session", "-A", "-s", tmuxSessionName],
+      ...(await resolveShellLaunch()),
       tmuxSessionName,
-      tmuxEnabled: true,
-      status: "Authenticated node-pty terminal connected to a persistent tmux session inside your private task workspace directory.",
+      tmuxEnabled: false,
+      terminalMode,
+      status: "Authenticated node-pty terminal connected. tmux is not installed in this runtime, so commands run in a non-persistent login shell inside your private task workspace directory.",
     };
   }
 
   return {
-    command: process.env.SHELL || "/bin/bash",
-    args: ["-l"],
+    ...(await resolveShellLaunch()),
     tmuxSessionName,
     tmuxEnabled: false,
-    status: "Authenticated node-pty terminal connected. tmux is not installed in this runtime, so commands run in a non-persistent login shell inside your private task workspace directory.",
+    terminalMode,
+    status: `Basic shell fallback connected. node-pty native module is unavailable in this runtime (${ptyLoadError ?? "no loader detail"}), so tmux is disabled and full-screen terminal UI behavior may be limited. Commands still run inside your private task workspace directory.`,
   };
 }
 
@@ -119,6 +165,59 @@ export async function getUserWorkspaceRoot(ownerUserId: number) {
   const root = path.join(WORKSPACE_ROOT, `user-${ownerUserId}`);
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
   return root;
+}
+
+function wirePtyTerminal(socket: WebSocket, terminal: NodePty.IPty) {
+  terminal.onData(data => sendJson(socket, { type: "output", data }));
+  terminal.onExit(({ exitCode, signal }) => {
+    sendJson(socket, { type: "status", status: `Terminal exited with code ${exitCode}${signal ? ` (${signal})` : ""}.` });
+    socket.close();
+  });
+
+  socket.on("message", (raw: RawData) => {
+    const message = parseClientMessage(raw);
+    if (!message) {
+      sendJson(socket, { type: "error", message: "Ignored malformed or oversized terminal message." });
+      return;
+    }
+    if (message.type === "input") terminal.write(message.data);
+    if (message.type === "resize") terminal.resize(message.cols, message.rows);
+  });
+
+  socket.on("close", () => {
+    terminal.kill();
+  });
+}
+
+function wireBasicShell(socket: WebSocket, shell: ChildProcessWithoutNullStreams) {
+  const forwardOutput = (data: Buffer | string) => sendJson(socket, { type: "output", data: data.toString() });
+
+  shell.stdout.on("data", forwardOutput);
+  shell.stderr.on("data", forwardOutput);
+  shell.on("error", error => {
+    sendJson(socket, { type: "error", fatal: true, message: `Terminal fallback shell failed to start: ${error.message}` });
+    socket.close();
+  });
+  shell.on("exit", (exitCode, signal) => {
+    sendJson(socket, { type: "status", status: `Fallback shell exited with code ${exitCode ?? "unknown"}${signal ? ` (${signal})` : ""}.` });
+    socket.close();
+  });
+
+  socket.on("message", (raw: RawData) => {
+    const message = parseClientMessage(raw);
+    if (!message) {
+      sendJson(socket, { type: "error", message: "Ignored malformed or oversized terminal message." });
+      return;
+    }
+    if (message.type === "input" && shell.stdin.writable) shell.stdin.write(message.data);
+    if (message.type === "resize") {
+      sendJson(socket, { type: "status", status: "Resize noted. Basic shell fallback is not a PTY, so terminal dimensions cannot be applied until node-pty is available." });
+    }
+  });
+
+  socket.on("close", () => {
+    if (!shell.killed) shell.kill();
+  });
 }
 
 export function registerTerminalWebSocket(server: Server): RegisteredTerminal {
@@ -148,25 +247,16 @@ export function registerTerminalWebSocket(server: Server): RegisteredTerminal {
       if (!user) throw new Error("Terminal connection is missing authenticated user context.");
       const ownerUserId = user.id;
       const cwd = await getUserWorkspaceRoot(ownerUserId);
-      const launchCommand = await buildTerminalLaunchCommand(ownerUserId);
-      const pty: typeof NodePty = await import("node-pty");
-      const terminal = pty.spawn(launchCommand.command, launchCommand.args, {
-        name: "xterm-256color",
-        cols: DEFAULT_COLS,
-        rows: DEFAULT_ROWS,
-        cwd,
-        env: {
-          ...process.env,
-          AICW_WORKSPACE_ROOT: cwd,
-          TERM: "xterm-256color",
-        },
-      });
+      const ptyLoad = await loadNodePty();
+      const terminalMode: TerminalMode = ptyLoad.pty ? "pty" : "basic";
+      const launchCommand = await buildTerminalLaunchCommand(ownerUserId, terminalMode, ptyLoad.errorMessage);
 
       sendJson(socket, {
         type: "ready",
         sessionKey: `user-${ownerUserId}`,
         tmuxSessionName: launchCommand.tmuxSessionName,
         tmuxEnabled: launchCommand.tmuxEnabled,
+        terminalMode: launchCommand.terminalMode,
         cwd,
       });
       sendJson(socket, {
@@ -174,27 +264,34 @@ export function registerTerminalWebSocket(server: Server): RegisteredTerminal {
         status: launchCommand.status,
       });
 
-      terminal.onData(data => sendJson(socket, { type: "output", data }));
-      terminal.onExit(({ exitCode, signal }) => {
-        sendJson(socket, { type: "status", status: `Terminal exited with code ${exitCode}${signal ? ` (${signal})` : ""}.` });
-        socket.close();
-      });
+      if (ptyLoad.pty) {
+        const terminal = ptyLoad.pty.spawn(launchCommand.command, launchCommand.args, {
+          name: "xterm-256color",
+          cols: DEFAULT_COLS,
+          rows: DEFAULT_ROWS,
+          cwd,
+          env: {
+            ...process.env,
+            AICW_WORKSPACE_ROOT: cwd,
+            TERM: "xterm-256color",
+          },
+        });
+        wirePtyTerminal(socket, terminal);
+        return;
+      }
 
-      socket.on("message", (raw: RawData) => {
-        const message = parseClientMessage(raw);
-        if (!message) {
-          sendJson(socket, { type: "error", message: "Ignored malformed or oversized terminal message." });
-          return;
-        }
-        if (message.type === "input") terminal.write(message.data);
-        if (message.type === "resize") terminal.resize(message.cols, message.rows);
+      const shell = spawn(launchCommand.command, launchCommand.args, {
+        cwd,
+        env: {
+          ...process.env,
+          AICW_WORKSPACE_ROOT: cwd,
+          TERM: "xterm-256color",
+        },
+        stdio: "pipe",
       });
-
-      socket.on("close", () => {
-        terminal.kill();
-      });
+      wireBasicShell(socket, shell);
     } catch (error) {
-      sendJson(socket, { type: "error", message: error instanceof Error ? error.message : "Terminal initialization failed." });
+      sendJson(socket, { type: "error", fatal: true, message: error instanceof Error ? error.message : "Terminal initialization failed." });
       socket.close();
     }
   });
