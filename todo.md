@@ -136,5 +136,5 @@
 - [x] Correct the center task thread ordering so older messages appear higher and the newest message appears closest to the type box, while preserving compact bubbles with owner messages aligned right and Manus/provider messages aligned left.
 - [x] Update regression tests to prove the newest task message renders nearest the composer instead of first at the top.
 - [x] Re-run validation for the corrected chat-order behavior.
-- [ ] Save a managed project checkpoint after the validated chat-ordering fix.
-- [ ] Report exactly what changed in the workspace UX/chat ordering and explicitly note remaining Claude-to-Kimi automation limitations.
+- [x] Save a managed project checkpoint after the validated chat-ordering fix.
+- [x] Report exactly what changed in the workspace UX/chat ordering and explicitly note remaining Claude-to-Kimi automation limitations.
