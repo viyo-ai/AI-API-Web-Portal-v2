@@ -126,6 +126,46 @@ export const globalMemory = mysqlTable(
   }),
 );
 
+export const globalFiles = mysqlTable(
+  "global_files",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerUserId: int("ownerUserId").notNull(),
+    displayName: varchar("displayName", { length: 220 }).notNull(),
+    relativePath: varchar("relativePath", { length: 1024 }).notNull(),
+    storageKey: text("storageKey").notNull(),
+    storageUrl: text("storageUrl").notNull(),
+    mimeType: varchar("mimeType", { length: 160 }),
+    sizeBytes: bigint("sizeBytes", { mode: "number" }).default(0).notNull(),
+    source: mysqlEnum("source", ["upload", "manual", "task_snapshot"]).default("upload").notNull(),
+    tagsJson: longtext("tagsJson"),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+    updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
+  },
+  (table) => ({
+    ownerPathIdx: index("global_files_owner_path_idx").on(table.ownerUserId, table.relativePath),
+    ownerUpdatedIdx: index("global_files_owner_updated_idx").on(table.ownerUserId, table.updatedAt),
+  }),
+);
+
+export const taskGlobalFileLinks = mysqlTable(
+  "task_global_file_links",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    taskId: int("taskId").notNull(),
+    globalFileId: int("globalFileId").notNull(),
+    ownerUserId: int("ownerUserId").notNull(),
+    attachedLabel: varchar("attachedLabel", { length: 220 }),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+    updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
+  },
+  (table) => ({
+    taskFileUnique: uniqueIndex("task_global_file_links_task_file_unique").on(table.taskId, table.globalFileId),
+    ownerTaskIdx: index("task_global_file_links_owner_task_idx").on(table.ownerUserId, table.taskId),
+    ownerFileIdx: index("task_global_file_links_owner_file_idx").on(table.ownerUserId, table.globalFileId),
+  }),
+);
+
 export const taskFiles = mysqlTable(
   "task_files",
   {
@@ -174,6 +214,10 @@ export type OrchestrationTurn = typeof orchestrationTurns.$inferSelect;
 export type InsertOrchestrationTurn = typeof orchestrationTurns.$inferInsert;
 export type GlobalMemory = typeof globalMemory.$inferSelect;
 export type InsertGlobalMemory = typeof globalMemory.$inferInsert;
+export type GlobalFile = typeof globalFiles.$inferSelect;
+export type InsertGlobalFile = typeof globalFiles.$inferInsert;
+export type TaskGlobalFileLink = typeof taskGlobalFileLinks.$inferSelect;
+export type InsertTaskGlobalFileLink = typeof taskGlobalFileLinks.$inferInsert;
 export type TaskFile = typeof taskFiles.$inferSelect;
 export type InsertTaskFile = typeof taskFiles.$inferInsert;
 export type CredentialStatusSnapshot = typeof credentialStatusSnapshots.$inferSelect;

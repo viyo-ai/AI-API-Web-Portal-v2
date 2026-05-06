@@ -177,3 +177,23 @@
 - [x] Run validation gates for the adaptive-thinking change, save a checkpoint, and report the exact implementation result.
 
 - [x] Run a live end-to-end portal/provider testing loop proving an actual Claude Opus 4.7 invocation uses adaptive thinking, then checkpoint and report the evidence.
+
+- [x] P1: Verify or complete first-class Global Files so users can upload to a global library independent of a task, attach/link files to tasks, understand scope from labels, and pass schema, router ownership, and UI tests for upload/list/attach flows.
+- [x] P1: Verify or complete AI Activity clarification by renaming “What the AI is doing” to “AI Activity,” showing plain-language steps, hiding technical events behind a details disclosure, and passing tests for readable activity labels plus disabled details state.
+
+- [x] Verify whether the entire attached Fortune 500 UX audit fix set was implemented and tested, including P1 Global Files and AI Activity acceptance criteria, and report exact evidence plus any remaining gaps.
+
+- [x] P1 implementation: Replace sentinel task-file global-library semantics with first-class Global Files records plus reversible task attachment/link records.
+- [x] P1 implementation: Add ownership-safe router procedures to upload/list Global Files and attach/link existing Global Files to owned tasks without duplicate uploads.
+- [x] P1 implementation: Update the UI so users can see scope labels, upload independent Global Files, and attach/link an existing Global File to the selected task.
+- [x] P1 implementation: Rename “What the AI is doing” to “AI Activity,” show readable activity labels, and hide/disable technical details appropriately when no details exist.
+- [x] P1 validation: Add schema tests, router ownership tests, and UI tests covering Global Files upload/list/attach flows and AI Activity details states.
+- [x] P1 validation: Run TypeScript, focused tests, full tests/build as needed, save checkpoint, and report evidence.
+
+- [x] Add first-class Global Files schema with owner-scoped metadata records.
+- [x] Add task-to-global-file attachment link records so files can be reused without duplicate uploads.
+- [x] Replace sentinel global-library helpers and router behavior with first-class Global Files procedures.
+- [x] Add Global Files upload, list, and attach-to-task UI with clear scope labels.
+- [x] Rename “What the AI is doing” to “AI Activity” and keep technical events behind a details disclosure.
+- [x] Add schema, router ownership, and UI tests for Global Files and AI Activity behavior.
+- [x] Run TypeScript, unit tests, and production build validation.

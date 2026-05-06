@@ -13,6 +13,7 @@ const updateTaskStatusMock = vi.fn();
 const submitMessageMock = vi.fn();
 const createFileMetadataMock = vi.fn();
 const uploadWorkspaceFileMock = vi.fn();
+const attachGlobalToTaskMock = vi.fn();
 const credentialsRefreshMock = vi.fn();
 const filesystemTreeRefetchMock = vi.fn(async () => undefined);
 const filesystemWriteMock = vi.fn();
@@ -111,17 +112,20 @@ let mockTaskFiles: Array<{ id: number; taskId: number; relativePath: string; sto
     createdAt: 1777999200000,
   },
 ];
-let mockGlobalFiles: Array<{ id: number; taskId: number; relativePath: string; storageUrl: string; version: number; mimeType: string | null; createdAt: number }> = [
+let mockGlobalFiles: Array<{ id: number; taskId: null; scope: "global"; displayName: string; relativePath: string; storageUrl: string; version: number; mimeType: string | null; createdAt: number }> = [
   {
     id: 56,
-    taskId: 0,
-    relativePath: "global-library/owner-playbook.pdf",
-    storageUrl: "/manus-storage/global-library/owner-playbook.pdf",
+    taskId: null,
+    scope: "global",
+    displayName: "Owner playbook.pdf",
+    relativePath: "global-files/owner-playbook.pdf",
+    storageUrl: "/manus-storage/global-files/owner-playbook.pdf",
     version: 1,
     mimeType: "application/pdf",
     createdAt: 1777999300000,
   },
 ];
+let mockAttachedGlobalFiles: Array<{ id: number; taskId: number; globalFileId: number; attachedLabel: string; file: (typeof mockGlobalFiles)[number] }> = [];
 let mockMemory: Array<{ id: number; title: string; category: string; content: string }> = [
   { id: 88, title: "No silent fallback", category: "decision", content: "Missing Claude or Kimi credentials must block explicitly." },
 ];
@@ -157,7 +161,7 @@ vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({
       tasks: { list: { invalidate: invalidateMock }, thread: { invalidate: invalidateMock } },
-      files: { listForTask: { invalidate: invalidateMock }, listAll: { invalidate: invalidateMock }, listGlobal: { invalidate: invalidateMock } },
+      files: { listForTask: { invalidate: invalidateMock }, listGlobalForTask: { invalidate: invalidateMock }, listAll: { invalidate: invalidateMock }, listGlobal: { invalidate: invalidateMock } },
       memory: { list: { invalidate: invalidateMock } },
       credentials: { status: { invalidate: invalidateMock } },
       filesystem: { tree: { invalidate: invalidateMock }, read: { invalidate: invalidateMock } },
@@ -190,6 +194,13 @@ vi.mock("@/lib/trpc", () => ({
       listForTask: { useQuery: () => ({ data: mockTaskFiles, isLoading: false }) },
       listAll: { useQuery: () => ({ data: [...mockTaskFiles, ...mockGlobalFiles], isLoading: false }) },
       listGlobal: { useQuery: () => ({ data: mockGlobalFiles, isLoading: false }) },
+      listGlobalForTask: { useQuery: () => ({ data: mockAttachedGlobalFiles, isLoading: false }) },
+      attachGlobalToTask: {
+        useMutation: () => ({
+          mutateAsync: attachGlobalToTaskMock,
+          isPending: false,
+        }),
+      },
       createMetadata: {
         useMutation: () => ({
           mutateAsync: createFileMetadataMock,
@@ -265,6 +276,7 @@ beforeEach(() => {
   submitMessageMock.mockReset();
   createFileMetadataMock.mockReset();
   uploadWorkspaceFileMock.mockReset();
+  attachGlobalToTaskMock.mockReset();
   credentialsRefreshMock.mockReset();
   filesystemTreeRefetchMock.mockReset();
   filesystemWriteMock.mockReset();
@@ -275,6 +287,7 @@ beforeEach(() => {
   updateTaskStatusMock.mockResolvedValue({ ...sampleTask, status: "archived" });
   submitMessageMock.mockResolvedValue(mockThread);
   createFileMetadataMock.mockResolvedValue(mockTaskFiles[0]);
+  attachGlobalToTaskMock.mockResolvedValue({ id: 501, taskId: 7, globalFileId: 56, attachedLabel: "Owner playbook.pdf", file: mockGlobalFiles[0] });
   uploadWorkspaceFileMock.mockResolvedValue({
     relativePath: "uploads/1777999300000-owner-brief.txt",
     storageKey: "task-7/uploads/owner-brief.txt",
@@ -316,14 +329,17 @@ beforeEach(() => {
   mockGlobalFiles = [
     {
       id: 56,
-      taskId: 0,
-      relativePath: "global-library/owner-playbook.pdf",
-      storageUrl: "/manus-storage/global-library/owner-playbook.pdf",
+      taskId: null,
+      scope: "global",
+      displayName: "Owner playbook.pdf",
+      relativePath: "global-files/owner-playbook.pdf",
+      storageUrl: "/manus-storage/global-files/owner-playbook.pdf",
       version: 1,
       mimeType: "application/pdf",
       createdAt: 1777999300000,
     },
   ];
+  mockAttachedGlobalFiles = [];
   mockMemory = [{ id: 88, title: "No silent fallback", category: "decision", content: "Missing Claude or Kimi credentials must block explicitly." }];
   mockCredentialStates = [
     { provider: "claude", configured: false, status: "missing", reason: "Missing CLAUDE_API_KEY." },
@@ -637,26 +653,26 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(uploadWorkspaceFileMock.mock.calls[0][0].relativePath).toMatch(/^uploads\/\d+-drop-note\.md$/);
   });
 
-  it("shows a first-class global library separate from the selected task folder", async () => {
+  it("shows first-class Global Files separate from the selected task folder", async () => {
     render(<Home />);
 
     await screen.findAllByText("Implement v2 shell");
     const globalLibrary = screen.getByTestId("global-file-library");
-    expect(within(globalLibrary).getByText(/Global file library/i)).toBeInTheDocument();
-    expect(within(globalLibrary).getByText(/owner-scoped and available outside a single task thread/i)).toBeInTheDocument();
-    expect(within(globalLibrary).getByRole("link", { name: /open or download global file global-library\/owner-playbook\.pdf/i })).toBeInTheDocument();
-    expect(screen.getByText(/Global library ·/i)).toBeInTheDocument();
+    expect(within(globalLibrary).getAllByText(/Global Files/i).length).toBeGreaterThan(0);
+    expect(within(globalLibrary).getByText(/owner-scoped reusable references/i)).toBeInTheDocument();
+    expect(within(globalLibrary).getByRole("link", { name: /open or download global file global-files\/owner-playbook\.pdf/i })).toBeInTheDocument();
+    expect(screen.getByText(/Global Files ·/i)).toBeInTheDocument();
   });
 
-  it("uploads selected files into the global library without attaching them to the selected task", async () => {
+  it("uploads selected files into Global Files without attaching them to the selected task", async () => {
     const user = userEvent.setup();
     render(<Home />);
 
     await screen.findAllByText("Implement v2 shell");
-    const uploadInput = screen.getByLabelText(/upload global library file/i) as HTMLInputElement;
+    const uploadInput = screen.getByLabelText(/upload Global Files file/i) as HTMLInputElement;
     const inputClickSpy = vi.spyOn(uploadInput, "click");
 
-    await user.click(screen.getByRole("button", { name: /upload to global library/i }));
+    await user.click(screen.getByRole("button", { name: /upload to Global Files/i }));
     expect(inputClickSpy).toHaveBeenCalled();
 
     const file = new File(["Reusable standard"], "brand standard.pdf", { type: "application/pdf" });
@@ -668,12 +684,12 @@ describe("Home v2 task-first workspace behavior", () => {
       mimeType: "application/pdf",
       base64Content: "UmV1c2FibGUgc3RhbmRhcmQ=",
     })));
-    expect(uploadWorkspaceFileMock.mock.calls[0][0].relativePath).toMatch(/^global-library\/\d+-brand-standard\.pdf$/);
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/Uploaded brand standard\.pdf to global file library/i));
+    expect(uploadWorkspaceFileMock.mock.calls[0][0].relativePath).toMatch(/^global-files\/\d+-brand-standard\.pdf$/);
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/Uploaded brand standard\.pdf to Global Files/i));
     inputClickSpy.mockRestore();
   });
 
-  it("uploads dropped files through the global-library drop zone with a global scope", async () => {
+  it("uploads dropped files through the Global Files drop zone with a global scope", async () => {
     render(<Home />);
 
     await screen.findAllByText("Implement v2 shell");
@@ -689,7 +705,7 @@ describe("Home v2 task-first workspace behavior", () => {
       mimeType: "text/markdown",
       base64Content: "R2xvYmFsIHBheWxvYWQ=",
     })));
-    expect(uploadWorkspaceFileMock.mock.calls[0][0].relativePath).toMatch(/^global-library\/\d+-global-note\.md$/);
+    expect(uploadWorkspaceFileMock.mock.calls[0][0].relativePath).toMatch(/^global-files\/\d+-global-note\.md$/);
   });
 
   it("marks smile and microphone as coming soon instead of silent decorative controls", async () => {

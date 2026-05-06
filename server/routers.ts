@@ -6,6 +6,7 @@ import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
   appendTaskEvent,
   assertSafeRelativePath,
+  attachGlobalFileToTask,
   createGlobalFile,
   createMemory,
   createTask,
@@ -17,8 +18,10 @@ import {
   getLatestCredentialStatuses,
   getTaskForOwner,
   getTaskThread,
+  getGlobalFileForOwner,
   getTaskFileForOwner,
   listAllFilesForOwner,
+  listGlobalFileLinksForTask,
   listGlobalFilesForOwner,
   listMemoryByCategory,
   listTaskEvents,
@@ -42,6 +45,7 @@ import {
   uploadWorkspaceFile,
   writeWorkspaceFile,
 } from "./filesystem";
+import { storagePut } from "./storage";
 import { getUserWorkspaceRoot } from "./terminal";
 import { CLAUDE_DEFAULT_MODEL, CLAUDE_OWNER_MODEL_LABEL, orchestrateWithOpenAI, executeWrapperTurn, getWrapperRuntimeCredentialStates, KIMI_K26_CLOUDFLARE_MODEL, KIMI_OWNER_MODEL_LABEL, resolveEffectiveRoute } from "./wrapperLLM";
 
@@ -434,6 +438,26 @@ export const appRouter = router({
       .query(async ({ ctx, input }) => {
         return listGlobalFilesForOwner(ctx.user.id, input?.limit ?? 200);
       }),
+    listGlobalForTask: protectedProcedure
+      .input(z.object({ taskId: z.number().int().positive(), limit: z.number().int().positive().max(500).default(200) }))
+      .query(async ({ ctx, input }) => {
+        return listGlobalFileLinksForTask(input.taskId, ctx.user.id, input.limit);
+      }),
+    attachGlobalToTask: protectedProcedure
+      .input(z.object({ taskId: z.number().int().positive(), globalFileId: z.number().int().positive(), attachedLabel: z.string().trim().max(220).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const attached = await attachGlobalFileToTask({ taskId: input.taskId, globalFileId: input.globalFileId, ownerUserId: ctx.user.id, attachedLabel: input.attachedLabel ?? null });
+        await appendTaskEvent({
+          taskId: input.taskId,
+          ownerUserId: ctx.user.id,
+          actor: "system",
+          eventType: "file_event",
+          status: "succeeded",
+          content: `Global file attached to this task: ${attached.file.displayName}`,
+          metadataJson: serializeJson({ globalFileId: attached.file.id, linkId: attached.id, storageKey: attached.file.storageKey }),
+        });
+        return attached;
+      }),
     createMetadata: protectedProcedure
       .input(
         z.object({
@@ -442,6 +466,7 @@ export const appRouter = router({
           relativePath: z.string().trim().min(1).max(1024),
           storageKey: z.string().trim().min(1).max(2048),
           storageUrl: z.string().trim().min(1).max(2048),
+          displayName: z.string().trim().max(220).optional(),
           mimeType: z.string().trim().max(160).nullable().optional(),
           sizeBytes: z.number().int().min(0).default(0),
           version: z.number().int().min(1).default(1),
@@ -452,12 +477,14 @@ export const appRouter = router({
         if (input.scope === "global") {
           return createGlobalFile({
             ownerUserId: ctx.user.id,
+            displayName: input.displayName,
             relativePath,
             storageKey: input.storageKey,
             storageUrl: input.storageUrl,
             mimeType: input.mimeType ?? null,
             sizeBytes: input.sizeBytes,
-            version: input.version,
+            source: "manual",
+            tagsJson: null,
           });
         }
         if (!input.taskId) throw new Error("taskId is required when recording task file metadata");
@@ -573,33 +600,40 @@ export const appRouter = router({
           relativePath: z.string().trim().min(1).max(1024),
           base64Content: z.string().min(1),
           mimeType: z.string().trim().max(160).optional(),
+          displayName: z.string().trim().max(220).optional(),
         }),
       )
       .mutation(async ({ ctx, input }) => {
         const isGlobalUpload = input.scope === "global";
         if (!isGlobalUpload && !input.taskId) throw new Error("Select a task before uploading to a task folder");
         if (input.taskId) await requireOwnedTask(input.taskId, ctx.user.id);
+        if (isGlobalUpload) {
+          const relativePath = assertSafeRelativePath(input.relativePath);
+          const buffer = Buffer.from(input.base64Content, "base64");
+          if (buffer.byteLength > 5 * 1024 * 1024) throw new Error("File is too large for the workshop uploader");
+          const storage = await storagePut(`global-files/user-${ctx.user.id}/${relativePath}`, buffer, input.mimeType ?? "application/octet-stream");
+          const file = await createGlobalFile({
+            ownerUserId: ctx.user.id,
+            displayName: input.displayName,
+            relativePath,
+            storageKey: storage.key,
+            storageUrl: storage.url,
+            mimeType: input.mimeType ?? null,
+            sizeBytes: buffer.byteLength,
+            source: "upload",
+            tagsJson: null,
+          });
+          return { relativePath, storageKey: storage.key, storageUrl: storage.url, size: buffer.byteLength, file };
+        }
         const rootPath = await getUserWorkspaceRoot(ctx.user.id);
         const uploaded = await uploadWorkspaceFile({
           rootPath,
-          workspaceId: isGlobalUpload ? 0 : input.taskId ?? 0,
+          workspaceId: input.taskId ?? 0,
           ownerUserId: ctx.user.id,
           relativePath: input.relativePath,
           base64Content: input.base64Content,
           mimeType: input.mimeType,
         });
-        if (isGlobalUpload) {
-          const file = await createGlobalFile({
-            ownerUserId: ctx.user.id,
-            relativePath: uploaded.relativePath,
-            storageKey: uploaded.storageKey,
-            storageUrl: uploaded.storageUrl,
-            mimeType: input.mimeType ?? null,
-            sizeBytes: uploaded.size,
-            version: 1,
-          });
-          return { ...uploaded, file };
-        }
         if (input.taskId) {
           const file = await createTaskFile({
             taskId: input.taskId,

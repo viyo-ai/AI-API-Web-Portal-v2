@@ -3,8 +3,11 @@ import { drizzle } from "drizzle-orm/mysql2";
 import {
   credentialStatusSnapshots,
   globalMemory,
+  globalFiles,
   InsertCredentialStatusSnapshot,
   InsertGlobalMemory,
+  InsertGlobalFile,
+  InsertTaskGlobalFileLink,
   InsertOrchestrationTurn,
   InsertTask,
   InsertTaskEvent,
@@ -13,6 +16,7 @@ import {
   orchestrationTurns,
   taskEvents,
   taskFiles,
+  taskGlobalFileLinks,
   tasks,
   users,
 } from "../drizzle/schema";
@@ -37,7 +41,6 @@ export type TurnState =
 export type MemoryCategory = "decision" | "feature" | "research" | "past_task";
 export type CredentialProvider = "claude" | "kimi";
 export type CredentialStatus = "configured" | "missing" | "invalid" | "untested" | "error";
-export const GLOBAL_FILE_TASK_ID = 0;
 
 export function nowMs() {
   return Date.now();
@@ -414,18 +417,28 @@ export async function createTaskFile(values: Omit<InsertTaskFile, "relativePath"
     .limit(1);
 
   if (!result[0]) throw new Error("Failed to create task file metadata");
-  if (values.taskId !== GLOBAL_FILE_TASK_ID) {
-    await touchTask(values.taskId, values.ownerUserId);
-  }
+  await touchTask(values.taskId, values.ownerUserId);
   return result[0];
 }
 
-export async function createGlobalFile(values: Omit<InsertTaskFile, "taskId" | "relativePath" | "createdAt" | "updatedAt"> & { relativePath: string; createdAt?: number; updatedAt?: number }) {
-  return createTaskFile({
-    ...values,
-    taskId: GLOBAL_FILE_TASK_ID,
-    relativePath: assertSafeRelativePath(values.relativePath),
-  });
+export async function createGlobalFile(values: Omit<InsertGlobalFile, "relativePath" | "displayName" | "createdAt" | "updatedAt"> & { relativePath: string; displayName?: string; createdAt?: number; updatedAt?: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for global files");
+
+  const timestamp = values.createdAt ?? nowMs();
+  const relativePath = assertSafeRelativePath(values.relativePath);
+  const displayName = (values.displayName?.trim() || relativePath.split("/").filter(Boolean).pop() || relativePath).slice(0, 220);
+  await db.insert(globalFiles).values({ ...values, displayName, relativePath, createdAt: timestamp, updatedAt: values.updatedAt ?? timestamp });
+
+  const result = await db
+    .select()
+    .from(globalFiles)
+    .where(and(eq(globalFiles.ownerUserId, values.ownerUserId), eq(globalFiles.relativePath, relativePath), eq(globalFiles.createdAt, timestamp)))
+    .orderBy(desc(globalFiles.id))
+    .limit(1);
+
+  if (!result[0]) throw new Error("Failed to create global file metadata");
+  return result[0];
 }
 
 export async function listTaskFiles(taskId: number, ownerUserId: number, limit = 200) {
@@ -442,21 +455,72 @@ export async function listTaskFiles(taskId: number, ownerUserId: number, limit =
 
 export async function listGlobalFilesForOwner(ownerUserId: number, limit = 200) {
   const db = await getDb();
-  if (!db) throw new Error("Database is required for task files");
+  if (!db) throw new Error("Database is required for global files");
 
-  return db
+  return db.select().from(globalFiles).where(eq(globalFiles.ownerUserId, ownerUserId)).orderBy(desc(globalFiles.updatedAt)).limit(limit);
+}
+
+export async function getGlobalFileForOwner(globalFileId: number, ownerUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for global files");
+
+  const result = await db.select().from(globalFiles).where(and(eq(globalFiles.id, globalFileId), eq(globalFiles.ownerUserId, ownerUserId))).limit(1);
+  return result[0];
+}
+
+export async function attachGlobalFileToTask(values: Omit<InsertTaskGlobalFileLink, "attachedLabel" | "createdAt" | "updatedAt"> & { attachedLabel?: string | null; createdAt?: number; updatedAt?: number }) {
+  const task = await getTaskForOwner(values.taskId, values.ownerUserId);
+  if (!task) throw new Error("Task not found");
+  const file = await getGlobalFileForOwner(values.globalFileId, values.ownerUserId);
+  if (!file) throw new Error("Global file not found");
+
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for global file links");
+  const timestamp = values.createdAt ?? nowMs();
+  await db
+    .insert(taskGlobalFileLinks)
+    .values({ ...values, attachedLabel: values.attachedLabel?.trim().slice(0, 220) || file.displayName, createdAt: timestamp, updatedAt: values.updatedAt ?? timestamp })
+    .onDuplicateKeyUpdate({ set: { attachedLabel: values.attachedLabel?.trim().slice(0, 220) || file.displayName, updatedAt: timestamp } });
+
+  await touchTask(values.taskId, values.ownerUserId);
+  const result = await db
     .select()
-    .from(taskFiles)
-    .where(and(eq(taskFiles.ownerUserId, ownerUserId), eq(taskFiles.taskId, GLOBAL_FILE_TASK_ID)))
-    .orderBy(desc(taskFiles.updatedAt))
+    .from(taskGlobalFileLinks)
+    .where(and(eq(taskGlobalFileLinks.taskId, values.taskId), eq(taskGlobalFileLinks.globalFileId, values.globalFileId), eq(taskGlobalFileLinks.ownerUserId, values.ownerUserId)))
+    .orderBy(desc(taskGlobalFileLinks.id))
+    .limit(1);
+  if (!result[0]) throw new Error("Failed to attach global file to task");
+  return { ...result[0], file };
+}
+
+export async function listGlobalFileLinksForTask(taskId: number, ownerUserId: number, limit = 200) {
+  const task = await getTaskForOwner(taskId, ownerUserId);
+  if (!task) return [];
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for global file links");
+
+  const rows = await db
+    .select({ link: taskGlobalFileLinks, file: globalFiles })
+    .from(taskGlobalFileLinks)
+    .innerJoin(globalFiles, and(eq(taskGlobalFileLinks.globalFileId, globalFiles.id), eq(globalFiles.ownerUserId, ownerUserId)))
+    .where(and(eq(taskGlobalFileLinks.taskId, taskId), eq(taskGlobalFileLinks.ownerUserId, ownerUserId)))
+    .orderBy(desc(taskGlobalFileLinks.updatedAt))
     .limit(limit);
+  return rows.map((row) => ({ ...row.link, file: row.file }));
 }
 
 export async function listAllFilesForOwner(ownerUserId: number, limit = 400) {
   const db = await getDb();
-  if (!db) throw new Error("Database is required for task files");
+  if (!db) throw new Error("Database is required for files");
 
-  return db.select().from(taskFiles).where(eq(taskFiles.ownerUserId, ownerUserId)).orderBy(desc(taskFiles.updatedAt)).limit(limit);
+  const taskRows = await db.select().from(taskFiles).where(eq(taskFiles.ownerUserId, ownerUserId)).orderBy(desc(taskFiles.updatedAt)).limit(limit);
+  const globalRows = await db.select().from(globalFiles).where(eq(globalFiles.ownerUserId, ownerUserId)).orderBy(desc(globalFiles.updatedAt)).limit(limit);
+  return [
+    ...taskRows.map((file) => ({ ...file, scope: "task" as const })),
+    ...globalRows.map((file) => ({ ...file, taskId: null, version: 1, scope: "global" as const })),
+  ]
+    .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+    .slice(0, limit);
 }
 
 export async function getTaskFileForOwner(fileId: number, ownerUserId: number) {
