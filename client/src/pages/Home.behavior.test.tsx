@@ -384,6 +384,22 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(FakeWebSocket.instances).toHaveLength(0);
   });
 
+  it("drafts an empty-memory note into the focused task composer", async () => {
+    const user = userEvent.setup();
+    mockMemory = [];
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    const composer = screen.getByLabelText(/Task message/i);
+    await user.type(composer, "Existing owner note");
+    await user.click(screen.getByRole("button", { name: /Draft memory note/i }));
+
+    expect(composer).toHaveValue("Existing owner note\n\nRecord the key decision or reusable context for this task.");
+    expect(composer).toHaveFocus();
+    expect(screen.getByText(/Memory-note draft added to the task composer/i)).toBeInTheDocument();
+    expect(submitMessageMock).not.toHaveBeenCalled();
+  });
+
   it("shows explicit authenticated missing-credential warnings for both Claude and Kimi", async () => {
     mockCredentialStates = [
       { provider: "claude", configured: false, status: "missing", reason: "Missing CLAUDE_API_KEY." },

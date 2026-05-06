@@ -209,3 +209,6 @@
 - [x] Defer Claude Standard Tier, routines-fire, and API overview checks until after the full audit implementation and full-loop testing pass.
 
 - [x] Surgical P2 regression alignment: update only stale tab/diagnostics expectations needed to validate the right-rail task inspector without broad source rework.
+
+- [x] Fix Draft memory note button no-op and verify the memory-note draft workflow through an interactive UX loop.
+- [x] Correct prior validation gap by documenting and performing the affected end-to-end UX loop before checkpointing again.

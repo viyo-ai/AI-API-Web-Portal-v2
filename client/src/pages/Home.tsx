@@ -265,6 +265,7 @@ export default function Home() {
   const [uploadScope, setUploadScope] = useState<"task" | "global">("task");
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const globalUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const taskListInput = useMemo(() => ({ includeArchived: false, limit: 50 }), []);
   const tasksQuery = trpc.tasks.list.useQuery(taskListInput, { enabled: isAuthenticated });
@@ -397,6 +398,16 @@ export default function Home() {
         void handleSendMessage();
       }
     }
+  }
+
+  function draftComposerMessage(message: string, notice: string) {
+    setComposerText((current) => {
+      if (!current.trim()) return message;
+      if (current.trim() === message.trim()) return current;
+      return `${current.trimEnd()}\n\n${message}`;
+    });
+    setWorkspaceNotice(notice);
+    composerTextareaRef.current?.focus();
   }
 
   async function handleArchiveTask(taskId: number, title: string) {
@@ -690,7 +701,7 @@ export default function Home() {
             {memories.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white/70 p-4 text-xs leading-5 text-[#6d6d65]">
                 Durable memory is empty. Decisions, features, research, and past-task learnings will appear here only after real records exist.
-                <Button type="button" variant="outline" onClick={() => setComposerText((value) => value || "Record the key decision or reusable context for this task.")} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">Draft memory note</Button>
+                <Button type="button" variant="outline" onClick={() => draftComposerMessage("Record the key decision or reusable context for this task.", "Memory-note draft added to the task composer. Review it, then send it to save durable context through the task thread.")} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">Draft memory note</Button>
               </div>
             ) : (
               memories.slice(0, 6).map((memory) => (
@@ -876,6 +887,7 @@ export default function Home() {
                 </button>
               </div>
               <Textarea
+                ref={composerTextareaRef}
                 value={composerText}
                 onChange={(event) => setComposerText(event.target.value)}
                 onKeyDown={handleComposerKeyDown}
