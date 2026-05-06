@@ -7,6 +7,10 @@ import {
   appendTaskEvent,
   assertSafeRelativePath,
   attachGlobalFileToTask,
+  createBuildBranch,
+  createBuildTarget,
+  updateBuildTarget,
+  archiveBuildTarget,
   createGlobalFile,
   createMemory,
   createTask,
@@ -15,12 +19,18 @@ import {
   type CredentialProvider,
   type CredentialStatus,
   failTurn,
+  getBuildBranchForOwner,
+  getBuildTargetForOwner,
   getLatestCredentialStatuses,
   getTaskForOwner,
   getTaskThread,
   getGlobalFileForOwner,
   getTaskFileForOwner,
+  linkTaskToBuildBranch,
+  deleteBuildBranch,
   listAllFilesForOwner,
+  listBuildBranchesForTarget,
+  listBuildTargetsForOwner,
   listGlobalFileLinksForTask,
   listGlobalFilesForOwner,
   listMemoryByCategory,
@@ -31,8 +41,10 @@ import {
   type MemoryCategory,
   recordCredentialStatus,
   renameTask,
+  parseJsonStringArray,
   type RouteMode,
   searchMemory,
+  updateBuildBranchState,
   updateTaskStatus,
 } from "./db";
 import {
@@ -45,6 +57,7 @@ import {
   uploadWorkspaceFile,
   writeWorkspaceFile,
 } from "./filesystem";
+import { cleanupWorkspace, cloneOrSyncBranch, getBuildBranchGitStatus, getBuildBranchWorkspacePath, testBuildTargetConnection, assertSafeBranchName } from "./buildRunner";
 import { storagePut } from "./storage";
 import { getUserWorkspaceRoot } from "./terminal";
 import { CLAUDE_DEFAULT_MODEL, CLAUDE_OWNER_MODEL_LABEL, orchestrateWithOpenAI, executeWrapperTurn, getWrapperRuntimeCredentialStates, KIMI_K26_CLOUDFLARE_MODEL, KIMI_OWNER_MODEL_LABEL, resolveEffectiveRoute } from "./wrapperLLM";
@@ -54,6 +67,7 @@ const taskStatuses = ["active", "waiting", "blocked", "completed", "archived", "
 const memoryCategories = ["decision", "feature", "research", "past_task"] as const;
 const memoryConfidences = ["low", "medium", "high", "verified"] as const;
 const credentialProviders = ["claude", "kimi"] as const;
+const defaultValidationCommands = ["pnpm check", "pnpm test", "pnpm build"] as const;
 
 export type CredentialState = {
   provider: CredentialProvider;
@@ -268,6 +282,7 @@ export const appRouter = router({
           taskId: z.number().int().positive(),
           message: z.string().trim().min(1).max(20000),
           routeMode: z.enum(routeModes).default("auto"),
+          buildBranchId: z.number().int().positive().nullable().optional(),
         }),
       )
       .mutation(async ({ ctx, input }) => {
@@ -420,6 +435,164 @@ export const appRouter = router({
       .query(async ({ ctx, input }) => {
         return searchMemory(ctx.user.id, input.query, input.limit);
       }),
+  }),
+
+  buildTarget: router({
+    list: protectedProcedure
+      .input(z.object({ includeArchived: z.boolean().default(false), limit: z.number().int().min(1).max(100).default(50) }).optional())
+      .query(async ({ ctx, input }) => listBuildTargetsForOwner(ctx.user.id, input?.includeArchived ?? false, input?.limit ?? 50)),
+    create: protectedProcedure
+      .input(
+        z.object({
+          name: z.string().trim().min(1).max(220),
+          repoUrl: z.string().trim().url().max(1024),
+          githubTokenEnvVar: z.string().trim().min(1).max(120),
+          defaultBaseBranch: z.string().trim().min(1).max(160).default("main"),
+          protectedBranches: z.array(z.string().trim().min(1).max(160)).optional(),
+          validationCommands: z.array(z.string().trim().min(1).max(240)).optional(),
+          serviceChecks: z.array(z.string().trim().min(1).max(240)).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const connection = await testBuildTargetConnection({ repoUrl: input.repoUrl, githubTokenEnvVar: input.githubTokenEnvVar, defaultBaseBranch: input.defaultBaseBranch });
+        if (connection.status !== "ok") throw new Error(connection.message);
+        return createBuildTarget({ ...input, ownerUserId: ctx.user.id });
+      }),
+    update: protectedProcedure
+      .input(
+        z.object({
+          targetId: z.number().int().positive(),
+          name: z.string().trim().min(1).max(220).optional(),
+          defaultBaseBranch: z.string().trim().min(1).max(160).optional(),
+          protectedBranches: z.array(z.string().trim().min(1).max(160)).optional(),
+          validationCommands: z.array(z.string().trim().min(1).max(240)).optional(),
+          serviceChecks: z.array(z.string().trim().min(1).max(240)).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const target = await getBuildTargetForOwner(input.targetId, ctx.user.id);
+        if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+        return updateBuildTarget({ ...input, ownerUserId: ctx.user.id });
+      }),
+    delete: protectedProcedure
+      .input(z.object({ targetId: z.number().int().positive(), confirm: z.literal("DELETE") }))
+      .mutation(async ({ ctx, input }) => {
+        const branches = await listBuildBranchesForTarget(input.targetId, ctx.user.id, 100);
+        for (const branch of branches) await cleanupWorkspace(branch.workspacePath).catch(() => undefined);
+        await archiveBuildTarget(input.targetId, ctx.user.id);
+        return { archived: true };
+      }),
+    testConnection: protectedProcedure
+      .input(z.object({ repoUrl: z.string().trim().url().max(1024), githubTokenEnvVar: z.string().trim().min(1).max(120), defaultBaseBranch: z.string().trim().min(1).max(160).default("main") }))
+      .mutation(async ({ input }) => testBuildTargetConnection(input)),
+    get: protectedProcedure
+      .input(z.object({ targetId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        const target = await getBuildTargetForOwner(input.targetId, ctx.user.id);
+        if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+        const branches = await listBuildBranchesForTarget(input.targetId, ctx.user.id, 100);
+        return { target, branches };
+      }),
+  }),
+  buildTargets: router({
+    list: protectedProcedure.input(z.object({ includeArchived: z.boolean().default(false), limit: z.number().int().min(1).max(100).default(50) }).optional()).query(async ({ ctx, input }) => listBuildTargetsForOwner(ctx.user.id, input?.includeArchived ?? false, input?.limit ?? 50)),
+    create: protectedProcedure.input(z.object({ name: z.string().trim().min(1).max(220), repoUrl: z.string().trim().url().max(1024), githubTokenEnvVar: z.string().trim().min(1).max(120), defaultBaseBranch: z.string().trim().min(1).max(160).default("main"), protectedBranches: z.array(z.string().trim().min(1).max(160)).optional(), validationCommands: z.array(z.string().trim().min(1).max(240)).optional(), serviceChecks: z.array(z.string().trim().min(1).max(240)).optional() })).mutation(async ({ ctx, input }) => {
+      const connection = await testBuildTargetConnection({ repoUrl: input.repoUrl, githubTokenEnvVar: input.githubTokenEnvVar, defaultBaseBranch: input.defaultBaseBranch });
+      if (connection.status !== "ok") throw new Error(connection.message);
+      return createBuildTarget({ ...input, ownerUserId: ctx.user.id });
+    }),
+    get: protectedProcedure.input(z.object({ targetId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      const target = await getBuildTargetForOwner(input.targetId, ctx.user.id);
+      if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+      const branches = await listBuildBranchesForTarget(input.targetId, ctx.user.id, 100);
+      return { target, branches };
+    }),
+    testConnection: protectedProcedure.input(z.object({ repoUrl: z.string().trim().url().max(1024), githubTokenEnvVar: z.string().trim().min(1).max(120), defaultBaseBranch: z.string().trim().min(1).max(160).default("main") })).mutation(async ({ input }) => testBuildTargetConnection(input)),
+  }),
+  buildBranch: router({
+    list: protectedProcedure.input(z.object({ buildTargetId: z.number().int().positive(), limit: z.number().int().min(1).max(100).default(50) })).query(async ({ ctx, input }) => listBuildBranchesForTarget(input.buildTargetId, ctx.user.id, input.limit)),
+    create: protectedProcedure
+      .input(z.object({ buildTargetId: z.number().int().positive(), branchName: z.string().trim().min(1).max(220), baseBranch: z.string().trim().min(1).max(160).optional(), taskId: z.number().int().positive().nullable().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const target = await getBuildTargetForOwner(input.buildTargetId, ctx.user.id);
+        if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+        const branchName = assertSafeBranchName(input.branchName);
+        const branch = await createBuildBranch({ buildTargetId: target.id, ownerUserId: ctx.user.id, branchName, baseBranch: input.baseBranch ?? target.defaultBaseBranch, workspacePath: getBuildBranchWorkspacePath({ ownerUserId: ctx.user.id, buildTargetId: target.id, branchId: Date.now(), branchName }), taskId: input.taskId ?? null });
+        void cloneOrSyncBranch({ ownerUserId: ctx.user.id, buildTargetId: target.id, branchId: branch.id, branchName, baseBranch: input.baseBranch ?? target.defaultBaseBranch, workspacePath: branch.workspacePath, target: { repoUrl: target.repoUrl, defaultBaseBranch: target.defaultBaseBranch, githubTokenEnvVar: target.githubTokenEnvVar, protectedBranches: parseJsonStringArray(target.protectedBranchesJson, ["main", "staging"]) } })
+          .then((workspace) => updateBuildBranchState({ branchId: branch.id, ownerUserId: ctx.user.id, state: workspace.state, errorMessage: workspace.errorMessage ?? null, lastSyncedCommit: workspace.lastSyncedCommit ?? null }))
+          .catch((error) => updateBuildBranchState({ branchId: branch.id, ownerUserId: ctx.user.id, state: "error", errorMessage: error instanceof Error ? error.message : String(error), lastSyncedCommit: null }));
+        if (input.taskId) await linkTaskToBuildBranch(input.taskId, ctx.user.id, branch.id);
+        return branch;
+      }),
+    getStatus: protectedProcedure.input(z.object({ branchId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      const branch = await getBuildBranchForOwner(input.branchId, ctx.user.id);
+      if (!branch) throw new Error("Build Branch not found or not owned by the authenticated user");
+      if (branch.state !== "clean") return { branch, gitStatus: null };
+      return { branch, gitStatus: await getBuildBranchGitStatus(branch.workspacePath) };
+    }),
+    delete: protectedProcedure.input(z.object({ branchId: z.number().int().positive(), confirm: z.literal("DELETE") })).mutation(async ({ ctx, input }) => {
+      const branch = await getBuildBranchForOwner(input.branchId, ctx.user.id);
+      if (!branch) throw new Error("Build Branch not found or not owned by the authenticated user");
+      await cleanupWorkspace(branch.workspacePath);
+      await deleteBuildBranch(branch.id, ctx.user.id);
+      return { deleted: true };
+    }),
+  }),
+  buildBranches: router({
+    list: protectedProcedure.input(z.object({ buildTargetId: z.number().int().positive(), targetId: z.number().int().positive().optional(), limit: z.number().int().min(1).max(100).default(50) })).query(async ({ ctx, input }) => listBuildBranchesForTarget(input.buildTargetId ?? input.targetId!, ctx.user.id, input.limit)),
+    create: protectedProcedure.input(z.object({ buildTargetId: z.number().int().positive().optional(), targetId: z.number().int().positive().optional(), branchName: z.string().trim().min(1).max(220), baseBranch: z.string().trim().min(1).max(160).optional(), taskId: z.number().int().positive().nullable().optional() })).mutation(async ({ ctx, input }) => {
+      const buildTargetId = input.buildTargetId ?? input.targetId;
+      if (!buildTargetId) throw new Error("Build Target is required.");
+      const target = await getBuildTargetForOwner(buildTargetId, ctx.user.id);
+      if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+      const branchName = assertSafeBranchName(input.branchName);
+      const branch = await createBuildBranch({ buildTargetId: target.id, ownerUserId: ctx.user.id, branchName, baseBranch: input.baseBranch ?? target.defaultBaseBranch, workspacePath: getBuildBranchWorkspacePath({ ownerUserId: ctx.user.id, buildTargetId: target.id, branchId: Date.now(), branchName }), taskId: input.taskId ?? null });
+      void cloneOrSyncBranch({ ownerUserId: ctx.user.id, buildTargetId: target.id, branchId: branch.id, branchName, baseBranch: input.baseBranch ?? target.defaultBaseBranch, workspacePath: branch.workspacePath, target: { repoUrl: target.repoUrl, defaultBaseBranch: target.defaultBaseBranch, githubTokenEnvVar: target.githubTokenEnvVar, protectedBranches: parseJsonStringArray(target.protectedBranchesJson, ["main", "staging"]) } })
+        .then((workspace) => updateBuildBranchState({ branchId: branch.id, ownerUserId: ctx.user.id, state: workspace.state, errorMessage: workspace.errorMessage ?? null, lastSyncedCommit: workspace.lastSyncedCommit ?? null }))
+        .catch((error) => updateBuildBranchState({ branchId: branch.id, ownerUserId: ctx.user.id, state: "error", errorMessage: error instanceof Error ? error.message : String(error), lastSyncedCommit: null }));
+      if (input.taskId) await linkTaskToBuildBranch(input.taskId, ctx.user.id, branch.id);
+      return branch;
+    }),
+    linkTask: protectedProcedure.input(z.object({ taskId: z.number().int().positive(), branchId: z.number().int().positive().nullable() })).mutation(async ({ ctx, input }) => {
+      await requireOwnedTask(input.taskId, ctx.user.id);
+      if (input.branchId) {
+        const branch = await getBuildBranchForOwner(input.branchId, ctx.user.id);
+        if (!branch) throw new Error("Build Branch not found or not owned by the authenticated user");
+      }
+      return linkTaskToBuildBranch(input.taskId, ctx.user.id, input.branchId);
+    }),
+    status: protectedProcedure.input(z.object({ branchId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      const branch = await getBuildBranchForOwner(input.branchId, ctx.user.id);
+      if (!branch) throw new Error("Build Branch not found or not owned by the authenticated user");
+      if (branch.state !== "clean") return { branch, gitStatus: null };
+      return { branch, gitStatus: await getBuildBranchGitStatus(branch.workspacePath) };
+    }),
+    getStatus: protectedProcedure.input(z.object({ branchId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      const branch = await getBuildBranchForOwner(input.branchId, ctx.user.id);
+      if (!branch) throw new Error("Build Branch not found or not owned by the authenticated user");
+      if (branch.state !== "clean") return { branch, gitStatus: null };
+      return { branch, gitStatus: await getBuildBranchGitStatus(branch.workspacePath) };
+    }),
+    workspaceTree: protectedProcedure.input(z.object({ branchId: z.number().int().positive(), relativePath: z.string().trim().max(1024).default(""), depth: z.number().int().min(0).max(4).default(2) })).query(async ({ ctx, input }) => {
+      const branch = await getBuildBranchForOwner(input.branchId, ctx.user.id);
+      if (!branch) throw new Error("Build Branch not found or not owned by the authenticated user");
+      if (branch.state !== "clean") return { branch, tree: null };
+      return { branch, tree: await listWorkspaceDirectory(branch.workspacePath, input.relativePath, input.depth) };
+    }),
+    cleanup: protectedProcedure.input(z.object({ branchId: z.number().int().positive(), confirm: z.literal("DELETE") })).mutation(async ({ ctx, input }) => {
+      const branch = await getBuildBranchForOwner(input.branchId, ctx.user.id);
+      if (!branch) throw new Error("Build Branch not found or not owned by the authenticated user");
+      await cleanupWorkspace(branch.workspacePath);
+      await deleteBuildBranch(branch.id, ctx.user.id);
+      return { deleted: true };
+    }),
+    delete: protectedProcedure.input(z.object({ branchId: z.number().int().positive(), confirm: z.literal("DELETE") })).mutation(async ({ ctx, input }) => {
+      const branch = await getBuildBranchForOwner(input.branchId, ctx.user.id);
+      if (!branch) throw new Error("Build Branch not found or not owned by the authenticated user");
+      await cleanupWorkspace(branch.workspacePath);
+      await deleteBuildBranch(branch.id, ctx.user.id);
+      return { deleted: true };
+    }),
   }),
   files: router({
     listForTask: protectedProcedure

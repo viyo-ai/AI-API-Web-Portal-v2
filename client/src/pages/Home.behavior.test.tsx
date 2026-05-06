@@ -15,6 +15,8 @@ const createFileMetadataMock = vi.fn();
 const uploadWorkspaceFileMock = vi.fn();
 const attachGlobalToTaskMock = vi.fn();
 const credentialsRefreshMock = vi.fn();
+const createBuildTargetMock = vi.fn();
+const createBuildBranchMock = vi.fn();
 const filesystemTreeRefetchMock = vi.fn(async () => undefined);
 const filesystemWriteMock = vi.fn();
 const filesystemMkdirMock = vi.fn();
@@ -165,6 +167,9 @@ vi.mock("@/lib/trpc", () => ({
       memory: { list: { invalidate: invalidateMock } },
       credentials: { status: { invalidate: invalidateMock } },
       filesystem: { tree: { invalidate: invalidateMock }, read: { invalidate: invalidateMock } },
+      buildTargets: { list: { invalidate: invalidateMock }, get: { invalidate: invalidateMock }, testConnection: { invalidate: invalidateMock } },
+      buildBranch: { list: { invalidate: invalidateMock }, getStatus: { invalidate: invalidateMock } },
+    buildBranches: { list: { invalidate: invalidateMock }, status: { invalidate: invalidateMock } },
     }),
     tasks: {
       list: { useQuery: () => ({ data: mockTasks, isLoading: false }) },
@@ -217,6 +222,26 @@ vi.mock("@/lib/trpc", () => ({
       write: { useMutation: () => ({ mutate: filesystemWriteMock, isPending: false }) },
       mkdir: { useMutation: () => ({ mutate: filesystemMkdirMock, isPending: false }) },
       upload: { useMutation: () => ({ mutateAsync: uploadWorkspaceFileMock, isPending: false }) },
+    },
+    buildTargets: {
+      list: { useQuery: () => ({ data: [], isLoading: false }) },
+      get: { useQuery: () => ({ data: undefined, isLoading: false }) },
+      create: { useMutation: () => ({ mutateAsync: createBuildTargetMock, isPending: false }) },
+      testConnection: { useMutation: () => ({ mutateAsync: vi.fn(async () => ({ ok: false, message: "No token configured.", tokenConfigured: false })), isPending: false }) },
+    },
+    buildBranch: {
+      list: { useQuery: vi.fn(() => ({ data: [], isLoading: false })) },
+      create: { useMutation: vi.fn(() => ({ mutateAsync: createBuildBranchMock, isPending: false })) },
+      getStatus: { useQuery: vi.fn(() => ({ data: null, isLoading: false })) },
+      delete: { useMutation: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })) },
+    },
+    buildBranches: {
+      list: { useQuery: () => ({ data: [], isLoading: false }) },
+      create: { useMutation: () => ({ mutateAsync: createBuildBranchMock, isPending: false }) },
+      linkTask: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
+      status: { useQuery: () => ({ data: undefined, isLoading: false }) },
+      workspaceTree: { useQuery: () => ({ data: { name: "workspace", relativePath: "", type: "directory", children: [] }, isLoading: false }) },
+      cleanup: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
     },
     credentials: {
       status: {
@@ -278,6 +303,8 @@ beforeEach(() => {
   uploadWorkspaceFileMock.mockReset();
   attachGlobalToTaskMock.mockReset();
   credentialsRefreshMock.mockReset();
+  createBuildTargetMock.mockReset();
+  createBuildBranchMock.mockReset();
   filesystemTreeRefetchMock.mockReset();
   filesystemWriteMock.mockReset();
   filesystemMkdirMock.mockReset();

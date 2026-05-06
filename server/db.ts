@@ -1,9 +1,13 @@
 import { and, desc, eq, like, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
+  buildBranches,
+  buildTargets,
   credentialStatusSnapshots,
   globalMemory,
   globalFiles,
+  InsertBuildBranch,
+  InsertBuildTarget,
   InsertCredentialStatusSnapshot,
   InsertGlobalMemory,
   InsertGlobalFile,
@@ -41,6 +45,8 @@ export type TurnState =
 export type MemoryCategory = "decision" | "feature" | "research" | "past_task";
 export type CredentialProvider = "claude" | "kimi";
 export type CredentialStatus = "configured" | "missing" | "invalid" | "untested" | "error";
+export type BuildTargetStatus = "active" | "archived";
+export type BuildBranchState = "clean" | "cloning" | "error";
 
 export function nowMs() {
   return Date.now();
@@ -148,6 +154,7 @@ export async function createTask(values: {
   title: string;
   summary?: string | null;
   routeMode?: RouteMode;
+  buildBranchId?: number | null;
 }) {
   const db = await getDb();
   if (!db) throw new Error("Database is required for tasks");
@@ -158,6 +165,7 @@ export async function createTask(values: {
     title: sanitizeTaskTitle(values.title),
     summary: values.summary ?? null,
     routeMode: values.routeMode ?? "auto",
+    buildBranchId: values.buildBranchId ?? null,
     status: "active",
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -567,4 +575,171 @@ export async function getLatestCredentialStatuses(ownerUserId: number) {
   }
 
   return [latest.get("claude") ?? null, latest.get("kimi") ?? null].filter(Boolean);
+}
+
+
+export function parseJsonStringArray(value: string | null | undefined, fallback: string[] = []) {
+  if (!value) return fallback;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function normalizeJsonStringArray(values: string[] | undefined, fallback: string[] = []) {
+  const source = values && values.length > 0 ? values : fallback;
+  return JSON.stringify(Array.from(new Set(source.map((value) => value.trim()).filter(Boolean))));
+}
+
+export function sanitizeBuildTargetName(input: string) {
+  const normalized = input.replace(/\s+/g, " ").trim();
+  if (!normalized) return "Untitled build target";
+  return normalized.slice(0, 220);
+}
+
+export async function createBuildTarget(values: {
+  ownerUserId: number;
+  name: string;
+  repoUrl: string;
+  githubTokenEnvVar: string;
+  defaultBaseBranch?: string;
+  protectedBranches?: string[];
+  validationCommands?: string[];
+  serviceChecks?: string[];
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for Build Targets");
+  const timestamp = nowMs();
+  const defaultBaseBranch = (values.defaultBaseBranch ?? "main").trim() || "main";
+  const insertValues: InsertBuildTarget = {
+    ownerUserId: values.ownerUserId,
+    name: sanitizeBuildTargetName(values.name),
+    repoUrl: values.repoUrl.trim(),
+    githubTokenEnvVar: values.githubTokenEnvVar.trim(),
+    defaultBaseBranch,
+    protectedBranchesJson: normalizeJsonStringArray(values.protectedBranches, ["main", "staging"]),
+    validationCommandsJson: normalizeJsonStringArray(values.validationCommands, ["pnpm check", "pnpm test", "pnpm build"]),
+    serviceChecksJson: normalizeJsonStringArray(values.serviceChecks, []),
+    status: "active",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  await db.insert(buildTargets).values(insertValues);
+  const created = await db.select().from(buildTargets).where(and(eq(buildTargets.ownerUserId, values.ownerUserId), eq(buildTargets.createdAt, timestamp))).orderBy(desc(buildTargets.id)).limit(1);
+  if (!created[0]) throw new Error("Failed to create Build Target");
+  return created[0];
+}
+
+export async function updateBuildTarget(values: {
+  targetId: number;
+  ownerUserId: number;
+  name?: string;
+  defaultBaseBranch?: string;
+  protectedBranches?: string[];
+  validationCommands?: string[];
+  serviceChecks?: string[];
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for Build Targets");
+  const set: Partial<InsertBuildTarget> = { updatedAt: nowMs() };
+  if (values.name !== undefined) set.name = sanitizeBuildTargetName(values.name);
+  if (values.defaultBaseBranch !== undefined) set.defaultBaseBranch = values.defaultBaseBranch.trim() || "main";
+  if (values.protectedBranches !== undefined) set.protectedBranchesJson = normalizeJsonStringArray(values.protectedBranches, ["main", "staging"]);
+  if (values.validationCommands !== undefined) set.validationCommandsJson = normalizeJsonStringArray(values.validationCommands, ["pnpm check", "pnpm test", "pnpm build"]);
+  if (values.serviceChecks !== undefined) set.serviceChecksJson = normalizeJsonStringArray(values.serviceChecks, []);
+  await db.update(buildTargets).set(set).where(and(eq(buildTargets.id, values.targetId), eq(buildTargets.ownerUserId, values.ownerUserId)));
+  return getBuildTargetForOwner(values.targetId, values.ownerUserId);
+}
+
+export async function archiveBuildTarget(targetId: number, ownerUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for Build Targets");
+  await db.update(buildTargets).set({ status: "archived", updatedAt: nowMs() }).where(and(eq(buildTargets.id, targetId), eq(buildTargets.ownerUserId, ownerUserId)));
+}
+
+export async function listBuildTargetsForOwner(ownerUserId: number, includeArchived = false, limit = 50) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for Build Targets");
+  const where = includeArchived ? eq(buildTargets.ownerUserId, ownerUserId) : and(eq(buildTargets.ownerUserId, ownerUserId), eq(buildTargets.status, "active"));
+  return db.select().from(buildTargets).where(where).orderBy(desc(buildTargets.updatedAt)).limit(limit);
+}
+
+export async function getBuildTargetForOwner(targetId: number, ownerUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for Build Targets");
+  const result = await db.select().from(buildTargets).where(and(eq(buildTargets.id, targetId), eq(buildTargets.ownerUserId, ownerUserId))).limit(1);
+  return result[0];
+}
+
+export async function createBuildBranch(values: {
+  buildTargetId: number;
+  ownerUserId: number;
+  branchName: string;
+  baseBranch: string;
+  workspacePath: string;
+  taskId?: number | null;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for Build Branches");
+  const timestamp = nowMs();
+  const insertValues: InsertBuildBranch = {
+    buildTargetId: values.buildTargetId,
+    ownerUserId: values.ownerUserId,
+    branchName: values.branchName.trim(),
+    baseBranch: values.baseBranch.trim() || "main",
+    taskId: values.taskId ?? null,
+    workspacePath: values.workspacePath,
+    state: "cloning",
+    errorMessage: null,
+    lastSyncedCommit: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  await db.insert(buildBranches).values(insertValues);
+  const created = await db.select().from(buildBranches).where(and(eq(buildBranches.ownerUserId, values.ownerUserId), eq(buildBranches.buildTargetId, values.buildTargetId), eq(buildBranches.createdAt, timestamp))).orderBy(desc(buildBranches.id)).limit(1);
+  if (!created[0]) throw new Error("Failed to create Build Branch");
+  return created[0];
+}
+
+export async function updateBuildBranchState(values: {
+  branchId: number;
+  ownerUserId: number;
+  state: BuildBranchState;
+  errorMessage?: string | null;
+  lastSyncedCommit?: string | null;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for Build Branches");
+  const timestamp = nowMs();
+  await db.update(buildBranches).set({ state: values.state, errorMessage: values.errorMessage ?? null, lastSyncedCommit: values.lastSyncedCommit ?? null, updatedAt: timestamp }).where(and(eq(buildBranches.id, values.branchId), eq(buildBranches.ownerUserId, values.ownerUserId)));
+  return getBuildBranchForOwner(values.branchId, values.ownerUserId);
+}
+
+export async function listBuildBranchesForTarget(buildTargetId: number, ownerUserId: number, limit = 50) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for Build Branches");
+  return db.select().from(buildBranches).where(and(eq(buildBranches.buildTargetId, buildTargetId), eq(buildBranches.ownerUserId, ownerUserId))).orderBy(desc(buildBranches.updatedAt)).limit(limit);
+}
+
+export async function getBuildBranchForOwner(branchId: number, ownerUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for Build Branches");
+  const result = await db.select().from(buildBranches).where(and(eq(buildBranches.id, branchId), eq(buildBranches.ownerUserId, ownerUserId))).limit(1);
+  return result[0];
+}
+
+export async function deleteBuildBranch(branchId: number, ownerUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for Build Branches");
+  await db.delete(buildBranches).where(and(eq(buildBranches.id, branchId), eq(buildBranches.ownerUserId, ownerUserId)));
+}
+
+export async function linkTaskToBuildBranch(taskId: number, ownerUserId: number, buildBranchId: number | null) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for Build Branch task links");
+  const timestamp = nowMs();
+  await db.update(tasks).set({ buildBranchId, updatedAt: timestamp, lastActivityAt: timestamp }).where(and(eq(tasks.id, taskId), eq(tasks.ownerUserId, ownerUserId)));
+  return getTaskForOwner(taskId, ownerUserId);
 }

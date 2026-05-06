@@ -28,6 +28,7 @@ export const tasks = mysqlTable(
     summary: longtext("summary"),
     status: mysqlEnum("status", ["active", "waiting", "blocked", "completed", "archived", "error"]).default("active").notNull(),
     routeMode: mysqlEnum("routeMode", ["auto", "claude", "kimi", "dual"]).default("auto").notNull(),
+    buildBranchId: int("buildBranchId"),
     createdAt: bigint("createdAt", { mode: "number" }).notNull(),
     updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
     lastActivityAt: bigint("lastActivityAt", { mode: "number" }).notNull(),
@@ -36,6 +37,7 @@ export const tasks = mysqlTable(
   (table) => ({
     ownerStatusIdx: index("tasks_owner_status_idx").on(table.ownerUserId, table.status),
     ownerActivityIdx: index("tasks_owner_activity_idx").on(table.ownerUserId, table.lastActivityAt),
+    ownerBuildBranchIdx: index("tasks_owner_build_branch_idx").on(table.ownerUserId, table.buildBranchId),
   }),
 );
 
@@ -166,6 +168,51 @@ export const taskGlobalFileLinks = mysqlTable(
   }),
 );
 
+export const buildTargets = mysqlTable(
+  "build_targets",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerUserId: int("ownerUserId").notNull(),
+    name: varchar("name", { length: 220 }).notNull(),
+    repoUrl: varchar("repoUrl", { length: 1024 }).notNull(),
+    githubTokenEnvVar: varchar("githubTokenEnvVar", { length: 120 }).notNull(),
+    defaultBaseBranch: varchar("defaultBaseBranch", { length: 160 }).default("main").notNull(),
+    protectedBranchesJson: longtext("protectedBranchesJson").notNull(),
+    validationCommandsJson: longtext("validationCommandsJson").notNull(),
+    serviceChecksJson: longtext("serviceChecksJson").notNull(),
+    status: mysqlEnum("status", ["active", "archived"]).default("active").notNull(),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+    updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
+  },
+  (table) => ({
+    ownerStatusIdx: index("build_targets_owner_status_idx").on(table.ownerUserId, table.status),
+    ownerRepoIdx: index("build_targets_owner_repo_idx").on(table.ownerUserId, table.repoUrl),
+  }),
+);
+
+export const buildBranches = mysqlTable(
+  "build_branches",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    buildTargetId: int("buildTargetId").notNull(),
+    ownerUserId: int("ownerUserId").notNull(),
+    branchName: varchar("branchName", { length: 220 }).notNull(),
+    baseBranch: varchar("baseBranch", { length: 160 }).default("main").notNull(),
+    taskId: int("taskId"),
+    state: mysqlEnum("state", ["clean", "cloning", "error"]).default("cloning").notNull(),
+    errorMessage: longtext("errorMessage"),
+    lastSyncedCommit: varchar("lastSyncedCommit", { length: 80 }),
+    workspacePath: varchar("workspacePath", { length: 1024 }).notNull(),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+    updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
+  },
+  (table) => ({
+    targetBranchUnique: uniqueIndex("build_branches_target_branch_unique").on(table.buildTargetId, table.branchName),
+    ownerTargetIdx: index("build_branches_owner_target_idx").on(table.ownerUserId, table.buildTargetId),
+    ownerTaskIdx: index("build_branches_owner_task_idx").on(table.ownerUserId, table.taskId),
+  }),
+);
+
 export const taskFiles = mysqlTable(
   "task_files",
   {
@@ -218,6 +265,10 @@ export type GlobalFile = typeof globalFiles.$inferSelect;
 export type InsertGlobalFile = typeof globalFiles.$inferInsert;
 export type TaskGlobalFileLink = typeof taskGlobalFileLinks.$inferSelect;
 export type InsertTaskGlobalFileLink = typeof taskGlobalFileLinks.$inferInsert;
+export type BuildTarget = typeof buildTargets.$inferSelect;
+export type InsertBuildTarget = typeof buildTargets.$inferInsert;
+export type BuildBranch = typeof buildBranches.$inferSelect;
+export type InsertBuildBranch = typeof buildBranches.$inferInsert;
 export type TaskFile = typeof taskFiles.$inferSelect;
 export type InsertTaskFile = typeof taskFiles.$inferInsert;
 export type CredentialStatusSnapshot = typeof credentialStatusSnapshots.$inferSelect;

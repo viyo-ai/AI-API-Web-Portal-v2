@@ -29,6 +29,20 @@
       "when": 1778085510352,
       "tag": "0003_silent_solo",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1778092264595,
+      "tag": "0004_spooky_bloodscream",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1778093726808,
+      "tag": "0005_loose_master_mold",
+      "breakpoints": true
     }
   ]
 }

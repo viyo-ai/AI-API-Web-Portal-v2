@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   CircleAlert,
   Clock3,
+  GitBranch,
   Download,
   File,
   FileCode2,
@@ -258,6 +259,16 @@ export default function Home() {
   const [filePath, setFilePath] = useState("");
   const [fileUrl, setFileUrl] = useState("");
   const [showAdvancedTools, setShowAdvancedTools] = useState(false);
+  const [selectedBuildTargetId, setSelectedBuildTargetId] = useState<number | null>(null);
+  const [buildTargetName, setBuildTargetName] = useState("Workshop repo");
+  const [buildTargetRepoUrl, setBuildTargetRepoUrl] = useState("");
+  const [buildBranchName, setBuildBranchName] = useState("");
+  const [buildTargetTokenEnvVar, setBuildTargetTokenEnvVar] = useState("BUILD_TARGET_GITHUB_TOKEN");
+  const [buildTargetDefaultBaseBranch, setBuildTargetDefaultBaseBranch] = useState("main");
+  const [buildTargetProtectedBranches, setBuildTargetProtectedBranches] = useState("main,staging");
+  const [buildTargetValidationCommands, setBuildTargetValidationCommands] = useState("");
+  const [buildTargetServiceChecks, setBuildTargetServiceChecks] = useState("");
+  const [openedBuildBranch, setOpenedBuildBranch] = useState<any | null>(null);
   const [showThreadDetails, setShowThreadDetails] = useState(false);
   const [workspaceNotice, setWorkspaceNotice] = useState("");
   const [isFileDragActive, setIsFileDragActive] = useState(false);
@@ -289,6 +300,8 @@ export default function Home() {
   const memoryInput = useMemo(() => ({ limit: 40 }), []);
   const memoryQuery = trpc.memory.list.useQuery(memoryInput, { enabled: isAuthenticated });
   const credentialsQuery = trpc.credentials.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 15000 });
+  const buildTargetsInput = useMemo(() => ({ includeArchived: false, limit: 50 }), []);
+  const buildTargetsQuery = trpc.buildTargets.list.useQuery(buildTargetsInput, { enabled: isAuthenticated });
 
   const createTask = trpc.tasks.create.useMutation();
   const updateTaskStatus = trpc.tasks.updateStatus.useMutation();
@@ -297,6 +310,9 @@ export default function Home() {
   const uploadWorkspaceFileMutation = trpc.filesystem.upload.useMutation();
   const attachGlobalToTaskMutation = trpc.files.attachGlobalToTask.useMutation();
   const credentialsRefreshMutation = trpc.credentials.refresh.useMutation();
+  const createBuildTargetMutation = trpc.buildTargets.create.useMutation();
+  const createBuildBranchMutation = trpc.buildBranches.create.useMutation();
+  const testBuildTargetConnectionMutation = trpc.buildTargets.testConnection.useMutation();
 
   const selectedThread = threadQuery.data;
   const selectedTask = selectedThread?.task ?? tasks.find((task) => task.id === selectedTaskId) ?? null;
@@ -311,6 +327,9 @@ export default function Home() {
   const globalFiles = (globalFilesQuery.data ?? []) as TaskFileRecord[];
   const memories = memoryQuery.data ?? [];
   const credentials = credentialsQuery.data?.runtimeStates ?? [];
+  const buildTargets = buildTargetsQuery.data ?? [];
+  const selectedBuildTarget = buildTargets.find((target) => target.id === selectedBuildTargetId) ?? buildTargets[0] ?? null;
+  const isBuildModeOpen = Boolean(selectedBuildTarget && openedBuildBranch);
 
   const filteredTasks = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -343,7 +362,7 @@ export default function Home() {
       .map((event) => ({ ...activityStepForEvent(event), id: event.id, status: event.status, createdAt: event.createdAt }));
   }, [events]);
 
-  const isMutating = createTask.isPending || updateTaskStatus.isPending || submitMessage.isPending || createFileMetadata.isPending || uploadWorkspaceFileMutation.isPending || attachGlobalToTaskMutation.isPending;
+  const isMutating = createTask.isPending || updateTaskStatus.isPending || submitMessage.isPending || createFileMetadata.isPending || uploadWorkspaceFileMutation.isPending || attachGlobalToTaskMutation.isPending || createBuildTargetMutation.isPending || createBuildBranchMutation.isPending || testBuildTargetConnectionMutation.isPending;
 
   async function refreshWorkspace() {
     await Promise.all([
@@ -356,7 +375,82 @@ export default function Home() {
       utils.memory.list.invalidate(),
       utils.credentials.status.invalidate(),
       utils.filesystem.tree.invalidate(),
+      utils.buildTargets.list.invalidate(),
+      utils.buildBranches.list.invalidate(),
+      utils.buildBranch.list.invalidate(),
     ]);
+  }
+
+  async function handleCreateBuildTarget() {
+    if (!buildTargetRepoUrl.trim()) {
+      const message = "Add a GitHub repository URL before creating a Build Target.";
+      setWorkspaceNotice(message);
+      toast.warning(message);
+      return;
+    }
+    try {
+      const created = await createBuildTargetMutation.mutateAsync({
+        name: buildTargetName.trim() || "Workshop repo",
+        repoUrl: buildTargetRepoUrl.trim(),
+        githubTokenEnvVar: buildTargetTokenEnvVar.trim(),
+        defaultBaseBranch: buildTargetDefaultBaseBranch.trim() || "main",
+        protectedBranches: buildTargetProtectedBranches.split(",").map((value) => value.trim()).filter(Boolean),
+        validationCommands: buildTargetValidationCommands.split("\n").map((value) => value.trim()).filter(Boolean),
+        serviceChecks: buildTargetServiceChecks.split("\n").map((value) => value.trim()).filter(Boolean),
+      });
+      setSelectedBuildTargetId(created.id);
+      setBuildTargetRepoUrl("");
+      const message = `Build Target created for ${created.name}.`;
+      setWorkspaceNotice(message);
+      toast.success(message);
+      await refreshWorkspace();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The Build Target could not be created.";
+      setWorkspaceNotice(message);
+      toast.error(message);
+    }
+  }
+
+  async function handleTestBuildTargetConnection() {
+    if (!buildTargetRepoUrl.trim()) {
+      const message = "Add a GitHub repository URL before testing the connection.";
+      setWorkspaceNotice(message);
+      toast.warning(message);
+      return;
+    }
+    try {
+      const result = await testBuildTargetConnectionMutation.mutateAsync({ repoUrl: buildTargetRepoUrl.trim(), githubTokenEnvVar: buildTargetTokenEnvVar.trim(), defaultBaseBranch: buildTargetDefaultBaseBranch.trim() || "main" });
+      setWorkspaceNotice(result.message);
+      if (result.status === "ok") toast.success(result.message);
+      else toast.warning(`${result.status.replaceAll("_", " ")}: ${result.message}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The Build Target connection test failed.";
+      setWorkspaceNotice(message);
+      toast.error(message);
+    }
+  }
+
+  async function handleCreateBuildBranch() {
+    if (!selectedBuildTarget) {
+      const message = "Create or select a Build Target before opening Build Mode.";
+      setWorkspaceNotice(message);
+      toast.warning(message);
+      return;
+    }
+    const cleanBranchName = buildBranchName.trim() || `portal-task-${selectedTaskId ?? Date.now()}`;
+    try {
+      const branch = await createBuildBranchMutation.mutateAsync({ buildTargetId: selectedBuildTarget.id, branchName: cleanBranchName, baseBranch: selectedBuildTarget.defaultBaseBranch, taskId: selectedTaskId });
+      setBuildBranchName("");
+      setOpenedBuildBranch(branch);
+      const message = branch.state === "clean" ? `Build Mode ready on ${branch.branchName}.` : `Build Branch recorded, but clone failed: ${branch.errorMessage ?? "check repository access"}.`;
+      setWorkspaceNotice(message);
+      if (branch.state === "clean") toast.success(message); else toast.warning(message);
+      await refreshWorkspace();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The Build Branch could not be created.";
+      setWorkspaceNotice(message);
+      toast.error(message);
+    }
   }
 
   async function handleRefreshCredentials() {
@@ -648,6 +742,39 @@ export default function Home() {
         </div>
 
         <ScrollArea className="min-h-0 min-w-0 flex-1 px-3 py-3">
+
+          <div className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">
+            <GitBranch className="h-3.5 w-3.5" /> Build Targets
+          </div>
+          <div className="mb-6 space-y-2">
+            <div className="rounded-2xl border border-[#d9d8d1] bg-white p-3">
+              <Input value={buildTargetName} onChange={(event) => setBuildTargetName(event.target.value)} placeholder="Build Target name" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+              <Input value={buildTargetRepoUrl} onChange={(event) => setBuildTargetRepoUrl(event.target.value)} placeholder="https://github.com/org/repo" className="mt-2 h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+              <Input value={buildTargetTokenEnvVar} onChange={(event) => setBuildTargetTokenEnvVar(event.target.value)} placeholder="BUILD_TARGET_VIYO_GITHUB_TOKEN" className="mt-2 h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+              <p className="mt-1 text-[11px] leading-4 text-[#77766e]">Enter only the environment variable name where the GitHub PAT is set. The token value itself never goes in this form.</p>
+              <Input value={buildTargetDefaultBaseBranch} onChange={(event) => setBuildTargetDefaultBaseBranch(event.target.value)} placeholder="Default base branch: main or staging" className="mt-2 h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+              <Input value={buildTargetProtectedBranches} onChange={(event) => setBuildTargetProtectedBranches(event.target.value)} placeholder="Protected branches: main,staging" className="mt-2 h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+              <Textarea value={buildTargetValidationCommands} onChange={(event) => setBuildTargetValidationCommands(event.target.value)} placeholder="Optional validation commands, one per line" className="mt-2 min-h-[62px] rounded-xl border-[#d9d8d1] bg-white text-xs" />
+              <Textarea value={buildTargetServiceChecks} onChange={(event) => setBuildTargetServiceChecks(event.target.value)} placeholder="Optional service checks, one per line" className="mt-2 min-h-[50px] rounded-xl border-[#d9d8d1] bg-white text-xs" />
+              <Button type="button" variant="outline" onClick={handleTestBuildTargetConnection} disabled={isMutating || !buildTargetRepoUrl.trim() || !buildTargetTokenEnvVar.trim()} className="mt-2 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">Test connection</Button>
+              <Button type="button" onClick={handleCreateBuildTarget} disabled={isMutating || !buildTargetRepoUrl.trim() || !buildTargetTokenEnvVar.trim()} className="mt-2 w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">
+                {createBuildTargetMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Plus className="mr-2 h-3.5 w-3.5" />} Add Build Target
+              </Button>
+            </div>
+            {buildTargetsQuery.isLoading ? (
+              <div className="rounded-2xl border border-[#d9d8d1] bg-white p-3 text-xs text-[#6d6d65]">Loading Build Targets...</div>
+            ) : buildTargets.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white/70 p-3 text-xs leading-5 text-[#6d6d65]">No Build Targets yet. Section 1 keeps existing tasks intact until you connect a repository.</div>
+            ) : (
+              buildTargets.slice(0, 5).map((target) => (
+                <button key={target.id} type="button" onClick={() => setSelectedBuildTargetId(target.id)} className={`w-full rounded-2xl border p-3 text-left text-xs transition ${selectedBuildTarget?.id === target.id ? "border-emerald-300 bg-white shadow-sm" : "border-transparent bg-transparent hover:bg-white/70"}`}>
+                  <span className="block truncate text-sm font-semibold text-[#30302b]">{target.name}</span>
+                  <a href={target.repoUrl} target="_blank" rel="noreferrer" className="mt-1 block truncate font-mono text-[11px] text-[#5c6f99] underline-offset-2 hover:underline" onClick={(event) => event.stopPropagation()}>{target.repoUrl}</a>
+                  <span className="mt-1 block truncate text-[#77766e]">Base {target.defaultBaseBranch} · Settings available in the form above</span>
+                </button>
+              ))
+            )}
+          </div>
           <div className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">
             <PanelLeft className="h-3.5 w-3.5" /> Live tasks
           </div>
@@ -726,6 +853,29 @@ export default function Home() {
             </div>
             <h1 className="mt-1 text-2xl font-semibold tracking-[-0.035em] text-[#20201d]">{selectedThread?.task.title ?? "Create or select a task"}</h1>
           </div>
+
+          {selectedBuildTarget ? (
+            <div className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold">Build Mode target: {selectedBuildTarget.name}</p>
+                  <p className="mt-1 text-xs text-emerald-800">Base branch {selectedBuildTarget.defaultBaseBranch}. Protected branches are never direct push targets.</p>
+                </div>
+                <div className="flex min-w-[220px] flex-1 gap-2 sm:flex-none">
+                  <Input value={buildBranchName} onChange={(event) => setBuildBranchName(event.target.value)} placeholder="feature/portal-task" className="h-9 rounded-xl border-emerald-200 bg-white text-xs" />
+                  <Button type="button" onClick={handleCreateBuildBranch} disabled={isMutating} className="h-9 rounded-xl bg-emerald-700 px-3 text-xs text-white hover:bg-emerald-800">
+                    {createBuildBranchMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Open"}
+                  </Button>
+                  {isBuildModeOpen ? (
+                    <Button type="button" variant="outline" onClick={() => setOpenedBuildBranch(null)} className="h-9 rounded-xl border-emerald-200 bg-white px-3 text-xs text-emerald-900">
+                      Close
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+              {isBuildModeOpen ? <p className="mt-3 rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-emerald-900">Build Mode: {selectedBuildTarget.name} on branch {openedBuildBranch.branchName}</p> : null}
+            </div>
+          ) : null}
           <div className="flex flex-col items-end gap-1">
             <div className="flex items-center gap-2">
               {credentials.map((credential: { provider: string; configured: boolean; status: string; reason?: string }) => (
@@ -1177,6 +1327,13 @@ export default function Home() {
               </Card>
               {showAdvancedTools ? (
                 <div className="space-y-4">
+
+                  {selectedBuildTarget ? (
+                    <div className="mb-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-xs leading-5 text-emerald-900">
+                      <p className="font-semibold">Read-only Build Target tree</p>
+                      <p className="mt-1">Section 1 links this task to {selectedBuildTarget.name}. Git writes remain behind explicit Build Branch actions; shipped task files below are not replaced.</p>
+                    </div>
+                  ) : null}
                   <FilesystemPanel workspaceId={selectedTaskId ?? undefined} />
                   <TerminalPanel />
                 </div>
