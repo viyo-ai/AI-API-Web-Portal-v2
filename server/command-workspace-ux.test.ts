@@ -70,11 +70,12 @@ describe("v2 task-first workspace production regressions", () => {
   it("keeps provider routing inside the Wrapper LLM instead of exposing a provider dropdown", () => {
     const source = readProjectFile("client/src/pages/Home.tsx");
 
-    expect(source).toContain("AUTO routes internally");
+    expect(source).toContain("Task creation is record-only");
+    expect(source).toContain("first task-thread message initializes/checks Claude Opus 4.7 and Kimi K2.6");
     expect(source).toContain("#claude");
     expect(source).toContain("#kimi");
     expect(source).toContain("No provider dropdown");
-    expect(source).toContain("Missing credentials block explicitly");
+    expect(source).toContain("No silent fallback");
     expect(source).not.toMatch(/<select|SelectItem|provider picker/i);
   });
 
@@ -89,7 +90,7 @@ describe("v2 task-first workspace production regressions", () => {
     expect(source).toContain("trpc.memory.list.useQuery");
     expect(source).toContain("trpc.credentials.status.useQuery");
     expect(source).toContain("credentialsRefreshMutation");
-    expect(source).toContain("Missing credentials block explicitly");
+    expect(source).toContain("No silent fallback");
     expect(source).not.toContain("trpc.workspace");
     expect(source).not.toContain("trpc.command");
   });

@@ -84,6 +84,55 @@ function eventTitle(actor: string, eventType: string) {
   return `${actor} · ${eventType.replaceAll("_", " ")}`;
 }
 
+type ThreadEvent = {
+  id: number;
+  taskId?: number;
+  ownerUserId?: number;
+  actor: string;
+  eventType: string;
+  status: string;
+  content: string;
+  metadataJson?: string | null;
+  createdAt: number | Date | string;
+};
+
+function eventTimestamp(event: ThreadEvent) {
+  return new Date(event.createdAt).getTime() || 0;
+}
+
+function newestFirst(a: ThreadEvent, b: ThreadEvent) {
+  const delta = eventTimestamp(b) - eventTimestamp(a);
+  return delta || b.id - a.id;
+}
+
+function isOwnerVisibleEvent(event: ThreadEvent) {
+  if (event.eventType === "message") return true;
+  if ((event.actor === "claude" || event.actor === "kimi") && ["model_result", "model_review"].includes(event.eventType)) return true;
+  return false;
+}
+
+function ownerEventTitle(event: ThreadEvent) {
+  if (event.eventType === "message" && event.actor === "user") return "You";
+  if (event.actor === "claude" || event.actor === "kimi") return "AI answer";
+  return eventTitle(event.actor, event.eventType);
+}
+
+function ownerEventBody(event: ThreadEvent) {
+  return ownerFacingText(event.content);
+}
+
+function ownerProviderFailureMessage(event: ThreadEvent | undefined) {
+  if (!event) return null;
+  const content = event.content.toLowerCase();
+  if (content.includes("missing credentials") || content.includes("credential") || content.includes("not connected")) {
+    return "This task can’t start yet because Claude or Kimi is not connected. Open the owner credentials dashboard or update the project secrets, then retry the message.";
+  }
+  if (content.includes("kimi") && (content.includes("empty") || content.includes("usable text"))) {
+    return "Kimi did not return usable text for this turn. No silent fallback was used; retry the message or send it with #claude while Kimi is checked.";
+  }
+  return "The AI provider did not return a usable answer for this turn. No silent fallback was used; retry after checking credentials or choose an explicit #claude or #kimi route.";
+}
+
 export default function Home() {
   const { user, loading, error, isAuthenticated, logout } = useAuth();
   const loginUrl = useMemo(() => getLoginUrl(), []);
@@ -96,6 +145,7 @@ export default function Home() {
   const [filePath, setFilePath] = useState("");
   const [fileUrl, setFileUrl] = useState("");
   const [showAdvancedTools, setShowAdvancedTools] = useState(false);
+  const [showThreadDetails, setShowThreadDetails] = useState(false);
 
   const taskListInput = useMemo(() => ({ includeArchived: false, limit: 50 }), []);
   const tasksQuery = trpc.tasks.list.useQuery(taskListInput, { enabled: isAuthenticated });
@@ -118,12 +168,18 @@ export default function Home() {
   const credentialsQuery = trpc.credentials.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 15000 });
 
   const createTask = trpc.tasks.create.useMutation();
+  const updateTaskStatus = trpc.tasks.updateStatus.useMutation();
   const submitMessage = trpc.orchestration.submitMessage.useMutation();
   const createFileMetadata = trpc.files.createMetadata.useMutation();
   const credentialsRefreshMutation = trpc.credentials.refresh.useMutation();
 
   const selectedThread = threadQuery.data;
-  const events = selectedThread?.events ?? [];
+  const selectedTask = selectedThread?.task ?? tasks.find((task) => task.id === selectedTaskId) ?? null;
+  const events = ((selectedThread?.events ?? []) as ThreadEvent[]);
+  const ownerVisibleEvents = useMemo(() => events.filter(isOwnerVisibleEvent).sort(newestFirst), [events]);
+  const technicalEvents = useMemo(() => events.filter((event) => !isOwnerVisibleEvent(event)).sort(newestFirst), [events]);
+  const latestProviderFailure = useMemo(() => technicalEvents.find((event) => event.status === "failed" || event.status === "blocked"), [technicalEvents]);
+  const providerFailureCopy = ownerProviderFailureMessage(latestProviderFailure);
   const taskFiles = taskFilesQuery.data ?? [];
   const allFiles = allFilesQuery.data ?? [];
   const memories = memoryQuery.data ?? [];
@@ -135,7 +191,7 @@ export default function Home() {
     return tasks.filter((task) => `${task.title} ${task.summary ?? ""} ${task.status}`.toLowerCase().includes(query));
   }, [tasks, searchTerm]);
 
-  const isMutating = createTask.isPending || submitMessage.isPending || createFileMetadata.isPending;
+  const isMutating = createTask.isPending || updateTaskStatus.isPending || submitMessage.isPending || createFileMetadata.isPending;
 
   async function refreshWorkspace() {
     await Promise.all([
@@ -174,6 +230,14 @@ export default function Home() {
     if (!selectedTaskId || !composerText.trim()) return;
     await submitMessage.mutateAsync({ taskId: selectedTaskId, message: composerText.trim(), routeMode: "auto" });
     setComposerText("");
+    await refreshWorkspace();
+  }
+
+  async function handleArchiveTask(taskId: number, title: string) {
+    const confirmed = window.confirm(`Archive task "${title}"? It will leave the live task list but stay recoverable in task history.`);
+    if (!confirmed) return;
+    await updateTaskStatus.mutateAsync({ taskId, status: "archived" });
+    if (selectedTaskId === taskId) setSelectedTaskId(null);
     await refreshWorkspace();
   }
 
@@ -288,19 +352,34 @@ export default function Home() {
               </div>
             ) : (
               filteredTasks.map((task) => (
-                <button
+                <article
                   key={task.id}
-                  type="button"
-                  onClick={() => setSelectedTaskId(task.id)}
-                  className={`w-full rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 ${selectedTaskId === task.id ? "border-sky-300 bg-white shadow-sm" : "border-transparent bg-transparent hover:bg-white/70"}`}
+                  className={`w-full rounded-2xl border p-3 text-left transition ${selectedTaskId === task.id ? "border-sky-300 bg-white shadow-sm" : "border-transparent bg-transparent hover:bg-white/70"}`}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <p className="min-w-0 flex-1 truncate text-sm font-semibold text-[#2c2c28]">{task.title}</p>
+                    <button type="button" onClick={() => setSelectedTaskId(task.id)} className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200">
+                      <p className="truncate text-sm font-semibold text-[#2c2c28]">{task.title}</p>
+                    </button>
                     <Badge variant="outline" className={`shrink-0 rounded-full text-[10px] ${statusTone[task.status] ?? statusTone.active}`}>{task.status}</Badge>
                   </div>
-                  <p className="mt-2 line-clamp-2 text-xs leading-5 text-[#66665f]">{ownerFacingText(task.summary) || "No summary recorded yet."}</p>
-                  <p className="mt-2 text-[11px] text-[#9a998f]">Updated {compactDate(task.updatedAt)}</p>
-                </button>
+                  <button type="button" onClick={() => setSelectedTaskId(task.id)} className="mt-2 block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200">
+                    <p className="line-clamp-2 text-xs leading-5 text-[#66665f]">{ownerFacingText(task.summary) || "No summary recorded yet."}</p>
+                    <p className="mt-2 text-[11px] text-[#9a998f]">Updated {compactDate(task.updatedAt)}</p>
+                  </button>
+                  <div className="mt-3 flex justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleArchiveTask(task.id, task.title)}
+                      disabled={updateTaskStatus.isPending}
+                      aria-label={`Archive task ${task.title}`}
+                      className="h-8 rounded-full border-[#d9d8d1] bg-white px-3 text-[11px] text-[#66665f] hover:text-[#2c2c28]"
+                    >
+                      <Archive className="mr-1.5 h-3.5 w-3.5" /> Archive
+                    </Button>
+                  </div>
+                </article>
               ))
             )}
           </div>
@@ -360,29 +439,80 @@ export default function Home() {
                 <CardContent className="p-8 text-center">
                   <Sparkles className="mx-auto mb-4 h-10 w-10 text-sky-500" />
                   <h2 className="text-xl font-semibold tracking-[-0.03em]">Start with a production task</h2>
-                  <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[#686861]">Use the composer below to create a task. AUTO coordination stays behind the scenes and can be overridden only with #claude or #kimi tags in the message.</p>
+                  <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[#686861]">Use the composer below to create the task record. The first submitted task-thread message starts Claude Opus 4.7 via API and Kimi K2.6 via Cloudflare Workers AI; AUTO can be overridden only with #claude or #kimi tags.</p>
                 </CardContent>
               </Card>
             ) : threadQuery.isLoading ? (
               <div className="rounded-2xl border border-[#deded8] bg-white p-5 text-sm text-[#6d6d65]">Loading task thread...</div>
             ) : events.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white p-8 text-center text-sm leading-6 text-[#6d6d65]">This task has no thread events yet. Send the first message to build real orchestration history.</div>
+              <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white p-8 text-center text-sm leading-6 text-[#6d6d65]">This task has no owner messages yet. Creating it only made the task record; send the first message to initialize Claude Opus 4.7 and Kimi K2.6 through the coordinator.</div>
             ) : (
-              events.map((event) => (
-                <article key={event.id} className={`rounded-3xl border p-4 shadow-sm ${actorTone[event.actor] ?? actorTone.system}`}>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      {event.status === "blocked" || event.status === "failed" ? <CircleAlert className="h-4 w-4 text-rose-600" /> : <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
-                      <h3 className="text-sm font-semibold text-[#2b2b27]">{eventTitle(event.actor, event.eventType)}</h3>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-[#77766e]">
-                      <Clock3 className="h-3.5 w-3.5" /> {compactDate(event.createdAt)}
-                      <Badge variant="outline" className="rounded-full text-[10px]">{event.status}</Badge>
-                    </div>
+              <div className="space-y-4">
+                {ownerVisibleEvents.length === 0 && !providerFailureCopy ? (
+                  <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white p-8 text-center text-sm leading-6 text-[#6d6d65]">
+                    No owner-facing task message is ready yet. Technical setup records are available below if you need them.
                   </div>
-                  <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[#3e3e39]">{ownerFacingText(event.content)}</p>
-                </article>
-              ))
+                ) : null}
+
+                {providerFailureCopy ? (
+                  <article className="rounded-3xl border border-amber-200 bg-amber-50/80 p-4 shadow-sm" data-testid="owner-provider-recovery">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <CircleAlert className="h-4 w-4 text-amber-700" />
+                        <h3 className="text-sm font-semibold text-[#2b2b27]">Plain-English recovery note</h3>
+                      </div>
+                      <Badge variant="outline" className="rounded-full border-amber-300 bg-white text-[10px] text-amber-800">needs attention</Badge>
+                    </div>
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[#3e3e39]">{providerFailureCopy}</p>
+                  </article>
+                ) : null}
+
+                {ownerVisibleEvents.map((event) => (
+                  <article key={event.id} className={`rounded-3xl border p-4 shadow-sm ${actorTone[event.actor] ?? actorTone.system}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        {event.status === "blocked" || event.status === "failed" ? <CircleAlert className="h-4 w-4 text-rose-600" /> : <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+                        <h3 className="text-sm font-semibold text-[#2b2b27]">{ownerEventTitle(event)}</h3>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-[#77766e]">
+                        <Clock3 className="h-3.5 w-3.5" /> {compactDate(event.createdAt)}
+                        <Badge variant="outline" className="rounded-full text-[10px]">{event.status}</Badge>
+                      </div>
+                    </div>
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[#3e3e39]">{ownerEventBody(event)}</p>
+                  </article>
+                ))}
+
+                {technicalEvents.length > 0 ? (
+                  <div className="rounded-3xl border border-[#deded8] bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-[#2b2b27]">Technical history</h3>
+                        <p className="mt-1 text-xs leading-5 text-[#77766e]">Routing decisions, context snapshots, and model-call records are hidden from the normal owner thread.</p>
+                      </div>
+                      <Button type="button" variant="outline" onClick={() => setShowThreadDetails((value) => !value)} className="rounded-full border-[#d9d8d1] bg-white text-xs">
+                        {showThreadDetails ? "Hide technical details" : `Show technical details (${technicalEvents.length})`}
+                      </Button>
+                    </div>
+                    {showThreadDetails ? (
+                      <div className="mt-4 space-y-3">
+                        {technicalEvents.map((event) => (
+                          <article key={event.id} className={`rounded-2xl border p-3 ${actorTone[event.actor] ?? actorTone.system}`}>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <h4 className="text-xs font-semibold text-[#2b2b27]">{eventTitle(event.actor, event.eventType)}</h4>
+                              <div className="flex items-center gap-2 text-[11px] text-[#77766e]">
+                                <Clock3 className="h-3 w-3" /> {compactDate(event.createdAt)}
+                                <Badge variant="outline" className="rounded-full text-[10px]">{event.status}</Badge>
+                              </div>
+                            </div>
+                            <p className="mt-2 whitespace-pre-wrap text-xs leading-6 text-[#55554e]">{ownerFacingText(event.content)}</p>
+                          </article>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             )}
           </div>
         </ScrollArea>
@@ -399,7 +529,7 @@ export default function Home() {
             <Textarea value={composerText} onChange={(event) => setComposerText(event.target.value)} placeholder="Describe the next task step. Use #claude or #kimi only when you need an explicit override." className="min-h-28 rounded-2xl border-[#d9d8d1] bg-[#fbfaf7] text-sm leading-6" />
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="space-y-1 text-xs leading-5 text-[#77766e]">
-                <p>AUTO routes internally. Missing credentials block explicitly; the app never silently falls back.</p>
+                <p>Task creation is record-only. Sending the first task-thread message initializes/checks Claude Opus 4.7 and Kimi K2.6; AUTO requires both credentials and never silently falls back.</p>
                 <Button type="button" variant="outline" onClick={handleRefreshCredentials} disabled={credentialsRefreshMutation.isPending} className="h-8 rounded-full border-[#d9d8d1] bg-white px-3 text-[11px]">
                   {credentialsRefreshMutation.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <RotateCcw className="mr-2 h-3 w-3" />}
                   Refresh credential status

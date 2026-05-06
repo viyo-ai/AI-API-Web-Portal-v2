@@ -66,7 +66,7 @@ function mockSuccessfulFetch() {
     const requestUrl = String(url);
     const body = JSON.parse(String(init?.body ?? "{}"));
     if (requestUrl.includes("api.anthropic.com")) {
-      const isReviewer = typeof body.system === "string" && body.system.includes("Claude Reviewer");
+      const isReviewer = typeof body.system === "string" && body.system.includes("Reviewer");
       return new Response(
         JSON.stringify({
           content: [{ type: "text", text: isReviewer ? "Claude reviewed final answer." : "Claude produced a plan." }],

@@ -9,6 +9,7 @@ import Home from "./Home";
 const logoutMock = vi.fn();
 const invalidateMock = vi.fn(async () => undefined);
 const createTaskMock = vi.fn();
+const updateTaskStatusMock = vi.fn();
 const submitMessageMock = vi.fn();
 const createFileMetadataMock = vi.fn();
 const credentialsRefreshMock = vi.fn();
@@ -149,6 +150,12 @@ vi.mock("@/lib/trpc", () => ({
           isPending: false,
         }),
       },
+      updateStatus: {
+        useMutation: () => ({
+          mutateAsync: updateTaskStatusMock,
+          isPending: false,
+        }),
+      },
     },
     orchestration: {
       submitMessage: {
@@ -231,6 +238,7 @@ beforeEach(() => {
   logoutMock.mockReset();
   invalidateMock.mockClear();
   createTaskMock.mockReset();
+  updateTaskStatusMock.mockReset();
   submitMessageMock.mockReset();
   createFileMetadataMock.mockReset();
   credentialsRefreshMock.mockReset();
@@ -240,6 +248,7 @@ beforeEach(() => {
   FakeWebSocket.instances = [];
   resizeObserverCallbacks = [];
   createTaskMock.mockResolvedValue({ task: { ...sampleTask, id: 19, title: "Created task" }, events: [], activeTurn: null });
+  updateTaskStatusMock.mockResolvedValue({ ...sampleTask, status: "archived" });
   submitMessageMock.mockResolvedValue(mockThread);
   createFileMetadataMock.mockResolvedValue(mockTaskFiles[0]);
   credentialsRefreshMock.mockResolvedValue({ runtimeStates: [] });
@@ -293,8 +302,10 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(screen.getByText(/Center task thread/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Task-scoped files/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Wire the task-first AI coordinator workspace/i)).toBeInTheDocument();
-    expect(screen.queryByText(/Wrapper LLM/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/No silent fallback/i)).toBeInTheDocument();
+    expect(screen.getByText(/Task creation is record-only/i)).toBeInTheDocument();
+    expect(screen.getByText(/first task-thread message initializes\/checks Claude Opus 4\.7 and Kimi K2\.6/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/No provider dropdown/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/No silent fallback/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/claude: missing/i)).toBeInTheDocument();
     expect(screen.getByText(/kimi: configured/i)).toBeInTheDocument();
     expect(screen.getByText(/Missing CLAUDE_API_KEY\./i)).toBeInTheDocument();
@@ -316,6 +327,99 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(screen.getByText(/kimi: missing/i)).toBeInTheDocument();
     expect(screen.getByText(/Missing CLAUDE_API_KEY\./i)).toBeInTheDocument();
     expect(screen.getByText(/Missing Cloudflare Workers AI credentials\./i)).toBeInTheDocument();
+  });
+
+  it("shows newest owner-facing task messages first and hides technical orchestration details until requested", async () => {
+    const user = userEvent.setup();
+    mockThread = {
+      task: sampleTask,
+      activeTurn: null,
+      events: [
+        {
+          id: 201,
+          taskId: 7,
+          ownerUserId: 42,
+          actor: "user",
+          eventType: "message",
+          status: "completed",
+          content: "Older owner request",
+          metadataJson: "{}",
+          createdAt: 1777999100000,
+        },
+        {
+          id: 202,
+          taskId: 7,
+          ownerUserId: 42,
+          actor: "wrapper",
+          eventType: "route_decision",
+          status: "completed",
+          content: "Route AUTO selected dual Claude and Kimi initialization.",
+          metadataJson: "{}",
+          createdAt: 1777999200000,
+        },
+        {
+          id: 203,
+          taskId: 7,
+          ownerUserId: 42,
+          actor: "kimi",
+          eventType: "model_result",
+          status: "completed",
+          content: "Newest plain answer from Kimi after initialization.",
+          metadataJson: "{}",
+          createdAt: 1777999300000,
+        },
+      ],
+    };
+
+    render(<Home />);
+
+    const newest = await screen.findByText("Newest plain answer from Kimi after initialization.");
+    const older = screen.getByText("Older owner request");
+    expect(newest.compareDocumentPosition(older) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("Route AUTO selected dual Claude and Kimi initialization.")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /show technical details/i }));
+    expect(screen.getByText("Route AUTO selected dual Claude and Kimi initialization.")).toBeInTheDocument();
+  });
+
+  it("summarizes empty Kimi responses as owner-friendly recovery guidance while keeping raw diagnostics in technical details", async () => {
+    const user = userEvent.setup();
+    mockThread = {
+      task: sampleTask,
+      activeTurn: null,
+      events: [
+        {
+          id: 301,
+          taskId: 7,
+          ownerUserId: 42,
+          actor: "user",
+          eventType: "message",
+          status: "completed",
+          content: "Build the safe next step.",
+          metadataJson: "{}",
+          createdAt: 1777999100000,
+        },
+        {
+          id: 302,
+          taskId: 7,
+          ownerUserId: 42,
+          actor: "wrapper",
+          eventType: "error",
+          status: "failed",
+          content: "Kimi returned an empty response.",
+          metadataJson: "{}",
+          createdAt: 1777999300000,
+        },
+      ],
+    };
+
+    render(<Home />);
+
+    expect(await screen.findByText(/Kimi did not return usable text/i)).toBeInTheDocument();
+    expect(screen.queryByText("Kimi returned an empty response.")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /show technical details/i }));
+    expect(screen.getByText("Kimi returned an empty response.")).toBeInTheDocument();
   });
 
   it("submits the selected task message through the task thread and refreshes v2 task context", async () => {
@@ -346,6 +450,33 @@ describe("Home v2 task-first workspace behavior", () => {
       routeMode: "auto",
     });
     expect(submitMessageMock).toHaveBeenCalledWith(expect.objectContaining({ taskId: 19, routeMode: "auto" }));
+    expect(createTaskMock.mock.invocationCallOrder[0]).toBeLessThan(submitMessageMock.mock.invocationCallOrder[0]);
+  });
+
+  it("archives a live sidebar task only after owner confirmation", async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValueOnce(true);
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    await user.click(screen.getByRole("button", { name: /archive task implement v2 shell/i }));
+
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("Archive task \"Implement v2 shell\"?"));
+    expect(updateTaskStatusMock).toHaveBeenCalledWith({ taskId: 7, status: "archived" });
+    await waitFor(() => expect(invalidateMock).toHaveBeenCalled());
+    confirmSpy.mockRestore();
+  });
+
+  it("does not archive a sidebar task when owner confirmation is cancelled", async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValueOnce(false);
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    await user.click(screen.getByRole("button", { name: /archive task implement v2 shell/i }));
+
+    expect(updateTaskStatusMock).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 
   it("refreshes provider credential status through the protected v2 credentials mutation", async () => {

@@ -40,8 +40,8 @@
 - [x] Fix published terminal native-module failure so a missing `node-pty` binary does not cause repeated disconnect/reconnect loops and provides an explicit usable fallback.
 - [x] Include client behavior tests in the Vitest include pattern so terminal reconnect regressions run in automated validation.
 - [x] Fix production OAuth login failure on `aicodwork-5kvwo4uo.manus.space` so users can complete Manus authentication and reach the protected workspace.
-- [ ] Add route-level regression coverage for the OAuth callback/session path so cookie-setting and post-callback auth recognition are tested together.
-- [ ] Validate Manus OAuth end-to-end on the published `aicodwork-5kvwo4uo.manus.space` domain with user-assisted login, confirming the session cookie is accepted and the protected workspace loads.
+- [x] Add route-level regression coverage for the OAuth callback/session path so cookie-setting and post-callback auth recognition are tested together.
+- [x] Validate Manus OAuth end-to-end on the published `aicodwork-5kvwo4uo.manus.space` domain with user-assisted login, confirming the session cookie is accepted and the protected workspace loads.
 - [x] Fix authenticated workspace database query failures for `tasks`, `global_memory`, and `task_files` after OAuth login by ensuring required tables exist and are migrated.
 - [x] Fix authenticated workspace filesystem startup failure when `/tmp/ai-coding-workshop-workspaces/user-1/README.md` is missing by seeding or recreating required workspace files safely.
 - [x] Confirm ResizeObserver warning does not represent an application failure or suppress only if it is caused by our terminal/layout code.
@@ -56,3 +56,15 @@
 - [x] Add regression coverage for the corrected no-terminal-default layout, owner-facing orchestration copy, and non-clipped right sidebar behavior where feasible.
 - [x] Pause additional fixes until both uploaded source documents have been read in full without skimming.
 - [x] Complete full source-file ingestion before making any further implementation-completeness claims.
+- [x] Fix the center task thread so the latest meaningful owner-facing message appears first by default, instead of burying it below older orchestration history.
+- [x] Simplify the center task thread so raw technical orchestration records are summarized or tucked behind an explicit details disclosure rather than dominating the normal owner view.
+- [x] Add regression coverage for newest-first center-thread ordering and owner-facing thread clarity.
+- [x] Fix the coordinator/provider path so a Kimi empty response is treated as a handled provider failure with owner-friendly recovery guidance instead of a dead-end raw error.
+- [x] Add regression coverage for empty Kimi responses so the task thread does not present them as normal owner-facing messages and exposes diagnostics only in technical details.
+- [x] Add or verify an owner-facing Delete/Archive task control for left-sidebar tasks, with safe confirmation and regression coverage.
+- [x] Clarify in the UI whether Claude and Kimi credentials are checked at task creation or initialized when a task message is submitted through the coordinator.
+- [x] Add regression coverage for model-initialization/status copy so task creation does not imply a model run has already occurred.
+- [x] Re-read the uploaded product/decision documentation for the first-message model initialization requirement before changing the coordinator behavior.
+- [x] Update the first-message flow so a newly created task with a typed message explicitly initializes/checks Kimi K2.6 via Cloudflare Workers AI and Claude Opus via API according to the source decisions.
+- [x] Correct the model/status copy so the owner can see that the first typed message is what starts the Claude/Kimi initialization and routing sequence.
+- [x] Add regression coverage proving task creation alone does not call providers, but task creation with a first message starts the required Claude/Kimi initialization checks and provider route handling.

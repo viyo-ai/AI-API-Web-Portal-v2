@@ -110,27 +110,7 @@ export function resolveWrapperRoute(message: string, preferredRoute: RouteMode =
         forcedByTag: override.forcedByTag,
         credentialStates,
         isRunnable: true,
-        reason: "AUTO can route through both Claude planning/review and Kimi execution because both credentials are configured.",
-      };
-    }
-    if (claude?.configured) {
-      return {
-        requestedRoute,
-        effectiveRoute: "claude",
-        forcedByTag: override.forcedByTag,
-        credentialStates,
-        isRunnable: true,
-        reason: "AUTO selected Claude because only Claude credentials are configured.",
-      };
-    }
-    if (kimi?.configured) {
-      return {
-        requestedRoute,
-        effectiveRoute: "kimi",
-        forcedByTag: override.forcedByTag,
-        credentialStates,
-        isRunnable: true,
-        reason: "AUTO selected Kimi because only Kimi credentials are configured.",
+        reason: "AUTO first-message initialization will start Claude Opus 4.7 through the Claude API and Kimi K2.6 through Cloudflare Workers AI. Task creation alone does not call either provider.",
       };
     }
   }
@@ -142,7 +122,10 @@ export function resolveWrapperRoute(message: string, preferredRoute: RouteMode =
       forcedByTag: override.forcedByTag,
       credentialStates,
       isRunnable: false,
-      reason: `Route ${requestedRoute.toUpperCase()} is unavailable because missing credentials: ${missing.join(", ")}.`,
+      reason:
+        requestedRoute === "auto"
+          ? `AUTO first-message initialization requires both Claude Opus 4.7 via the Claude API and Kimi K2.6 via Cloudflare Workers AI. Missing credentials: ${missing.join(", ")}. Task creation alone does not call providers.`
+          : `Route ${requestedRoute.toUpperCase()} is unavailable because missing credentials: ${missing.join(", ")}.`,
     };
   }
 
@@ -212,21 +195,12 @@ export const appRouter = router({
           actor: "system",
           eventType: "status",
           status: "informational",
-          content: "Task created with v2 Wrapper LLM orchestration context.",
+          content: "Task record created. Claude Opus 4.7 and Kimi K2.6 are initialized only when the first task message is submitted through the AI coordinator.",
           metadataJson: serializeJson({ routeMode: input.routeMode }),
         });
 
-        if (input.initialMessage) {
-          await appendTaskEvent({
-            taskId: task.id,
-            ownerUserId: ctx.user.id,
-            actor: "user",
-            eventType: "message",
-            status: "succeeded",
-            content: input.initialMessage,
-            metadataJson: serializeJson({ source: "task_create" }),
-          });
-        }
+        // Per the v2 decision record, creating a task only creates the task record and a status event.
+        // Provider initialization begins when the owner submits a task-thread message through orchestration.submitMessage.
 
         return getTaskThread(task.id, ctx.user.id);
       }),
@@ -327,7 +301,7 @@ export const appRouter = router({
             actor: "system",
             eventType: "credential_status",
             status: "blocked",
-            content: "The Wrapper LLM did not fall back silently. Configure the missing server credentials, then retry the task.",
+            content: "The AI coordinator did not fall back silently. AUTO first-message initialization requires both Claude Opus 4.7 and Kimi K2.6 credentials; configure the missing server credentials, then retry the task.",
             metadataJson: serializeJson({ turnId: turn.id, credentialStates: decision.credentialStates }),
           });
         } else {

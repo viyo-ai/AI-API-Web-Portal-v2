@@ -12,7 +12,7 @@ vi.mock("./db", () => ({
   ...dbMocks,
 }));
 
-import { executeWrapperTurn, getWrapperRuntimeCredentialStates, KIMI_K26_CLOUDFLARE_MODEL } from "./wrapperLLM";
+import { CLAUDE_DEFAULT_MODEL, executeWrapperTurn, getWrapperRuntimeCredentialStates, KIMI_K26_CLOUDFLARE_MODEL } from "./wrapperLLM";
 
 type EnvSnapshot = Pick<NodeJS.ProcessEnv, "CLAUDE_API_KEY" | "CLOUDFLARE_ACCOUNT_ID" | "CLOUDFLARE_API_TOKEN">;
 
@@ -67,7 +67,8 @@ describe("Wrapper LLM v2 credential gates and fallback policy", () => {
     restoreProviderEnv();
   });
 
-  it("uses the exact Cloudflare Workers AI Kimi K2.6 model identifier", () => {
+  it("uses the exact approved model identifiers for Claude Opus and Cloudflare Workers AI Kimi", () => {
+    expect(CLAUDE_DEFAULT_MODEL).toContain("opus");
     expect(KIMI_K26_CLOUDFLARE_MODEL).toBe("@cf/moonshotai/kimi-k2.6");
   });
 
@@ -104,5 +105,31 @@ describe("Wrapper LLM v2 credential gates and fallback policy", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(dbMocks.failTurn).toHaveBeenCalledWith(99, 7, "MODEL_EXECUTION_FAILED", expect.stringContaining("Kimi credential is missing"), "failed");
     expect(dbMocks.updateTaskStatus).toHaveBeenCalledWith(10, 7, "error");
+  });
+
+  it("handles empty Kimi responses as provider failures with owner-friendly recovery guidance and raw diagnostics", async () => {
+    process.env.CLOUDFLARE_ACCOUNT_ID = "test-account";
+    process.env.CLOUDFLARE_API_TOKEN = "test-token";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ success: true, result: { response: "   " } }), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+
+    await expect(executeWrapperTurn(sampleExecutionInput("kimi"))).rejects.toThrow("Kimi returned an empty response");
+
+    expect(dbMocks.failTurn).toHaveBeenCalledWith(
+      99,
+      7,
+      "MODEL_EXECUTION_FAILED",
+      expect.stringContaining("Kimi did not return usable text"),
+      "failed",
+    );
+    expect(dbMocks.appendTaskEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actor: "wrapper",
+      eventType: "error",
+      status: "failed",
+      content: expect.stringContaining("Kimi did not return usable text"),
+      metadataJson: expect.stringContaining("Kimi returned an empty response"),
+    }));
+    expect(dbMocks.completeTurn).not.toHaveBeenCalled();
   });
 });

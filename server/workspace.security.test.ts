@@ -103,6 +103,71 @@ describe("v2 task ownership and credential-gate security", () => {
     expect(wrapperMocks.executeWrapperTurn).not.toHaveBeenCalled();
   });
 
+  it("creates only the task record and status event even if an initial message is supplied", async () => {
+    dbMocks.createTask.mockResolvedValueOnce({ ...ownedTask, id: 88, title: "New task" });
+    dbMocks.getTaskThread.mockResolvedValueOnce({ task: { ...ownedTask, id: 88, title: "New task" }, events: [], activeTurn: null });
+    const caller = appRouter.createCaller(createContext(42));
+
+    await caller.tasks.create({ title: "New task", routeMode: "auto", initialMessage: "Do not initialize providers during creation." });
+
+    expect(dbMocks.createTask).toHaveBeenCalledWith(expect.objectContaining({ ownerUserId: 42, title: "New task", routeMode: "auto" }));
+    expect(dbMocks.appendTaskEvent).toHaveBeenCalledTimes(1);
+    expect(dbMocks.appendTaskEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actor: "system",
+      eventType: "status",
+      content: expect.stringContaining("Task record created"),
+    }));
+    expect(dbMocks.createTurn).not.toHaveBeenCalled();
+    expect(wrapperMocks.executeWrapperTurn).not.toHaveBeenCalled();
+  });
+
+  it("routes the first submitted AUTO message through dual Claude Opus and Kimi initialization when both credentials exist", async () => {
+    wrapperMocks.getWrapperRuntimeCredentialStates.mockReturnValue([
+      { provider: "claude", status: "configured", configured: true, reason: "Claude configured." },
+      { provider: "kimi", status: "configured", configured: true, reason: "Kimi configured." },
+    ]);
+    dbMocks.getTaskForOwner.mockResolvedValue(ownedTask);
+    wrapperMocks.executeWrapperTurn.mockResolvedValue({ route: "dual", finalAnswer: "Reviewed answer." });
+    const caller = appRouter.createCaller(createContext(42));
+
+    await caller.orchestration.submitMessage({ taskId: 77, message: "Start the task", routeMode: "auto" });
+
+    expect(dbMocks.createTurn).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 77,
+      ownerUserId: 42,
+      route: "dual",
+      state: "context_assembly",
+      errorCode: null,
+    }));
+    expect(dbMocks.appendTaskEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actor: "wrapper",
+      eventType: "route_decision",
+      status: "succeeded",
+      content: expect.stringContaining("AUTO first-message initialization"),
+    }));
+    expect(wrapperMocks.executeWrapperTurn).toHaveBeenCalledWith(expect.objectContaining({ route: "dual", userMessage: "Start the task" }));
+  });
+
+  it("blocks AUTO first-message initialization instead of degrading to one provider when either required credential is missing", async () => {
+    wrapperMocks.getWrapperRuntimeCredentialStates.mockReturnValue([
+      { provider: "claude", status: "configured", configured: true, reason: "Claude configured." },
+      { provider: "kimi", status: "missing", configured: false, reason: "Kimi missing." },
+    ]);
+    dbMocks.getTaskForOwner.mockResolvedValue(ownedTask);
+    const caller = appRouter.createCaller(createContext(42));
+
+    await caller.orchestration.submitMessage({ taskId: 77, message: "Start the task", routeMode: "auto" });
+
+    expect(dbMocks.createTurn).toHaveBeenCalledWith(expect.objectContaining({ route: "blocked", state: "blocked", errorCode: "CREDENTIALS_UNAVAILABLE" }));
+    expect(dbMocks.appendTaskEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actor: "wrapper",
+      eventType: "route_decision",
+      status: "blocked",
+      content: expect.stringContaining("requires both Claude Opus 4.7"),
+    }));
+    expect(wrapperMocks.executeWrapperTurn).not.toHaveBeenCalled();
+  });
+
   it("blocks #claude work explicitly when the required server credential is missing", async () => {
     dbMocks.getTaskForOwner.mockResolvedValue(ownedTask);
     const caller = appRouter.createCaller(createContext(42));
