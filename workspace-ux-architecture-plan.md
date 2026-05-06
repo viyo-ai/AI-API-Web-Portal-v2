@@ -156,3 +156,16 @@ The automated suite passed with `pnpm check`, focused `server/workspace.security
 | Global Memory | Empty-state UI is honest; server tests cover owner-scoped create/list/search and source-task ownership behavior. | Add a small in-workspace memory creation affordance and a visible “promote message to memory” action once product scope approves it. |
 | Task files and context | Task-scoped files panel is guarded and metadata-backed, with unsupported actions disabled unless real records exist. | Convert metadata-only file entry into a clearer guided flow: attach, preview, promote, and rollback with explicit storage provenance. |
 | Workspace layout | Three-panel task-first workspace remains readable and validates the core workshop workflow. | Continue refining density, right-panel hierarchy, and optional technical disclosures so the owner-facing thread remains the primary surface. |
+
+
+## Opencode.ai Scope Resolution
+
+The remaining Opencode.ai task-start items were reviewed against the previously ingested product-decision evidence. The current project implements **Kimi through the Cloudflare Workers AI native endpoint**, not a hidden Opencode.ai execution session. The existing source-evidence audit already identifies hidden Kimi/OpenCode execution as a larger product and architecture decision rather than a safe final-polish item. Therefore, this delivery does **not** silently add an Opencode.ai initialization path or claim hidden file-changing execution.
+
+For the current checkpoint, the accepted state is that Kimi provides routed execution-draft/code responses through Cloudflare Workers AI while task-scoped files, filesystem write helpers, and metadata records remain available as separate workspace primitives. A future Opencode.ai implementation should be treated as a new P0/P1 architecture feature with explicit approval, including task-start session lifecycle, credential boundaries, owner approval states, progress translation, file diffing, rollback, and audit logging.
+
+| Question | Resolution for This Checkpoint | Required Future Decision |
+|---|---|---|
+| Should task creation start Opencode.ai automatically? | No. Task creation remains lightweight; provider initialization occurs when the owner sends a message. | Confirm whether hidden Opencode.ai execution belongs in the next MVP phase. |
+| Is Kimi currently verified through Cloudflare Workers AI? | Yes. Browser and automated validations confirm the native Kimi route works. | Decide whether Kimi should stay native or move behind Opencode.ai for real file execution. |
+| Should this checkpoint implement hidden Opencode.ai task-start flow? | No. The existing audit classifies this as a larger architecture/product decision. | Approve an execution-session design before implementation. |

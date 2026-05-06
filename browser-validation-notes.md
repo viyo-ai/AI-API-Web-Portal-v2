@@ -105,3 +105,18 @@ Production build: Vite build and server bundle completed successfully.
 The focused workspace security suite now includes global-memory procedure coverage for owner-scoped create/list/search behavior and source-task ownership enforcement. The live browser validation already confirmed the left-panel Global Memory empty state is accessible and honest when no durable records exist.
 
 The production build completed with the existing Vite warning that the main client chunk exceeds 500 kB after minification. This is a performance follow-up rather than a functional build failure.
+
+## 2026-05-06 Post-Scope Final Validation
+
+After resolving the Opencode.ai scope-confirmation items as a documented future architecture decision rather than an implemented hidden execution feature, the project was validated again:
+
+```text
+pnpm check
+pnpm test
+pnpm build
+
+Full regression suite: 14 test files passed, 57 tests passed.
+Production build: Vite build and server bundle completed successfully.
+```
+
+The remaining Vite large-chunk warning is unchanged and remains a performance optimization follow-up, not a failing validation gate.

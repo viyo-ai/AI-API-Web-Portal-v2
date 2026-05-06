@@ -112,8 +112,8 @@
 - [x] Verify orchestration source order: user OpenAI key first, Manus Forge fallback, keyword last resort.
 - [x] Verify Claude execution path in deployed runtime and fix response parsing/credential failures.
 - [x] Verify Kimi execution through Cloudflare Workers AI native endpoint.
-- [ ] Verify Opencode.ai task-start flow if it remains part of the intended scope.
-- [ ] Implement Opencode.ai initialization/connection step at task creation if confirmed as required for current workflow.
+- [x] Verify Opencode.ai task-start flow scope: current checkpoint does not include hidden Opencode.ai task-start execution; it remains a future architecture decision pending explicit approval.
+- [x] Resolve Opencode.ai initialization/connection at task creation: not implemented in this checkpoint because current workflow intentionally initializes providers on message send and hidden Opencode.ai execution requires a separate approved architecture feature.
 - [x] Browser-test actual `#claude` and `#kimi` tag overrides in message text and record results.
 - [x] Replace remaining SYSTEM labels with provider-specific Claude/Kimi labels for generated answers and failures.
 - [x] Browser-test real planning prompt, build prompt, manual Claude route override, and manual Kimi route override after fixes.
