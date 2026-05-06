@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import React from "react";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import Home from "./Home";
@@ -12,6 +12,7 @@ const createTaskMock = vi.fn();
 const updateTaskStatusMock = vi.fn();
 const submitMessageMock = vi.fn();
 const createFileMetadataMock = vi.fn();
+const uploadWorkspaceFileMock = vi.fn();
 const credentialsRefreshMock = vi.fn();
 const filesystemTreeRefetchMock = vi.fn(async () => undefined);
 const filesystemWriteMock = vi.fn();
@@ -132,6 +133,15 @@ vi.mock("@/const", () => ({
   getLoginUrl: () => "/login",
 }));
 
+vi.mock("sonner", () => ({
+  toast: {
+    error: vi.fn(),
+    info: vi.fn(),
+    success: vi.fn(),
+    warning: vi.fn(),
+  },
+}));
+
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({
@@ -183,6 +193,7 @@ vi.mock("@/lib/trpc", () => ({
       read: { useQuery: () => ({ data: { relativePath: "README.md", content: "", exists: false }, isLoading: false }) },
       write: { useMutation: () => ({ mutate: filesystemWriteMock, isPending: false }) },
       mkdir: { useMutation: () => ({ mutate: filesystemMkdirMock, isPending: false }) },
+      upload: { useMutation: () => ({ mutateAsync: uploadWorkspaceFileMock, isPending: false }) },
     },
     credentials: {
       status: {
@@ -241,6 +252,7 @@ beforeEach(() => {
   updateTaskStatusMock.mockReset();
   submitMessageMock.mockReset();
   createFileMetadataMock.mockReset();
+  uploadWorkspaceFileMock.mockReset();
   credentialsRefreshMock.mockReset();
   filesystemTreeRefetchMock.mockReset();
   filesystemWriteMock.mockReset();
@@ -251,6 +263,13 @@ beforeEach(() => {
   updateTaskStatusMock.mockResolvedValue({ ...sampleTask, status: "archived" });
   submitMessageMock.mockResolvedValue(mockThread);
   createFileMetadataMock.mockResolvedValue(mockTaskFiles[0]);
+  uploadWorkspaceFileMock.mockResolvedValue({
+    relativePath: "uploads/1777999300000-owner-brief.txt",
+    storageKey: "task-7/uploads/owner-brief.txt",
+    storageUrl: "/manus-storage/task-7/uploads/owner-brief.txt",
+    size: 11,
+    file: { ...mockTaskFiles[0], relativePath: "uploads/owner-brief.txt", storageUrl: "/manus-storage/task-7/uploads/owner-brief.txt" },
+  });
   credentialsRefreshMock.mockResolvedValue({ runtimeStates: [] });
   filesystemTreeRefetchMock.mockResolvedValue(undefined);
   mockTasks = [sampleTask];
@@ -300,7 +319,7 @@ describe("Home v2 task-first workspace behavior", () => {
     expect((await screen.findAllByText("Implement v2 shell")).length).toBeGreaterThan(0);
     expect(screen.getByText(/Task-first production workspace/i)).toBeInTheDocument();
     expect(screen.getByText(/Center task thread/i)).toBeInTheDocument();
-    expect(screen.getByText(/Task folder/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Task folder/i).length).toBeGreaterThan(0);
     expect(screen.getByTestId("handoff-indicator")).toBeInTheDocument();
     expect(screen.getByTestId("handoff-explanation")).toBeInTheDocument();
     expect(screen.getByTestId("worker-action-log")).toBeInTheDocument();
@@ -549,6 +568,72 @@ describe("Home v2 task-first workspace behavior", () => {
       sizeBytes: 0,
       version: 1,
     });
+  });
+
+  it("wires plus and paperclip to a real upload input and stores the selected task file", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    const uploadInput = screen.getByLabelText(/upload task file/i) as HTMLInputElement;
+    const inputClickSpy = vi.spyOn(uploadInput, "click");
+
+    await user.click(screen.getByRole("button", { name: /attach file to task/i }));
+    expect(inputClickSpy).toHaveBeenCalled();
+
+    const file = new File(["Owner brief"], "owner brief.txt", { type: "text/plain" });
+    await user.upload(uploadInput, file);
+
+    await waitFor(() => expect(uploadWorkspaceFileMock).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 7,
+      mimeType: "text/plain",
+      base64Content: "T3duZXIgYnJpZWY=",
+    })));
+    expect(uploadWorkspaceFileMock.mock.calls[0][0].relativePath).toMatch(/^uploads\/\d+-owner-brief\.txt$/);
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/Uploaded owner brief\.txt to this task folder/i));
+    inputClickSpy.mockRestore();
+  });
+
+  it("uploads dropped files through the visible task-file drop zone", async () => {
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    const dropZone = screen.getByTestId("task-file-drop-zone");
+    const file = new File(["Drop payload"], "drop-note.md", { type: "text/markdown" });
+
+    fireEvent.dragOver(dropZone, { dataTransfer: { files: [file] } });
+    fireEvent.drop(dropZone, { dataTransfer: { files: [file] } });
+
+    await waitFor(() => expect(uploadWorkspaceFileMock).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 7,
+      mimeType: "text/markdown",
+      base64Content: "RHJvcCBwYXlsb2Fk",
+    })));
+    expect(uploadWorkspaceFileMock.mock.calls[0][0].relativePath).toMatch(/^uploads\/\d+-drop-note\.md$/);
+  });
+
+  it("marks smile and microphone as coming soon instead of silent decorative controls", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    await user.click(screen.getByRole("button", { name: /emoji reactions coming soon/i }));
+    expect(screen.getByRole("status")).toHaveTextContent(/emoji reactions are coming soon/i);
+
+    await user.click(screen.getByRole("button", { name: /voice input coming soon/i }));
+    expect(screen.getByRole("status")).toHaveTextContent(/voice input are coming soon/i);
+  });
+
+  it("keeps left navigation cards bounded so long task metadata cannot clip the sidebar", async () => {
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    const taskCard = screen.getByTestId("left-nav-task-card");
+    expect(taskCard).toHaveClass("max-w-full", "overflow-hidden");
+    const taskTitleButton = screen.getAllByText("Implement v2 shell").find((element) => element.closest("button"))?.closest("button");
+    expect(taskTitleButton).toHaveClass("min-w-0", "overflow-hidden");
+    expect(within(taskCard).getByText("active")).toHaveClass("max-w-[96px]", "truncate", "shrink-0");
+    expect(screen.getByRole("button", { name: /archive task implement v2 shell/i })).toHaveClass("h-8", "rounded-full");
   });
 
   it("writes and creates authenticated workspace filesystem entries from the real filesystem panel", async () => {

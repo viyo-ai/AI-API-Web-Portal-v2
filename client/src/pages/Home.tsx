@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -112,6 +113,29 @@ function readableFileKind(file: TaskFileRecord) {
   return file.mimeType ?? "File";
 }
 
+function sanitizeUploadFileName(fileName: string) {
+  return (
+    fileName
+      .trim()
+      .replace(/[/\\]+/g, "-")
+      .replace(/[^a-zA-Z0-9._ -]/g, "_")
+      .replace(/\s+/g, "-")
+      .slice(0, 140) || "uploaded-file"
+  );
+}
+
+function readFileAsBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      resolve(result.includes(",") ? result.split(",")[1] : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("The selected file could not be read."));
+    reader.readAsDataURL(file);
+  });
+}
+
 function activityStepForEvent(event: ThreadEvent) {
   const baseDescription = ownerFacingText(event.content);
   if (event.eventType === "route_decision") {
@@ -223,6 +247,9 @@ export default function Home() {
   const [fileUrl, setFileUrl] = useState("");
   const [showAdvancedTools, setShowAdvancedTools] = useState(false);
   const [showThreadDetails, setShowThreadDetails] = useState(false);
+  const [workspaceNotice, setWorkspaceNotice] = useState("");
+  const [isFileDragActive, setIsFileDragActive] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const taskListInput = useMemo(() => ({ includeArchived: false, limit: 50 }), []);
   const tasksQuery = trpc.tasks.list.useQuery(taskListInput, { enabled: isAuthenticated });
@@ -248,6 +275,7 @@ export default function Home() {
   const updateTaskStatus = trpc.tasks.updateStatus.useMutation();
   const submitMessage = trpc.orchestration.submitMessage.useMutation();
   const createFileMetadata = trpc.files.createMetadata.useMutation();
+  const uploadWorkspaceFileMutation = trpc.filesystem.upload.useMutation();
   const credentialsRefreshMutation = trpc.credentials.refresh.useMutation();
 
   const selectedThread = threadQuery.data;
@@ -293,7 +321,7 @@ export default function Home() {
       .map((event) => ({ ...activityStepForEvent(event), id: event.id, status: event.status, createdAt: event.createdAt }));
   }, [events]);
 
-  const isMutating = createTask.isPending || updateTaskStatus.isPending || submitMessage.isPending || createFileMetadata.isPending;
+  const isMutating = createTask.isPending || updateTaskStatus.isPending || submitMessage.isPending || createFileMetadata.isPending || uploadWorkspaceFileMutation.isPending;
 
   async function refreshWorkspace() {
     await Promise.all([
@@ -303,6 +331,7 @@ export default function Home() {
       utils.files.listAll.invalidate(),
       utils.memory.list.invalidate(),
       utils.credentials.status.invalidate(),
+      utils.filesystem.tree.invalidate(),
     ]);
   }
 
@@ -366,7 +395,78 @@ export default function Home() {
       sizeBytes: 0,
       version: 1,
     });
+    setWorkspaceNotice(`Connected ${filePath.trim()} to this task folder.`);
     await refreshWorkspace();
+  }
+
+  function openUploadPicker() {
+    if (!selectedTaskId) {
+      const message = "Create or select a task before uploading files.";
+      setWorkspaceNotice(message);
+      toast.warning(message);
+      return;
+    }
+    uploadInputRef.current?.click();
+  }
+
+  function showComingSoon(feature: "emoji reactions" | "voice input") {
+    const message = `${feature} are coming soon. For now, send text or upload files with the plus and paperclip buttons.`;
+    setWorkspaceNotice(message);
+    toast.info(message);
+  }
+
+  async function uploadSelectedTaskFile(file: File) {
+    const taskId = selectedTaskId;
+    if (!taskId) {
+      const message = "Create or select a task before uploading files.";
+      setWorkspaceNotice(message);
+      toast.warning(message);
+      return;
+    }
+    try {
+      const safeName = sanitizeUploadFileName(file.name);
+      const relativePath = `uploads/${Date.now()}-${safeName}`;
+      setWorkspaceNotice(`Uploading ${file.name} to this task folder...`);
+      const base64Content = await readFileAsBase64(file);
+      await uploadWorkspaceFileMutation.mutateAsync({
+        taskId,
+        relativePath,
+        base64Content,
+        mimeType: file.type || "application/octet-stream",
+      });
+      const message = `Uploaded ${file.name} to this task folder.`;
+      setWorkspaceNotice(message);
+      toast.success(message);
+      await refreshWorkspace();
+    } catch (uploadError) {
+      const message = uploadError instanceof Error ? uploadError.message : "The file could not be uploaded. Please try again.";
+      setWorkspaceNotice(message);
+      toast.error(message);
+    }
+  }
+
+  function handleUploadInputChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) void uploadSelectedTaskFile(file);
+  }
+
+  function handleFileDragOver(event: React.DragEvent<HTMLElement>) {
+    event.preventDefault();
+    if (selectedTaskId) setIsFileDragActive(true);
+  }
+
+  function handleFileDragLeave(event: React.DragEvent<HTMLElement>) {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setIsFileDragActive(false);
+    }
+  }
+
+  function handleFileDrop(event: React.DragEvent<HTMLElement>) {
+    event.preventDefault();
+    setIsFileDragActive(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file) void uploadSelectedTaskFile(file);
   }
 
   if (loading) {
@@ -430,7 +530,7 @@ export default function Home() {
   }
 
   return (
-    <main className="grid h-screen w-full min-w-0 overflow-hidden overflow-x-hidden bg-[#f7f6f2] text-[#242420] lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_390px]">
+    <main className="grid h-screen w-full min-w-0 overflow-hidden overflow-x-hidden bg-[#f7f6f2] text-[#242420] lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)_390px]">
       <aside className="flex h-screen min-h-0 min-w-0 flex-col overflow-hidden border-r border-[#d9d8d1] bg-[#f0efeb]">
         <div className="border-b border-[#d9d8d1] p-4">
           <div className="flex items-center justify-between gap-3">
@@ -468,19 +568,20 @@ export default function Home() {
               filteredTasks.map((task) => (
                 <article
                   key={task.id}
-                  className={`w-full overflow-hidden rounded-2xl border p-3 text-left transition ${selectedTaskId === task.id ? "border-sky-300 bg-white shadow-sm" : "border-transparent bg-transparent hover:bg-white/70"}`}
+                  data-testid="left-nav-task-card"
+                  className={`max-w-full overflow-hidden rounded-2xl border p-3 text-left transition ${selectedTaskId === task.id ? "border-sky-300 bg-white shadow-sm" : "border-transparent bg-transparent hover:bg-white/70"}`}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <button type="button" onClick={() => setSelectedTaskId(task.id)} className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200">
+                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                    <button type="button" onClick={() => setSelectedTaskId(task.id)} className="min-w-0 overflow-hidden text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200">
                       <p className="truncate text-sm font-semibold text-[#2c2c28]">{task.title}</p>
                     </button>
-                    <Badge variant="outline" className={`shrink-0 rounded-full text-[10px] ${statusTone[task.status] ?? statusTone.active}`}>{task.status}</Badge>
+                    <Badge variant="outline" className={`max-w-[96px] shrink-0 truncate rounded-full text-[10px] ${statusTone[task.status] ?? statusTone.active}`}>{task.status}</Badge>
                   </div>
-                  <button type="button" onClick={() => setSelectedTaskId(task.id)} className="mt-2 block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200">
+                  <button type="button" onClick={() => setSelectedTaskId(task.id)} className="mt-2 block w-full min-w-0 overflow-hidden text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200">
                     <p className="line-clamp-2 text-xs leading-5 text-[#66665f]">{ownerFacingText(task.summary) || "No summary recorded yet."}</p>
-                    <p className="mt-2 text-[11px] text-[#9a998f]">Updated {compactDate(task.updatedAt)}</p>
+                    <p className="mt-2 truncate text-[11px] text-[#9a998f]">Updated {compactDate(task.updatedAt)}</p>
                   </button>
-                  <div className="mt-3 flex justify-end">
+                  <div className="mt-3 flex min-w-0 justify-end">
                     <Button
                       type="button"
                       variant="outline"
@@ -672,12 +773,20 @@ export default function Home() {
             </div>
 
             <div className="flex items-end gap-2 rounded-[1.65rem] border border-[#d9d8d1] bg-[#fbfaf7] p-2 shadow-sm focus-within:border-sky-300 focus-within:ring-2 focus-within:ring-sky-100" data-testid="manus-style-composer">
-              <div className="hidden items-center gap-1 pb-1 sm:flex" aria-hidden="true">
-                {[Plus, Paperclip, Smile, Mic].map((Icon, index) => (
-                  <span key={index} className="flex h-8 w-8 items-center justify-center rounded-full text-[#77766e]">
-                    <Icon className="h-4 w-4" />
-                  </span>
-                ))}
+              <input ref={uploadInputRef} type="file" className="sr-only" aria-label="Upload task file" onChange={handleUploadInputChange} />
+              <div className="hidden items-center gap-1 pb-1 sm:flex">
+                <button type="button" onClick={openUploadPicker} disabled={uploadWorkspaceFileMutation.isPending} className="flex h-8 w-8 items-center justify-center rounded-full text-[#77766e] transition hover:bg-white hover:text-[#242420] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:opacity-50" aria-label="Add file to task">
+                  <Plus className="h-4 w-4" />
+                </button>
+                <button type="button" onClick={openUploadPicker} disabled={uploadWorkspaceFileMutation.isPending} className="flex h-8 w-8 items-center justify-center rounded-full text-[#77766e] transition hover:bg-white hover:text-[#242420] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:opacity-50" aria-label="Attach file to task">
+                  <Paperclip className="h-4 w-4" />
+                </button>
+                <button type="button" onClick={() => showComingSoon("emoji reactions")} className="flex h-8 w-8 items-center justify-center rounded-full text-[#77766e] transition hover:bg-white hover:text-[#242420] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200" aria-label="Emoji reactions coming soon">
+                  <Smile className="h-4 w-4" />
+                </button>
+                <button type="button" onClick={() => showComingSoon("voice input")} className="flex h-8 w-8 items-center justify-center rounded-full text-[#77766e] transition hover:bg-white hover:text-[#242420] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200" aria-label="Voice input coming soon">
+                  <Mic className="h-4 w-4" />
+                </button>
               </div>
               <Textarea
                 value={composerText}
@@ -691,6 +800,7 @@ export default function Home() {
                 {isMutating ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizontal className="h-4 w-4" />}
               </Button>
             </div>
+            {workspaceNotice ? <p className="mt-2 text-xs leading-5 text-[#66665f]" role="status" aria-live="polite">{workspaceNotice}</p> : null}
           </div>
         </footer>
       </section>
@@ -756,7 +866,14 @@ export default function Home() {
               </CardContent>
             </Card>
 
-            <Card className="border-[#deded8] bg-white text-[#242420]" data-testid="windows-file-manager">
+            <Card
+              className={`border-[#deded8] bg-white text-[#242420] transition ${isFileDragActive ? "border-sky-300 ring-2 ring-sky-100" : ""}`}
+              data-testid="windows-file-manager"
+              aria-label="Task files drop zone"
+              onDragOver={handleFileDragOver}
+              onDragLeave={handleFileDragLeave}
+              onDrop={handleFileDrop}
+            >
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base"><FolderOpen className="h-4 w-4 text-amber-600" /> Task files</CardTitle>
                 <div className="mt-2 flex items-center gap-1 rounded-xl border border-[#deded8] bg-[#fbfaf7] px-3 py-2 text-[11px] text-[#66665f]">
@@ -764,6 +881,14 @@ export default function Home() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
+                <div className={`rounded-2xl border border-dashed p-3 text-xs leading-5 transition ${isFileDragActive ? "border-sky-300 bg-sky-50 text-sky-800" : "border-[#cfcfc8] bg-[#fbfaf7] text-[#6d6d65]"}`} data-testid="task-file-drop-zone">
+                  <p className="font-semibold text-[#30302b]">Drop files here or use plus/paperclip.</p>
+                  <p className="mt-1">Uploads are stored in the selected task folder and then appear in this file list.</p>
+                  <Button type="button" variant="outline" onClick={openUploadPicker} disabled={!selectedTaskId || uploadWorkspaceFileMutation.isPending} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
+                    {uploadWorkspaceFileMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Paperclip className="mr-2 h-3.5 w-3.5" />}
+                    Upload file
+                  </Button>
+                </div>
                 {taskFiles.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">This task folder is empty. Files will appear here only after a real storage-backed file record exists.</div>
                 ) : (
@@ -798,7 +923,7 @@ export default function Home() {
                 )}
                 <div className="rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-3 text-xs leading-5 text-[#686861]">
                   <p className="font-semibold text-[#30302b]">Need to add a file?</p>
-                  <p className="mt-1">Files appear here after the app has a real stored file to show. Manual storage-link entry is kept as an advanced maintenance action so the normal folder view stays non-technical.</p>
+                  <p className="mt-1">Files now appear here after plus, paperclip, or drag-and-drop upload. Manual storage-link entry is kept as an advanced maintenance action so the normal folder view stays non-technical.</p>
                   <details className="mt-3 rounded-xl border border-[#deded8] bg-white p-3">
                     <summary className="cursor-pointer text-xs font-semibold text-[#30302b]">Advanced: connect a stored file manually</summary>
                     <div className="mt-3 space-y-2">

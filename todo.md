@@ -138,3 +138,31 @@
 - [x] Re-run validation for the corrected chat-order behavior.
 - [x] Save a managed project checkpoint after the validated chat-ordering fix.
 - [x] Report exactly what changed in the workspace UX/chat ordering and explicitly note remaining Claude-to-Kimi automation limitations.
+
+- [x] Push the current validated checkpoint to GitHub repository viyo-ai/AI-API-Web-Portal-v2.
+- [x] Verify the GitHub branch commit matches the validated local checkpoint commit.
+- [x] Report the GitHub push result, target branch, and commit hash to the user.
+
+- [x] Audit and confirm which chat composer icon buttons are non-functional, including plus, attachment, emoji, microphone, and send behavior.
+- [x] Audit and confirm the missing or broken drag-and-drop file upload behavior in the chat/workspace.
+- [x] Determine and document whether files are currently stored globally, per project, per task, or only as task references.
+- [ ] Design the requested separate global file folder in addition to the existing per-project or per-task file area.
+- [x] Explain the intended purpose, user value, and required redesign of the “What the AI is doing” section.
+- [x] Re-audit the left navigation clipping/layout issue and identify why the previous fix did not satisfy the user.
+- [x] Perform a complete Fix, Review, Fix, Review, Confirm UX audit loop before proposing implementation work.
+- [x] Produce Fortune 500-grade easy-to-use portal recommendations with prioritized fixes, acceptance criteria, and testing plan.
+
+- [x] Audit why chat composer accessory buttons appear clickable but do not perform any action.
+- [x] Audit and design a working drag-and-drop file upload experience for task files.
+- [x] Clarify and document whether files are stored globally, per authenticated user, per project, or per task.
+- [ ] Design a first-class global file folder/library in addition to per-project or per-task file folders.
+- [x] Clarify the purpose and user value of the "What the AI is doing" section.
+- [x] Audit and redesign the left navigation so it is fixed, readable, and reliable at desktop and smaller breakpoints.
+- [x] Run a complete fix-review-fix-review-confirm testing loop before marking the portal ready.
+- [x] Produce Fortune 500-grade UX recommendations before implementation.
+
+- [x] P0: Wire plus and paperclip composer controls to real task-file upload with file picker support.
+- [x] P0: Add drag-and-drop upload to the task file area with clear upload progress and error feedback.
+- [x] P0: Make smile and microphone composer controls honest by showing accessible coming-soon feedback instead of silent decorative icons.
+- [x] P0: Repair left navigation layout so task rows and archive/menu controls do not clip at the live preview viewport.
+- [x] P0: Add regression coverage for upload/drop controls, coming-soon controls, and left-navigation layout structure.

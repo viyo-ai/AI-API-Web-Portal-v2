@@ -58,13 +58,15 @@ describe("v2 task-first workspace production regressions", () => {
     const source = readProjectFile("client/src/pages/Home.tsx");
 
     expect(source).toContain("overflow-x-hidden");
-    expect(source).toContain("xl:grid-cols-[300px_minmax(0,1fr)_390px]");
+    expect(source).toContain("xl:grid-cols-[320px_minmax(0,1fr)_390px]");
     expect(source).toContain("flex h-screen min-h-0 min-w-0 flex-col overflow-hidden border-l");
     expect(source).toContain("lg:col-span-2 xl:col-span-1");
     expect(source).toContain("Task folder");
     expect(source).toContain("Advanced tools");
     expect(source).toContain("showAdvancedTools ?");
     expect(source).toContain("normal folder view stays non-technical");
+    expect(source).toContain("task-file-drop-zone");
+    expect(source).toContain("trpc.filesystem.upload.useMutation");
   });
 
   it("exposes an explicit Auto, Kimi, and Claude route selector without a hidden provider dropdown", () => {
