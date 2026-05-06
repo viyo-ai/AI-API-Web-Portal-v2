@@ -1,0 +1,4 @@
+
+## Live preview visual review — 2026-05-06
+
+The managed preview opened successfully after the global-library implementation. The left navigation remains readable and bounded in the live viewport; the task card no longer clips the archive control. The center composer still exposes the upload-affordance controls and route selector. The right panel shows the Files and Activity column with the task folder header, handoff explanation, and activity feed; the global-library sections are lower in the same right-column content and are covered by source-level and behavior regression tests. An attempted direct container scroll at the lower right did not identify a scrollable browser container at that coordinate, so automated test coverage and source-level contract checks remain the primary validation for the lower file sections.

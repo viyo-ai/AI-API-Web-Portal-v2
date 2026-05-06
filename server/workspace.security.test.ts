@@ -6,6 +6,7 @@ const dbMocks = vi.hoisted(() => ({
   createMemory: vi.fn(),
   createTask: vi.fn(),
   createTaskFile: vi.fn(),
+  createGlobalFile: vi.fn(),
   createTurn: vi.fn(),
   failTurn: vi.fn(),
   getLatestCredentialStatuses: vi.fn(),
@@ -13,6 +14,7 @@ const dbMocks = vi.hoisted(() => ({
   getTaskForOwner: vi.fn(),
   getTaskThread: vi.fn(),
   listAllFilesForOwner: vi.fn(),
+  listGlobalFilesForOwner: vi.fn(),
   listMemoryByCategory: vi.fn(),
   listTaskEvents: vi.fn(),
   listTaskFiles: vi.fn(),
@@ -115,6 +117,7 @@ describe("v2 task ownership and credential-gate security", () => {
     dbMocks.listTaskEvents.mockResolvedValue([]);
     dbMocks.listMemoryByCategory.mockResolvedValue([]);
     dbMocks.listTaskFiles.mockResolvedValue([]);
+    dbMocks.listGlobalFilesForOwner.mockResolvedValue([]);
   });
 
   it("rejects orchestration messages for tasks not owned by the authenticated user", async () => {
@@ -288,6 +291,65 @@ describe("v2 task ownership and credential-gate security", () => {
       }),
     ).rejects.toThrow("Unsafe file path");
     expect(dbMocks.createTaskFile).not.toHaveBeenCalled();
+  });
+
+  it("lists global-library files through the owner-scoped backend helper", async () => {
+    const globalFile = {
+      id: 31,
+      taskId: -42,
+      ownerUserId: 42,
+      relativePath: "global-library/brand-standard.pdf",
+      storageKey: "global-library/brand-standard.pdf",
+      storageUrl: "/manus-storage/global-library/brand-standard.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 512,
+      version: 1,
+      createdAt: 1777999100000,
+      updatedAt: 1777999100000,
+    };
+    dbMocks.listGlobalFilesForOwner.mockResolvedValueOnce([globalFile]);
+    const caller = appRouter.createCaller(createContext(42));
+
+    const result = await caller.files.listGlobal({ limit: 25 });
+
+    expect(dbMocks.listGlobalFilesForOwner).toHaveBeenCalledWith(42, 25);
+    expect(result).toEqual([globalFile]);
+  });
+
+  it("records global-library metadata without requiring or touching a selected task", async () => {
+    dbMocks.createGlobalFile.mockResolvedValueOnce({
+      id: 32,
+      taskId: -42,
+      ownerUserId: 42,
+      relativePath: "global-library/reusable-standard.md",
+      storageKey: "global-library/reusable-standard.md",
+      storageUrl: "/manus-storage/global-library/reusable-standard.md",
+      mimeType: "text/markdown",
+      sizeBytes: 64,
+      version: 1,
+      createdAt: 1777999200000,
+      updatedAt: 1777999200000,
+    });
+    const caller = appRouter.createCaller(createContext(42));
+
+    const result = await caller.files.createMetadata({
+      scope: "global",
+      relativePath: "global-library/reusable-standard.md",
+      storageKey: "global-library/reusable-standard.md",
+      storageUrl: "/manus-storage/global-library/reusable-standard.md",
+      mimeType: "text/markdown",
+      sizeBytes: 64,
+      version: 1,
+    });
+
+    expect(dbMocks.getTaskForOwner).not.toHaveBeenCalled();
+    expect(dbMocks.createGlobalFile).toHaveBeenCalledWith(expect.objectContaining({
+      ownerUserId: 42,
+      relativePath: "global-library/reusable-standard.md",
+      storageKey: "global-library/reusable-standard.md",
+    }));
+    expect(dbMocks.appendTaskEvent).not.toHaveBeenCalledWith(expect.objectContaining({ eventType: "file_event" }));
+    expect(result).toMatchObject({ id: 32, relativePath: "global-library/reusable-standard.md" });
   });
 
   it("creates task-linked global memory only after source-task ownership is verified", async () => {

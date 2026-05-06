@@ -37,6 +37,7 @@ export type TurnState =
 export type MemoryCategory = "decision" | "feature" | "research" | "past_task";
 export type CredentialProvider = "claude" | "kimi";
 export type CredentialStatus = "configured" | "missing" | "invalid" | "untested" | "error";
+export const GLOBAL_FILE_TASK_ID = 0;
 
 export function nowMs() {
   return Date.now();
@@ -413,8 +414,18 @@ export async function createTaskFile(values: Omit<InsertTaskFile, "relativePath"
     .limit(1);
 
   if (!result[0]) throw new Error("Failed to create task file metadata");
-  await touchTask(values.taskId, values.ownerUserId);
+  if (values.taskId !== GLOBAL_FILE_TASK_ID) {
+    await touchTask(values.taskId, values.ownerUserId);
+  }
   return result[0];
+}
+
+export async function createGlobalFile(values: Omit<InsertTaskFile, "taskId" | "relativePath" | "createdAt" | "updatedAt"> & { relativePath: string; createdAt?: number; updatedAt?: number }) {
+  return createTaskFile({
+    ...values,
+    taskId: GLOBAL_FILE_TASK_ID,
+    relativePath: assertSafeRelativePath(values.relativePath),
+  });
 }
 
 export async function listTaskFiles(taskId: number, ownerUserId: number, limit = 200) {
@@ -425,6 +436,18 @@ export async function listTaskFiles(taskId: number, ownerUserId: number, limit =
     .select()
     .from(taskFiles)
     .where(and(eq(taskFiles.taskId, taskId), eq(taskFiles.ownerUserId, ownerUserId)))
+    .orderBy(desc(taskFiles.updatedAt))
+    .limit(limit);
+}
+
+export async function listGlobalFilesForOwner(ownerUserId: number, limit = 200) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for task files");
+
+  return db
+    .select()
+    .from(taskFiles)
+    .where(and(eq(taskFiles.ownerUserId, ownerUserId), eq(taskFiles.taskId, GLOBAL_FILE_TASK_ID)))
     .orderBy(desc(taskFiles.updatedAt))
     .limit(limit);
 }

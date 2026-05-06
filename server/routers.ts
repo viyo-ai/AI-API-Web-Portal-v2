@@ -6,6 +6,7 @@ import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
   appendTaskEvent,
   assertSafeRelativePath,
+  createGlobalFile,
   createMemory,
   createTask,
   createTaskFile,
@@ -18,6 +19,7 @@ import {
   getTaskThread,
   getTaskFileForOwner,
   listAllFilesForOwner,
+  listGlobalFilesForOwner,
   listMemoryByCategory,
   listTaskEvents,
   listTaskFiles,
@@ -427,10 +429,16 @@ export const appRouter = router({
       .query(async ({ ctx, input }) => {
         return listAllFilesForOwner(ctx.user.id, input?.limit ?? 400);
       }),
+    listGlobal: protectedProcedure
+      .input(z.object({ limit: z.number().int().min(1).max(400).default(200) }).optional())
+      .query(async ({ ctx, input }) => {
+        return listGlobalFilesForOwner(ctx.user.id, input?.limit ?? 200);
+      }),
     createMetadata: protectedProcedure
       .input(
         z.object({
-          taskId: z.number().int().positive(),
+          taskId: z.number().int().positive().optional(),
+          scope: z.enum(["task", "global"]).default("task"),
           relativePath: z.string().trim().min(1).max(1024),
           storageKey: z.string().trim().min(1).max(2048),
           storageUrl: z.string().trim().min(1).max(2048),
@@ -440,8 +448,20 @@ export const appRouter = router({
         }),
       )
       .mutation(async ({ ctx, input }) => {
-        await requireOwnedTask(input.taskId, ctx.user.id);
         const relativePath = assertSafeRelativePath(input.relativePath);
+        if (input.scope === "global") {
+          return createGlobalFile({
+            ownerUserId: ctx.user.id,
+            relativePath,
+            storageKey: input.storageKey,
+            storageUrl: input.storageUrl,
+            mimeType: input.mimeType ?? null,
+            sizeBytes: input.sizeBytes,
+            version: input.version,
+          });
+        }
+        if (!input.taskId) throw new Error("taskId is required when recording task file metadata");
+        await requireOwnedTask(input.taskId, ctx.user.id);
         const file = await createTaskFile({
           taskId: input.taskId,
           ownerUserId: ctx.user.id,
@@ -549,22 +569,37 @@ export const appRouter = router({
       .input(
         z.object({
           taskId: z.number().int().positive().nullable().optional(),
+          scope: z.enum(["task", "global"]).default("task"),
           relativePath: z.string().trim().min(1).max(1024),
           base64Content: z.string().min(1),
           mimeType: z.string().trim().max(160).optional(),
         }),
       )
       .mutation(async ({ ctx, input }) => {
+        const isGlobalUpload = input.scope === "global";
+        if (!isGlobalUpload && !input.taskId) throw new Error("Select a task before uploading to a task folder");
         if (input.taskId) await requireOwnedTask(input.taskId, ctx.user.id);
         const rootPath = await getUserWorkspaceRoot(ctx.user.id);
         const uploaded = await uploadWorkspaceFile({
           rootPath,
-          workspaceId: input.taskId ?? 0,
+          workspaceId: isGlobalUpload ? 0 : input.taskId ?? 0,
           ownerUserId: ctx.user.id,
           relativePath: input.relativePath,
           base64Content: input.base64Content,
           mimeType: input.mimeType,
         });
+        if (isGlobalUpload) {
+          const file = await createGlobalFile({
+            ownerUserId: ctx.user.id,
+            relativePath: uploaded.relativePath,
+            storageKey: uploaded.storageKey,
+            storageUrl: uploaded.storageUrl,
+            mimeType: input.mimeType ?? null,
+            sizeBytes: uploaded.size,
+            version: 1,
+          });
+          return { ...uploaded, file };
+        }
         if (input.taskId) {
           const file = await createTaskFile({
             taskId: input.taskId,

@@ -146,7 +146,7 @@
 - [x] Audit and confirm which chat composer icon buttons are non-functional, including plus, attachment, emoji, microphone, and send behavior.
 - [x] Audit and confirm the missing or broken drag-and-drop file upload behavior in the chat/workspace.
 - [x] Determine and document whether files are currently stored globally, per project, per task, or only as task references.
-- [ ] Design the requested separate global file folder in addition to the existing per-project or per-task file area.
+- [x] Design the requested separate global file folder in addition to the existing per-project or per-task file area.
 - [x] Explain the intended purpose, user value, and required redesign of the “What the AI is doing” section.
 - [x] Re-audit the left navigation clipping/layout issue and identify why the previous fix did not satisfy the user.
 - [x] Perform a complete Fix, Review, Fix, Review, Confirm UX audit loop before proposing implementation work.
@@ -155,7 +155,11 @@
 - [x] Audit why chat composer accessory buttons appear clickable but do not perform any action.
 - [x] Audit and design a working drag-and-drop file upload experience for task files.
 - [x] Clarify and document whether files are stored globally, per authenticated user, per project, or per task.
-- [ ] Design a first-class global file folder/library in addition to per-project or per-task file folders.
+- [x] Design a first-class global file folder/library in addition to per-project or per-task file folders.
+- [x] Implement owner-scoped global file library API and upload path separate from selected task-file uploads.
+- [x] Add visible global-library UI with separate upload and drag-and-drop affordances beside task folders.
+- [x] Add regression coverage for global-library listing, selected upload, dropped upload, API scope, and source-level UX contracts.
+- [x] Validate global-library implementation with focused tests, full test suite, TypeScript check, production build, and managed preview health check.
 - [x] Clarify the purpose and user value of the "What the AI is doing" section.
 - [x] Audit and redesign the left navigation so it is fixed, readable, and reliable at desktop and smaller breakpoints.
 - [x] Run a complete fix-review-fix-review-confirm testing loop before marking the portal ready.

@@ -18,6 +18,7 @@ describe("v2 task-first workspace production regressions", () => {
     expect(source).toContain("Center task thread");
     expect(source).toContain("Files and activity");
     expect(source).toContain("Task folder");
+    expect(source).toContain("Global file library");
     expect(source).toContain("All recorded files");
     expect(source).toContain("bg-[#f7f6f2]");
   });
@@ -66,6 +67,8 @@ describe("v2 task-first workspace production regressions", () => {
     expect(source).toContain("showAdvancedTools ?");
     expect(source).toContain("normal folder view stays non-technical");
     expect(source).toContain("task-file-drop-zone");
+    expect(source).toContain("global-file-drop-zone");
+    expect(source).toContain("Upload to global library");
     expect(source).toContain("trpc.filesystem.upload.useMutation");
   });
 
@@ -89,6 +92,7 @@ describe("v2 task-first workspace production regressions", () => {
     expect(source).toContain("trpc.tasks.thread.useQuery");
     expect(source).toContain("trpc.orchestration.submitMessage.useMutation");
     expect(source).toContain("trpc.files.listForTask.useQuery");
+    expect(source).toContain("trpc.files.listGlobal.useQuery");
     expect(source).toContain("trpc.files.listAll.useQuery");
     expect(source).toContain("trpc.memory.list.useQuery");
     expect(source).toContain("trpc.credentials.status.useQuery");
@@ -110,6 +114,8 @@ describe("v2 task-first workspace production regressions", () => {
     expect(source).toContain("refresh: protectedProcedure");
     expect(source).toContain("files: router");
     expect(source).toContain("filesystem: router");
+    expect(source).toContain("listGlobal: protectedProcedure");
+    expect(source).toContain("scope: z.enum([\"task\", \"global\"])");
     expect(source).toContain("memory: router");
     expect(source).toContain("CREDENTIALS_UNAVAILABLE");
     expect(source).not.toContain("command: router");
@@ -122,6 +128,7 @@ describe("v2 task-first workspace production regressions", () => {
     expect(source).toContain("No live tasks yet");
     expect(source).toContain("Durable memory is empty");
     expect(source).toContain("This task folder is empty. Files will appear here only after a real storage-backed file record exists.");
+    expect(source).toContain("The global library is empty");
     expect(source).toContain("The all-files index is empty");
     expect(source).toContain("only after a real storage-backed file record exists");
     expect(source).not.toMatch(/demo task|sample task|placeholder task|fake task/i);

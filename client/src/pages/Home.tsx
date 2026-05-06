@@ -249,7 +249,10 @@ export default function Home() {
   const [showThreadDetails, setShowThreadDetails] = useState(false);
   const [workspaceNotice, setWorkspaceNotice] = useState("");
   const [isFileDragActive, setIsFileDragActive] = useState(false);
+  const [isGlobalFileDragActive, setIsGlobalFileDragActive] = useState(false);
+  const [uploadScope, setUploadScope] = useState<"task" | "global">("task");
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const globalUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const taskListInput = useMemo(() => ({ includeArchived: false, limit: 50 }), []);
   const tasksQuery = trpc.tasks.list.useQuery(taskListInput, { enabled: isAuthenticated });
@@ -267,6 +270,8 @@ export default function Home() {
   const taskFilesQuery = trpc.files.listForTask.useQuery(filesInput, { enabled: isAuthenticated && Boolean(selectedTaskId) });
   const allFilesInput = useMemo(() => ({ limit: 400 }), []);
   const allFilesQuery = trpc.files.listAll.useQuery(allFilesInput, { enabled: isAuthenticated });
+  const globalFilesInput = useMemo(() => ({ limit: 200 }), []);
+  const globalFilesQuery = trpc.files.listGlobal.useQuery(globalFilesInput, { enabled: isAuthenticated });
   const memoryInput = useMemo(() => ({ limit: 40 }), []);
   const memoryQuery = trpc.memory.list.useQuery(memoryInput, { enabled: isAuthenticated });
   const credentialsQuery = trpc.credentials.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 15000 });
@@ -287,6 +292,7 @@ export default function Home() {
   const providerFailureCopy = ownerProviderFailureMessage(latestProviderFailure);
   const taskFiles = (taskFilesQuery.data ?? []) as TaskFileRecord[];
   const allFiles = (allFilesQuery.data ?? []) as TaskFileRecord[];
+  const globalFiles = (globalFilesQuery.data ?? []) as TaskFileRecord[];
   const memories = memoryQuery.data ?? [];
   const credentials = credentialsQuery.data?.runtimeStates ?? [];
 
@@ -329,6 +335,7 @@ export default function Home() {
       utils.tasks.thread.invalidate(),
       utils.files.listForTask.invalidate(),
       utils.files.listAll.invalidate(),
+      utils.files.listGlobal.invalidate(),
       utils.memory.list.invalidate(),
       utils.credentials.status.invalidate(),
       utils.filesystem.tree.invalidate(),
@@ -399,11 +406,16 @@ export default function Home() {
     await refreshWorkspace();
   }
 
-  function openUploadPicker() {
-    if (!selectedTaskId) {
+  function openUploadPicker(scope: "task" | "global" = "task") {
+    if (scope === "task" && !selectedTaskId) {
       const message = "Create or select a task before uploading files.";
       setWorkspaceNotice(message);
       toast.warning(message);
+      return;
+    }
+    setUploadScope(scope);
+    if (scope === "global") {
+      globalUploadInputRef.current?.click();
       return;
     }
     uploadInputRef.current?.click();
@@ -415,9 +427,9 @@ export default function Home() {
     toast.info(message);
   }
 
-  async function uploadSelectedTaskFile(file: File) {
+  async function uploadSelectedFile(file: File, scope: "task" | "global") {
     const taskId = selectedTaskId;
-    if (!taskId) {
+    if (scope === "task" && !taskId) {
       const message = "Create or select a task before uploading files.";
       setWorkspaceNotice(message);
       toast.warning(message);
@@ -425,16 +437,19 @@ export default function Home() {
     }
     try {
       const safeName = sanitizeUploadFileName(file.name);
-      const relativePath = `uploads/${Date.now()}-${safeName}`;
-      setWorkspaceNotice(`Uploading ${file.name} to this task folder...`);
+      const prefix = scope === "global" ? "global-library" : "uploads";
+      const relativePath = `${prefix}/${Date.now()}-${safeName}`;
+      const destination = scope === "global" ? "global file library" : "this task folder";
+      setWorkspaceNotice(`Uploading ${file.name} to ${destination}...`);
       const base64Content = await readFileAsBase64(file);
       await uploadWorkspaceFileMutation.mutateAsync({
-        taskId,
+        taskId: scope === "global" ? null : taskId,
+        scope,
         relativePath,
         base64Content,
         mimeType: file.type || "application/octet-stream",
       });
-      const message = `Uploaded ${file.name} to this task folder.`;
+      const message = `Uploaded ${file.name} to ${destination}.`;
       setWorkspaceNotice(message);
       toast.success(message);
       await refreshWorkspace();
@@ -445,10 +460,24 @@ export default function Home() {
     }
   }
 
+  async function uploadSelectedTaskFile(file: File) {
+    await uploadSelectedFile(file, "task");
+  }
+
+  async function uploadSelectedGlobalFile(file: File) {
+    await uploadSelectedFile(file, "global");
+  }
+
   function handleUploadInputChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (file) void uploadSelectedTaskFile(file);
+    if (file) void uploadSelectedFile(file, uploadScope);
+  }
+
+  function handleGlobalUploadInputChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) void uploadSelectedGlobalFile(file);
   }
 
   function handleFileDragOver(event: React.DragEvent<HTMLElement>) {
@@ -467,6 +496,24 @@ export default function Home() {
     setIsFileDragActive(false);
     const file = event.dataTransfer.files?.[0];
     if (file) void uploadSelectedTaskFile(file);
+  }
+
+  function handleGlobalFileDragOver(event: React.DragEvent<HTMLElement>) {
+    event.preventDefault();
+    setIsGlobalFileDragActive(true);
+  }
+
+  function handleGlobalFileDragLeave(event: React.DragEvent<HTMLElement>) {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setIsGlobalFileDragActive(false);
+    }
+  }
+
+  function handleGlobalFileDrop(event: React.DragEvent<HTMLElement>) {
+    event.preventDefault();
+    setIsGlobalFileDragActive(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file) void uploadSelectedGlobalFile(file);
   }
 
   if (loading) {
@@ -774,11 +821,12 @@ export default function Home() {
 
             <div className="flex items-end gap-2 rounded-[1.65rem] border border-[#d9d8d1] bg-[#fbfaf7] p-2 shadow-sm focus-within:border-sky-300 focus-within:ring-2 focus-within:ring-sky-100" data-testid="manus-style-composer">
               <input ref={uploadInputRef} type="file" className="sr-only" aria-label="Upload task file" onChange={handleUploadInputChange} />
+              <input ref={globalUploadInputRef} type="file" className="sr-only" aria-label="Upload global library file" onChange={handleGlobalUploadInputChange} />
               <div className="hidden items-center gap-1 pb-1 sm:flex">
-                <button type="button" onClick={openUploadPicker} disabled={uploadWorkspaceFileMutation.isPending} className="flex h-8 w-8 items-center justify-center rounded-full text-[#77766e] transition hover:bg-white hover:text-[#242420] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:opacity-50" aria-label="Add file to task">
+                <button type="button" onClick={() => openUploadPicker("task")} disabled={uploadWorkspaceFileMutation.isPending} className="flex h-8 w-8 items-center justify-center rounded-full text-[#77766e] transition hover:bg-white hover:text-[#242420] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:opacity-50" aria-label="Add file to task">
                   <Plus className="h-4 w-4" />
                 </button>
-                <button type="button" onClick={openUploadPicker} disabled={uploadWorkspaceFileMutation.isPending} className="flex h-8 w-8 items-center justify-center rounded-full text-[#77766e] transition hover:bg-white hover:text-[#242420] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:opacity-50" aria-label="Attach file to task">
+                <button type="button" onClick={() => openUploadPicker("task")} disabled={uploadWorkspaceFileMutation.isPending} className="flex h-8 w-8 items-center justify-center rounded-full text-[#77766e] transition hover:bg-white hover:text-[#242420] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:opacity-50" aria-label="Attach file to task">
                   <Paperclip className="h-4 w-4" />
                 </button>
                 <button type="button" onClick={() => showComingSoon("emoji reactions")} className="flex h-8 w-8 items-center justify-center rounded-full text-[#77766e] transition hover:bg-white hover:text-[#242420] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200" aria-label="Emoji reactions coming soon">
@@ -884,7 +932,7 @@ export default function Home() {
                 <div className={`rounded-2xl border border-dashed p-3 text-xs leading-5 transition ${isFileDragActive ? "border-sky-300 bg-sky-50 text-sky-800" : "border-[#cfcfc8] bg-[#fbfaf7] text-[#6d6d65]"}`} data-testid="task-file-drop-zone">
                   <p className="font-semibold text-[#30302b]">Drop files here or use plus/paperclip.</p>
                   <p className="mt-1">Uploads are stored in the selected task folder and then appear in this file list.</p>
-                  <Button type="button" variant="outline" onClick={openUploadPicker} disabled={!selectedTaskId || uploadWorkspaceFileMutation.isPending} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
+                  <Button type="button" variant="outline" onClick={() => openUploadPicker("task")} disabled={!selectedTaskId || uploadWorkspaceFileMutation.isPending} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
                     {uploadWorkspaceFileMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Paperclip className="mr-2 h-3.5 w-3.5" />}
                     Upload file
                   </Button>
@@ -939,6 +987,46 @@ export default function Home() {
               </CardContent>
             </Card>
 
+            <Card
+              className={`border-[#deded8] bg-white text-[#242420] transition ${isGlobalFileDragActive ? "border-emerald-300 ring-2 ring-emerald-100" : ""}`}
+              data-testid="global-file-library"
+              aria-label="Global file library drop zone"
+              onDragOver={handleGlobalFileDragOver}
+              onDragLeave={handleGlobalFileDragLeave}
+              onDrop={handleGlobalFileDrop}
+            >
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base"><Archive className="h-4 w-4 text-emerald-600" /> Global file library</CardTitle>
+                <div className="mt-2 flex items-center gap-1 rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-[11px] text-emerald-800">
+                  <Folder className="h-3.5 w-3.5 text-emerald-600" /> Global <span>/</span> Shared files
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className={`rounded-2xl border border-dashed p-3 text-xs leading-5 transition ${isGlobalFileDragActive ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-[#cfcfc8] bg-[#fbfaf7] text-[#6d6d65]"}`} data-testid="global-file-drop-zone">
+                  <p className="font-semibold text-[#30302b]">Drop reusable files here or choose upload.</p>
+                  <p className="mt-1">Global library files are owner-scoped and available outside a single task thread. Use task files for task-specific working material.</p>
+                  <Button type="button" variant="outline" onClick={() => openUploadPicker("global")} disabled={uploadWorkspaceFileMutation.isPending} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
+                    {uploadWorkspaceFileMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Paperclip className="mr-2 h-3.5 w-3.5" />}
+                    Upload to global library
+                  </Button>
+                </div>
+                {globalFiles.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">The global library is empty. Add reusable briefs, standards, screenshots, or references here when they should not belong to only one task.</div>
+                ) : (
+                  <div className="space-y-2 rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-2">
+                    {globalFiles.slice(0, 12).map((file) => (
+                      <a key={file.id} href={file.storageUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-xl bg-white/80 px-3 py-2 text-xs text-[#4d4d46] hover:bg-emerald-50" aria-label={`Open or download global file ${file.relativePath}`}>
+                        <File className="h-4 w-4 text-emerald-600" />
+                        <span className="min-w-0 flex-1 truncate">{fileNameFromPath(file.relativePath)}</span>
+                        <span className="hidden text-[10px] text-[#8a8980] sm:inline">{readableFileKind(file)}</span>
+                        <Download className="h-3.5 w-3.5 text-[#8a8980]" />
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             <Card className="border-[#deded8] bg-white text-[#242420]">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4 text-stone-600" /> Advanced tools</CardTitle>
@@ -964,12 +1052,12 @@ export default function Home() {
               </CardHeader>
               <CardContent className="space-y-2">
                 {allFiles.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">The all-files index is empty because no real task files have been recorded yet.</div>
+                  <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">The all-files index is empty because no real task or global files have been recorded yet.</div>
                 ) : (
                   allFiles.slice(0, 10).map((file) => (
                     <a key={file.id} href={file.storageUrl} target="_blank" rel="noreferrer" className="block rounded-xl border border-[#deded8] bg-[#fbfaf7] p-2 text-xs text-[#5d5d55] hover:border-sky-200" aria-label={`Open or download ${file.relativePath}`}>
                       <span className="font-semibold text-[#30302b]">{file.relativePath}</span>
-                      <p className="mt-1 text-[#77766e]">Task #{file.taskId ?? "unknown"} · {compactDate(file.createdAt)}</p>
+                      <p className="mt-1 text-[#77766e]">{file.taskId === 0 ? "Global library" : `Task #${file.taskId ?? "unknown"}`} · {compactDate(file.createdAt)}</p>
                       <p className="mt-1 flex items-center gap-1 text-[#77766e]"><Download className="h-3 w-3" /> Open or download from the recorded storage link.</p>
                     </a>
                   ))
