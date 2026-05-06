@@ -18,7 +18,7 @@
 - [x] Run the Vitest regression suite with `pnpm test`.
 - [x] Run the production build with `pnpm build`.
 - [x] Validate browser rendering for landing, auth-gated workspace behavior, provider-status UI, and core workspace layout.
-- [ ] Create the final managed project checkpoint after all requested work and verification gates pass.
+- [x] Create the final managed project checkpoint after all requested work and verification gates pass.
 - [x] Update Claude credential gate to ignore `ANTHROPIC_API_KEY` and use `CLAUDE_API_KEY` only, while preserving explicit missing-credential UI feedback.
 - [x] Keep provider credential entry in server-side project secrets rather than public web-app form fields.
 - [x] Fix or validate node-pty native loading so the terminal panel can import `node-pty`, then validate terminal WebSocket behavior where authentication access permits.
