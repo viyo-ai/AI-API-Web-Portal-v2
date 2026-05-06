@@ -197,3 +197,6 @@
 - [x] Rename “What the AI is doing” to “AI Activity” and keep technical events behind a details disclosure.
 - [x] Add schema, router ownership, and UI tests for Global Files and AI Activity behavior.
 - [x] Run TypeScript, unit tests, and production build validation.
+
+- [ ] Push the validated P1 Global Files and AI Activity implementation to GitHub and record branch/commit evidence.
+- [ ] Verify whether the rest of the AI Coding Workshop Portal Fortune 500 UX Audit and Fix Recommendations are fully implemented, with exact implemented/gap evidence.
