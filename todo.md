@@ -175,3 +175,5 @@
 - [x] Update the Claude provider invocation path so adaptive thinking is enabled every time Claude Opus 4.7 is invoked.
 - [x] Add regression tests proving all Claude Opus 4.7 calls include adaptive-thinking configuration.
 - [x] Run validation gates for the adaptive-thinking change, save a checkpoint, and report the exact implementation result.
+
+- [x] Run a live end-to-end portal/provider testing loop proving an actual Claude Opus 4.7 invocation uses adaptive thinking, then checkpoint and report the evidence.

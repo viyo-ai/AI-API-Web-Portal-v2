@@ -1,0 +1,95 @@
+{
+  "startedAt": "2026-05-06T15:59:21.311Z",
+  "finishedAt": "2026-05-06T15:59:35.946Z",
+  "validation": {
+    "passed": true,
+    "expectedModel": "claude-opus-4-7",
+    "expectedThinking": {
+      "type": "adaptive"
+    },
+    "capturedAnthropicCallCount": 1,
+    "adaptiveThinkingCallCount": 1,
+    "submitError": null
+  },
+  "task": {
+    "id": 30001,
+    "title": "LIVE Claude adaptive-thinking validation 2026-05-06T15:59:21.311Z",
+    "ownerUserId": 1,
+    "finalStatus": "active",
+    "routeMode": "claude"
+  },
+  "capturedAnthropicCalls": [
+    {
+      "timestamp": "2026-05-06T15:59:21.719Z",
+      "url": "https://api.anthropic.com/v1/messages",
+      "model": "claude-opus-4-7",
+      "maxTokens": 4096,
+      "thinking": {
+        "type": "adaptive"
+      },
+      "messageCount": 1,
+      "hasSystemPrompt": true,
+      "hasApiKeyHeader": true,
+      "responseStatus": 200,
+      "responseOk": true
+    }
+  ],
+  "eventEvidence": [
+    {
+      "id": 30014,
+      "actor": "system",
+      "eventType": "status",
+      "status": "informational",
+      "contentPreview": "Task record created. Claude Opus 4.7 and Kimi K2.6 are initialized only when the first task message is submitted through the AI coordinator.",
+      "metadataJson": "{\n  \"routeMode\": \"claude\"\n}"
+    },
+    {
+      "id": 30015,
+      "actor": "user",
+      "eventType": "message",
+      "status": "succeeded",
+      "contentPreview": "Live validation only: reply with one short sentence confirming you received this adaptive-thinking provider-path test.",
+      "metadataJson": "{\n  \"requestedRoute\": \"claude\",\n  \"forcedByTag\": \"#claude\"\n}"
+    },
+    {
+      "id": 30016,
+      "actor": "wrapper",
+      "eventType": "route_decision",
+      "status": "succeeded",
+      "contentPreview": "Route CLAUDE is credential-ready.",
+      "metadataJson": "{\n  \"requestedRoute\": \"claude\",\n  \"effectiveRoute\": \"claude\",\n  \"forcedByTag\": \"#claude\",\n  \"credentialStates\": [\n    {\n      \"provider\": \"claude\",\n      \"status\": \"configured\",\n      \"configured\": true,\n      \"reason\": \"Claude server credential is configured.\"\n    },\n    {\n      \"provider\": \"kimi\",\n      \"status\": \"configured\",\n      \"configured\": true,\n      \"reason\": \"Cloudflare Workers AI credentials are configured for Kimi.\"\n    }\n  ],\n  \"isRunnable\": true,\n  \"reason\": \"Route CLAUDE is credential-ready.\"\n}"
+    },
+    {
+      "id": 30017,
+      "actor": "wrapper",
+      "eventType": "context_snapshot",
+      "status": "succeeded",
+      "contentPreview": "Wrapper LLM assembled task thread, global memory, task file metadata, route, and credential context for this turn.",
+      "metadataJson": "{\n  \"turnId\": 30002,\n  \"route\": \"claude\",\n  \"context\": {\n    \"task\": {\n      \"id\": 30001,\n      \"title\": \"LIVE Claude adaptive-thinking validation 2026-05-06T15:59:21.311Z\",\n      \"summary\": \"One-off validation that the real portal orchestration path sends Claude Opus 4.7 requests with Anthropic adaptive thinking enabled.\",\n      \"routeMode\": \"claude\",\n      \"status\": \"active\"\n    },\n    \"userMessage\": \"Live validation only: reply with one short sentence confirming you received this adaptive-thinking provider-path test.\",\n    \"credentialStates\": [\n      {\n        \"provider\": \"claude\",\n        \"status\": \"configured\",\n        \"configured\": true,\n        \"reason\": \"Claude server credential is configured.\"\n      },\n      {\n        \"provider\": \"kimi\",\n        \"status\": \"configured\",\n        \"configured\": true,\n        \"reason\": \"Cloudflare Workers AI credentials are configured for Kimi.\"\n      }\n    ],\n    \"recentEvents\": [\n      {\n        \"actor\": \"wrapper\",\n        \"eventType\": \"route_decision\",\n        \"status\": \"succeeded\",\n        \"content\": \"Route CLAUDE is credential-ready.\"\n      },\n      {\n        \"actor\": \"user\",\n        \"eventType\": \"message\",\n        \"status\": \"succeeded\",\n        \"content\": \"Live validation only: reply with one short sentence confirming you received this adaptive-thinking provider-path test.\"\n      },\n      {\n        \"actor\": \"system\",\n        \"eventType\": \"status\",\n        \"status\": \"informational\",\n        \"content\": \"Task record created. Claude Opus 4.7 and Kimi K2.6 are initialized only when the first task message is submitted through the AI coordinator.\"\n      }\n    ],\n    \"memory\": [],\n    \"files\": []\n  }\n}"
+    },
+    {
+      "id": 30018,
+      "actor": "wrapper",
+      "eventType": "model_start",
+      "status": "running",
+      "contentPreview": "First typed message is initializing Claude Opus 4.7 via the Claude API. Task creation alone does not call providers.",
+      "metadataJson": "{\n  \"turnId\": 30002,\n  \"route\": \"claude\",\n  \"claudeModel\": \"claude-opus-4-7\",\n  \"kimiModel\": \"@cf/moonshotai/kimi-k2.6\"\n}"
+    },
+    {
+      "id": 30019,
+      "actor": "claude",
+      "eventType": "model_result",
+      "status": "succeeded",
+      "contentPreview": "## Execution Plan\n\n**Objective**: Confirm receipt of the live adaptive-thinking provider-path validation with a single short sentence.\n\n**Classification**: Validation ping — no execution work, no Kimi handoff required.\n\n### Steps\n1. Acknowledge receipt in one short sentence on the Claude route.\n2. No file, deployment, or external action is involved.\n\n### Risks\n- **Overreach**: Padding the reply with extra commentary would defeat the validation. Keep to one sentence.\n- **False claims**: Do not as",
+      "metadataJson": "{\n  \"turnId\": 30002,\n  \"model\": \"claude-opus-4-7\",\n  \"role\": \"planner\"\n}"
+    },
+    {
+      "id": 30020,
+      "actor": "wrapper",
+      "eventType": "status",
+      "status": "succeeded",
+      "contentPreview": "Wrapper LLM completed the turn and persisted the model output into the task timeline.",
+      "metadataJson": "{\n  \"turnId\": 30002,\n  \"route\": \"claude\"\n}"
+    }
+  ]
+}
