@@ -1,5 +1,27 @@
 {
   "version": "7",
   "dialect": "mysql",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1777988956977,
+      "tag": "0000_past_morlocks",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1777989492804,
+      "tag": "0001_public_microchip",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1778009283019,
+      "tag": "0002_unusual_magneto",
+      "breakpoints": true
+    }
+  ]
 }

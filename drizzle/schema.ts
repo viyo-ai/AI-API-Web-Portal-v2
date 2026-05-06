@@ -1,17 +1,14 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { bigint, index, int, longtext, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 /**
- * Core user table backing auth flow.
- * Extend this file with additional tables as your product grows.
- * Columns use camelCase to match both database fields and generated types.
+ * Core user table backing the Manus OAuth flow.
+ *
+ * This table is intentionally preserved from the template so the existing auth
+ * context can continue to provide ctx.user.id, ctx.user.openId, and ctx.user.role
+ * to every protected v2 procedure.
  */
 export const users = mysqlTable("users", {
-  /**
-   * Surrogate primary key. Auto-incremented numeric value managed by the database.
-   * Use this for relations between tables.
-   */
   id: int("id").autoincrement().primaryKey(),
-  /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. */
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
@@ -22,7 +19,162 @@ export const users = mysqlTable("users", {
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
+export const tasks = mysqlTable(
+  "tasks",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerUserId: int("ownerUserId").notNull(),
+    title: varchar("title", { length: 220 }).notNull(),
+    summary: longtext("summary"),
+    status: mysqlEnum("status", ["active", "waiting", "blocked", "completed", "archived", "error"]).default("active").notNull(),
+    routeMode: mysqlEnum("routeMode", ["auto", "claude", "kimi", "dual"]).default("auto").notNull(),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+    updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
+    lastActivityAt: bigint("lastActivityAt", { mode: "number" }).notNull(),
+    archivedAt: bigint("archivedAt", { mode: "number" }),
+  },
+  (table) => ({
+    ownerStatusIdx: index("tasks_owner_status_idx").on(table.ownerUserId, table.status),
+    ownerActivityIdx: index("tasks_owner_activity_idx").on(table.ownerUserId, table.lastActivityAt),
+  }),
+);
+
+export const taskEvents = mysqlTable(
+  "task_events",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    taskId: int("taskId").notNull(),
+    ownerUserId: int("ownerUserId").notNull(),
+    actor: mysqlEnum("actor", ["user", "claude", "kimi", "wrapper", "system", "tool"]).notNull(),
+    eventType: mysqlEnum("eventType", [
+      "message",
+      "route_decision",
+      "credential_status",
+      "context_snapshot",
+      "model_start",
+      "model_delta",
+      "model_result",
+      "model_review",
+      "file_event",
+      "memory_event",
+      "blocked",
+      "error",
+      "status",
+    ])
+      .default("message")
+      .notNull(),
+    status: mysqlEnum("status", ["queued", "running", "succeeded", "blocked", "failed", "informational"]).default("informational").notNull(),
+    content: longtext("content").notNull(),
+    metadataJson: longtext("metadataJson"),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+  },
+  (table) => ({
+    taskCreatedIdx: index("task_events_task_created_idx").on(table.taskId, table.createdAt),
+    ownerCreatedIdx: index("task_events_owner_created_idx").on(table.ownerUserId, table.createdAt),
+  }),
+);
+
+export const orchestrationTurns = mysqlTable(
+  "orchestration_turns",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    taskId: int("taskId").notNull(),
+    ownerUserId: int("ownerUserId").notNull(),
+    route: mysqlEnum("route", ["auto", "claude", "kimi", "dual", "blocked"]).default("auto").notNull(),
+    state: mysqlEnum("state", [
+      "received",
+      "routing",
+      "credential_check",
+      "context_assembly",
+      "model_calling",
+      "model_review",
+      "persisting_output",
+      "completed",
+      "blocked",
+      "failed",
+    ])
+      .default("received")
+      .notNull(),
+    credentialStateJson: longtext("credentialStateJson"),
+    startedAt: bigint("startedAt", { mode: "number" }).notNull(),
+    completedAt: bigint("completedAt", { mode: "number" }),
+    errorCode: varchar("errorCode", { length: 96 }),
+    errorMessage: longtext("errorMessage"),
+  },
+  (table) => ({
+    taskStateIdx: index("orchestration_turns_task_state_idx").on(table.taskId, table.state),
+    ownerStartedIdx: index("orchestration_turns_owner_started_idx").on(table.ownerUserId, table.startedAt),
+  }),
+);
+
+export const globalMemory = mysqlTable(
+  "global_memory",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerUserId: int("ownerUserId").notNull(),
+    category: mysqlEnum("category", ["decision", "feature", "research", "past_task"]).notNull(),
+    title: varchar("title", { length: 220 }).notNull(),
+    content: longtext("content").notNull(),
+    sourceTaskId: int("sourceTaskId"),
+    confidence: mysqlEnum("confidence", ["low", "medium", "high", "verified"]).default("medium").notNull(),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+    updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
+  },
+  (table) => ({
+    ownerCategoryIdx: index("global_memory_owner_category_idx").on(table.ownerUserId, table.category),
+    ownerUpdatedIdx: index("global_memory_owner_updated_idx").on(table.ownerUserId, table.updatedAt),
+  }),
+);
+
+export const taskFiles = mysqlTable(
+  "task_files",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    taskId: int("taskId").notNull(),
+    ownerUserId: int("ownerUserId").notNull(),
+    relativePath: varchar("relativePath", { length: 1024 }).notNull(),
+    storageKey: text("storageKey").notNull(),
+    storageUrl: text("storageUrl").notNull(),
+    mimeType: varchar("mimeType", { length: 160 }),
+    sizeBytes: bigint("sizeBytes", { mode: "number" }).default(0).notNull(),
+    version: int("version").default(1).notNull(),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+    updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
+  },
+  (table) => ({
+    taskPathUnique: uniqueIndex("task_files_task_path_version_unique").on(table.taskId, table.relativePath, table.version),
+    taskPathIdx: index("task_files_task_path_idx").on(table.taskId, table.relativePath),
+    ownerUpdatedIdx: index("task_files_owner_updated_idx").on(table.ownerUserId, table.updatedAt),
+  }),
+);
+
+export const credentialStatusSnapshots = mysqlTable(
+  "credential_status_snapshots",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerUserId: int("ownerUserId").notNull(),
+    provider: mysqlEnum("provider", ["claude", "kimi"]).notNull(),
+    status: mysqlEnum("status", ["configured", "missing", "invalid", "untested", "error"]).default("untested").notNull(),
+    checkedAt: bigint("checkedAt", { mode: "number" }).notNull(),
+    lastErrorCode: varchar("lastErrorCode", { length: 120 }),
+    lastErrorMessage: longtext("lastErrorMessage"),
+  },
+  (table) => ({
+    ownerProviderCheckedIdx: index("credential_status_owner_provider_checked_idx").on(table.ownerUserId, table.provider, table.checkedAt),
+  }),
+);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
-
-// TODO: Add your tables here
+export type Task = typeof tasks.$inferSelect;
+export type InsertTask = typeof tasks.$inferInsert;
+export type TaskEvent = typeof taskEvents.$inferSelect;
+export type InsertTaskEvent = typeof taskEvents.$inferInsert;
+export type OrchestrationTurn = typeof orchestrationTurns.$inferSelect;
+export type InsertOrchestrationTurn = typeof orchestrationTurns.$inferInsert;
+export type GlobalMemory = typeof globalMemory.$inferSelect;
+export type InsertGlobalMemory = typeof globalMemory.$inferInsert;
+export type TaskFile = typeof taskFiles.$inferSelect;
+export type InsertTaskFile = typeof taskFiles.$inferInsert;
+export type CredentialStatusSnapshot = typeof credentialStatusSnapshots.$inferSelect;
+export type InsertCredentialStatusSnapshot = typeof credentialStatusSnapshots.$inferInsert;

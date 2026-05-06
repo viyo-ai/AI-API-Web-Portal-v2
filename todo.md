@@ -1,0 +1,39 @@
+# Project TODO
+
+- [x] Migrate restored source files from `/home/ubuntu/ai-coding-workshop` into the permanent managed project while preserving managed runtime compatibility.
+- [x] Preserve the v2 public landing page for unauthenticated users and route authenticated Manus OAuth users into the protected workspace.
+- [x] Implement the task-first three-panel workspace with live tasks and global memory on the left, task thread in the center, and task files on the right.
+- [x] Wire Drizzle schema for users, tasks, global memory entries, task thread messages, and task files.
+- [x] Apply database migrations for the permanent managed project without destructive data loss.
+- [x] Implement Wrapper LLM v2 server-side provider routing for Claude and Kimi with explicit provider selection.
+- [x] Add Cloudflare Workers AI Kimi integration using exact model `@cf/moonshotai/kimi-k2.6` gated on `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`.
+- [x] Add Claude integration gated on `CLAUDE_API_KEY` only, ignoring `ANTHROPIC_API_KEY` as requested.
+- [x] Ensure no silent fallback behavior exists anywhere in the provider routing layer.
+- [x] Implement an AI provider status endpoint that reports configured and missing credential state per provider.
+- [x] Surface explicit missing-credential UI feedback to users for unconfigured providers.
+- [x] Port the terminal panel with xterm.js and node-pty over WebSocket into the permanent project.
+- [x] Port the filesystem panel into the permanent project.
+- [x] Add or update Vitest coverage for provider gates, provider status, task workspace behavior, terminal/filesystem wiring where feasible, and auth-protected routing.
+- [x] Run TypeScript verification with `pnpm check`.
+- [x] Run the Vitest regression suite with `pnpm test`.
+- [x] Run the production build with `pnpm build`.
+- [x] Validate browser rendering for landing, auth-gated workspace behavior, provider-status UI, and core workspace layout.
+- [ ] Create the final managed project checkpoint after all requested work and verification gates pass.
+- [x] Update Claude credential gate to ignore `ANTHROPIC_API_KEY` and use `CLAUDE_API_KEY` only, while preserving explicit missing-credential UI feedback.
+- [x] Keep provider credential entry in server-side project secrets rather than public web-app form fields.
+- [x] Fix or validate node-pty native loading so the terminal panel can import `node-pty`, then validate terminal WebSocket behavior where authentication access permits.
+- [x] Add or verify explicit authenticated workspace UI for missing Claude/Kimi credentials and cover it with passing tests.
+- [x] Add regression tests for provider-status endpoint/UI and filesystem/terminal panel wiring.
+- [x] Perform authenticated browser validation of the full three-panel workspace, including provider-status UI and right-side files panel.
+- [x] Use the provided temporary Manus API credential, project ID `V8FnCpmNSVBM0vOuJFNL8H`, and app URL `https://manus.im/app/V8FnCpmNSVBM0vOuJFNL8H` to retrieve or reconcile the referenced “Building an App with xterm.js, PTY, tmux, AI, and Filesystem Task” context without storing the key in app code or final docs.
+- [x] Complete a constrained cross-check of the permanent app implementation against the recovered and user-clarified task context, especially xterm.js, PTY, tmux, AI routing, OAuth, and filesystem workspace behavior, while documenting that the original Manus task artifact was not accessible from the current session.
+- [x] Account for the clarified origin of the referenced context: it came from the “Building an App with xterm.js, PTY, tmux, AI, and Filesystem” agent task and specifically includes OAuth completion constraints.
+- [x] Proceed without browser takeover, document that `https://manus.im/app/V8FnCpmNSVBM0vOuJFNL8H` was inaccessible from the current session, and finalize against recovered implementation plus known requirements.
+- [x] Finish final validation against the recovered implementation and known requirements after the remaining terminal, regression-test, authenticated browser, and task-context cross-check items are completed.
+- [x] Validate terminal WebSocket behavior end-to-end where auth permits: connect, receive ready/status, send input, and confirm tmux or shell fallback reporting.
+- [x] Run and fix authenticated workspace UI tests after the latest credential-refresh UI changes, including mocks for `trpc.credentials.refresh.useMutation()`.
+- [x] Add functional provider-status and credential-refresh tests, and deepen filesystem/terminal interaction coverage beyond source-string assertions where feasible.
+- [x] Add explicit authenticated UI assertions for missing Claude/Kimi credential states in the workspace.
+- [x] Add deeper automated filesystem and terminal interaction validation beyond static source-string checks where feasible.
+- [x] Document the referenced Manus task-context limitation as a constrained validation against recovered implementation and known user requirements unless a concrete task artifact becomes accessible.
+- [x] Keep the referenced Manus task-context cross-check explicitly constrained by the documented API/browser access limitation unless a concrete artifact becomes available.
