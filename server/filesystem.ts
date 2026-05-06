@@ -15,6 +15,14 @@ export type WorkspaceFsEntry = {
 export const MAX_FILE_PREVIEW_BYTES = 1024 * 1024;
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
+const WORKSPACE_README_NAME = "README.md";
+const DEFAULT_WORKSPACE_README = `# AI Coding Workshop Workspace
+
+This private workspace is attached to your authenticated AI Coding Workshop session.
+
+Use it to draft task notes, store small working files, and inspect outputs created during a task. Files in this directory are scoped to your Manus-authenticated user.
+`;
+
 function assertNoUnsafeSegments(relativePath: string) {
   if (relativePath.includes("\0")) throw new Error("File path contains an invalid character");
   if (path.isAbsolute(relativePath)) throw new Error("Absolute file paths are not allowed");
@@ -31,8 +39,23 @@ export async function ensureWorkspaceRoot(rootPath: string) {
   return resolved;
 }
 
-export async function resolveWorkspacePath(rootPath: string, userRelativePath = "") {
+export async function ensureWorkspaceSeeded(rootPath: string) {
   const root = await ensureWorkspaceRoot(rootPath);
+  const readmePath = path.join(root, WORKSPACE_README_NAME);
+
+  try {
+    await fs.access(readmePath, constants.F_OK);
+  } catch {
+    await fs.writeFile(readmePath, DEFAULT_WORKSPACE_README, { encoding: "utf8", mode: 0o600, flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "EEXIST") throw error;
+    });
+  }
+
+  return root;
+}
+
+export async function resolveWorkspacePath(rootPath: string, userRelativePath = "") {
+  const root = await ensureWorkspaceSeeded(rootPath);
   const safeRelativePath = assertNoUnsafeSegments(userRelativePath || "");
   const absolutePath = path.resolve(root, safeRelativePath);
   if (absolutePath !== root && !absolutePath.startsWith(`${root}${path.sep}`)) {
@@ -83,7 +106,21 @@ export async function listWorkspaceDirectory(rootPath: string, relativePath = ""
 
 export async function readWorkspaceFile(rootPath: string, relativePath: string) {
   const { absolutePath, relativePath: safeRelativePath } = await resolveWorkspacePath(rootPath, relativePath);
-  const stats = await fs.stat(absolutePath);
+  let stats;
+  try {
+    stats = await fs.stat(absolutePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return {
+        relativePath: safeRelativePath,
+        content: "",
+        size: 0,
+        modifiedAt: null,
+        exists: false,
+      };
+    }
+    throw error;
+  }
   if (!stats.isFile()) throw new Error("Only files can be previewed");
   if (stats.size > MAX_FILE_PREVIEW_BYTES) throw new Error("File is too large to preview safely");
   const data = await fs.readFile(absolutePath);
@@ -93,6 +130,7 @@ export async function readWorkspaceFile(rootPath: string, relativePath: string) 
     content: data.toString("utf8"),
     size: stats.size,
     modifiedAt: stats.mtime.toISOString(),
+    exists: true,
   };
 }
 

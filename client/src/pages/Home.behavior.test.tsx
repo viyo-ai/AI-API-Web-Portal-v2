@@ -16,6 +16,8 @@ const filesystemTreeRefetchMock = vi.fn(async () => undefined);
 const filesystemWriteMock = vi.fn();
 const filesystemMkdirMock = vi.fn();
 
+let resizeObserverCallbacks: Array<ResizeObserverCallback> = [];
+
 class FakeWebSocket {
   static CONNECTING = 0;
   static OPEN = 1;
@@ -198,11 +200,16 @@ vi.mock("@/lib/trpc", () => ({
 
 beforeAll(() => {
   class ResizeObserverStub {
+    constructor(private readonly callback: ResizeObserverCallback) {
+      resizeObserverCallbacks.push(callback);
+    }
     observe() {}
     unobserve() {}
     disconnect() {}
   }
   Object.defineProperty(globalThis, "ResizeObserver", { value: ResizeObserverStub, writable: true });
+  Object.defineProperty(window, "requestAnimationFrame", { value: vi.fn((callback: FrameRequestCallback) => window.setTimeout(() => callback(0), 0)), writable: true });
+  Object.defineProperty(window, "cancelAnimationFrame", { value: vi.fn((handle: number) => window.clearTimeout(handle)), writable: true });
   Object.defineProperty(window, "matchMedia", {
     value: vi.fn().mockImplementation((query: string) => ({
       matches: false,
@@ -231,6 +238,7 @@ beforeEach(() => {
   filesystemWriteMock.mockReset();
   filesystemMkdirMock.mockReset();
   FakeWebSocket.instances = [];
+  resizeObserverCallbacks = [];
   createTaskMock.mockResolvedValue({ task: { ...sampleTask, id: 19, title: "Created task" }, events: [], activeTurn: null });
   submitMessageMock.mockResolvedValue(mockThread);
   createFileMetadataMock.mockResolvedValue(mockTaskFiles[0]);
@@ -415,6 +423,37 @@ describe("Home v2 task-first workspace behavior", () => {
 
     expect(screen.getByText(/tmux PTY terminal/i)).toBeInTheDocument();
     expect(screen.getByText(/tmux · ai-workshop-test · \/workspace\/task-7/i)).toBeInTheDocument();
+  });
+
+  it("throttles terminal ResizeObserver fitting through requestAnimationFrame", async () => {
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const requestAnimationFrameMock = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+      rafCallbacks.push(callback);
+      return rafCallbacks.length;
+    });
+    const cancelAnimationFrameMock = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    expect(resizeObserverCallbacks.length).toBeGreaterThan(0);
+    const scheduledBeforeResize = requestAnimationFrameMock.mock.calls.length;
+
+    await act(async () => {
+      resizeObserverCallbacks[0]([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+      resizeObserverCallbacks[0]([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+    });
+
+    expect(requestAnimationFrameMock.mock.calls.length).toBeLessThanOrEqual(scheduledBeforeResize + 1);
+
+    await act(async () => {
+      rafCallbacks.shift()?.(0);
+    });
+
+    cleanup();
+    expect(cancelAnimationFrameMock).toHaveBeenCalled();
+    requestAnimationFrameMock.mockRestore();
+    cancelAnimationFrameMock.mockRestore();
   });
 
   it("pauses terminal reconnects after fatal native-module initialization errors", async () => {

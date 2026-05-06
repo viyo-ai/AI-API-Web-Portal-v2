@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+import { installBenignResizeObserverErrorGuard } from "@/lib/resizeObserverError";
 
 type ConnectionState = "connecting" | "connected" | "disconnected" | "error";
 
@@ -24,6 +25,7 @@ export default function TerminalPanel() {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
   const tmuxEnabledRef = useRef(false);
   const suppressReconnectRef = useRef(false);
   const disposedRef = useRef(false);
@@ -34,6 +36,8 @@ export default function TerminalPanel() {
 
   useEffect(() => {
     if (!containerRef.current) return;
+
+    const removeResizeObserverErrorGuard = installBenignResizeObserverErrorGuard();
 
     const terminal = new Terminal({
       cursorBlink: true,
@@ -82,6 +86,14 @@ export default function TerminalPanel() {
       }
     };
 
+    const scheduleFitAndResize = () => {
+      if (animationFrameRef.current !== null) return;
+      animationFrameRef.current = window.requestAnimationFrame(() => {
+        animationFrameRef.current = null;
+        fitAndResize();
+      });
+    };
+
     const connect = () => {
       setConnectionState("connecting");
       const socket = new WebSocket(createTerminalSocketUrl());
@@ -91,7 +103,7 @@ export default function TerminalPanel() {
         suppressReconnectRef.current = false;
         setConnectionState("connected");
         terminal.writeln("\r\n\x1b[32mConnected. Type a command or use the guided task panel.\x1b[0m");
-        fitAndResize();
+        scheduleFitAndResize();
       });
 
       socket.addEventListener("message", event => {
@@ -140,16 +152,18 @@ export default function TerminalPanel() {
       }
     });
 
-    const resizeObserver = new ResizeObserver(fitAndResize);
+    const resizeObserver = new ResizeObserver(scheduleFitAndResize);
     resizeObserver.observe(containerRef.current);
-    window.setTimeout(fitAndResize, 100);
+    window.setTimeout(scheduleFitAndResize, 100);
     connect();
 
     return () => {
       disposedRef.current = true;
+      removeResizeObserverErrorGuard();
       inputDisposable.dispose();
       resizeObserver.disconnect();
       if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+      if (animationFrameRef.current !== null) window.cancelAnimationFrame(animationFrameRef.current);
       socketRef.current?.close();
       terminal.dispose();
     };

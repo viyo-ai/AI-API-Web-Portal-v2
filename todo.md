@@ -39,3 +39,9 @@
 - [x] Keep the referenced Manus task-context cross-check explicitly constrained by the documented API/browser access limitation unless a concrete artifact becomes available.
 - [x] Fix published terminal native-module failure so a missing `node-pty` binary does not cause repeated disconnect/reconnect loops and provides an explicit usable fallback.
 - [x] Include client behavior tests in the Vitest include pattern so terminal reconnect regressions run in automated validation.
+- [x] Fix production OAuth login failure on `aicodwork-5kvwo4uo.manus.space` so users can complete Manus authentication and reach the protected workspace.
+- [ ] Add route-level regression coverage for the OAuth callback/session path so cookie-setting and post-callback auth recognition are tested together.
+- [ ] Validate Manus OAuth end-to-end on the published `aicodwork-5kvwo4uo.manus.space` domain with user-assisted login, confirming the session cookie is accepted and the protected workspace loads.
+- [x] Fix authenticated workspace database query failures for `tasks`, `global_memory`, and `task_files` after OAuth login by ensuring required tables exist and are migrated.
+- [x] Fix authenticated workspace filesystem startup failure when `/tmp/ai-coding-workshop-workspaces/user-1/README.md` is missing by seeding or recreating required workspace files safely.
+- [x] Confirm ResizeObserver warning does not represent an application failure or suppress only if it is caused by our terminal/layout code.
