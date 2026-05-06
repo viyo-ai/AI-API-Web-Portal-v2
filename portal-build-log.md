@@ -27,3 +27,17 @@ Section 2 shipped additive per-Build-Target governance auto-load without startin
 | Automated validation | Passed | `pnpm check`, `pnpm test` with 22 files and 94 tests passing, and `pnpm build` all completed successfully. |
 
 Product Owner boundary: Section 2 is complete for review. Section 3 has not been started and must remain paused until the Product Owner explicitly instructs the build to proceed.
+
+## Phase 2 §3A Complete — Plain-Language Vocabulary Rename
+
+§3A from `PHASE_2_SECTION_3_REWRITE.md` is complete as the only active work item from the rewritten Section 3 directive. The implementation renames owner-facing Phase 1 and Section 2 vocabulary to plain-language labels while preserving existing database fields, tRPC procedure keys, environment-variable names, and internal build-runner contracts for backward compatibility.
+
+| §3A acceptance area | Result | Evidence |
+|---|---|---|
+| Project vocabulary | Passed | Owner-facing Build Target/Build Mode language was renamed to Project/project-mode language in the primary UI and related human-readable messages while preserving internal `buildTarget` and `buildBranch` identifiers. |
+| Rule-book vocabulary | Passed | Owner-facing Governance Files language was renamed to Project rule books; loader/module names and Section 2 rule-book injection behavior remain compatible with the accepted Section 2 implementation. |
+| Plumbing-label cleanup | Passed | User-visible labels for validation, service checks, environment injection, commit-message policy, context limit, and push checks now use plain-language wording. |
+| Focused acceptance coverage | Passed | `client/src/pages/Home.behavior.test.tsx` includes a §3A rendered-UI test that proves approved labels are present and banned owner-facing legacy labels are absent from the default visible UI copy. |
+| Automated validation | Passed | `pnpm check`, `pnpm test` with 22 files and 95 tests passing, and `pnpm build` completed successfully. |
+
+Product Owner boundary: §3A is complete for review. Rewritten §3 Skill Libraries and original §1A wizard work have not been started and must remain paused until Product Owner approval is received.

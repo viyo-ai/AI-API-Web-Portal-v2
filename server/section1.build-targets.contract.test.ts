@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { buildBranches, buildTargets, tasks } from "../drizzle/schema";
 import { appRouter } from "./routers";
 
-describe("Section 1 Build Targets contract", () => {
-  it("defines additive Build Target and Build Branch schema surfaces", () => {
+describe("Section 1 Projects contract", () => {
+  it("defines additive Project and Build Branch schema surfaces", () => {
     expect(buildTargets.id).toBeDefined();
     expect(buildTargets.ownerUserId).toBeDefined();
     expect(buildTargets.repoUrl).toBeDefined();
@@ -16,7 +16,7 @@ describe("Section 1 Build Targets contract", () => {
     expect(tasks.buildBranchId).toBeDefined();
   });
 
-  it("exposes Build Target and Build Branch tRPC procedure groups", () => {
+  it("exposes Project and Build Branch tRPC procedure groups", () => {
     const procedures = appRouter._def.procedures;
     expect(procedures["buildTargets.list"]).toBeDefined();
     expect(procedures["buildTargets.create"]).toBeDefined();

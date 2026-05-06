@@ -25,7 +25,7 @@ describe("Section 4 branch isolation, push policy, and env injection contracts",
     expect(() => assertBranchIsNotProtected("main", ["main", "staging"])).toThrow(/protected/);
     expect(assertBranchIsNotProtected("feature/section-4", ["main", "staging"])).toBeUndefined();
     expect(assertConventionalCommitMessage("feat(portal-section-4): branch isolation")).toBe("feat(portal-section-4): branch isolation");
-    expect(() => assertConventionalCommitMessage("section 4 update")).toThrow(/Conventional Commit/);
+    expect(() => assertConventionalCommitMessage("section 4 update")).toThrow(/commit message/);
   });
 
   it("normalizes agent env-var maps to uppercase env names only", () => {

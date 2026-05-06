@@ -255,3 +255,22 @@
 - [x] Section 2 Governance Files UI: add editable add/remove/reorder settings rows with required/dynamic/role/resolver validation.
 - [x] Section 2 acceptance tests: cover schema, loader, UI validation, blocking, prompt injection, legacy behavior, and token budget behavior without skipped tests.
 - [x] Section 2 closeout: pass validation, append portal build log, commit and push `feat(governance): add per-task governance auto-load [PORTAL-P2-S2-01]`.
+
+- [x] Reporting convention: every section completion report must include the full GitHub commit URL on its own line in the format `Commit URL: https://github.com/viyo-ai/AI-API-Web-Portal-v2/commit/<full-SHA>`.
+
+- [ ] Section 3 Skill Libraries directive ingestion: re-read `PORTAL_PHASE_2_DIRECTIVE.md` Section 3 and required VIYO protocols before implementation.
+- [ ] Section 3 Skill Libraries schema and migration: add only the persistence required for Skill Libraries while preserving approved Section 2 behavior.
+- [ ] Section 3 Skill Libraries backend contracts: implement library persistence, selection, validation, and Build Mode resolution per directive acceptance requirements.
+- [ ] Section 3 Skill Libraries prompt integration: wire selected skill library content into Build Mode execution without altering Section 2 governance ordering or behavior.
+- [ ] Section 3 Skill Libraries owner UI: add the required Skill Libraries management and selection flows with validation and clear non-placeholder behavior.
+- [ ] Section 3 acceptance tests: cover schema, backend contracts, UI validation, Build Mode integration, Section 2 regression, and legacy non-Build behavior without skipped tests.
+- [ ] Section 3 closeout: pass validation, append `portal-build-log.md`, commit and push Section 3, report standalone `Commit URL: https://github.com/viyo-ai/AI-API-Web-Portal-v2/commit/<full-SHA>`, then stop before Section 1A.
+
+## Phase 2 Section 3 Rewrite — §3A Plain-Language Vocabulary
+
+- [x] Re-read VIYO development protocol, VIYO document ingestion protocol, and the frozen PHASE_2_SECTION_3_REWRITE.md before implementing §3A.
+- [x] Implement §3A only: rename user-facing Phase 1 and Section 2 labels to the approved plain-language vocabulary while preserving database/API compatibility.
+- [x] Add or update focused acceptance tests proving §3A labels are present and old owner-facing labels are removed from the UI copy.
+- [x] Run §3A validation gate: pnpm check, pnpm test with no skipped tests, and pnpm build.
+- [x] Append §3A closeout evidence to portal-build-log.md.
+- [x] Commit and push §3A only, then stop for PO review before starting rewritten §3 Skills or §1A wizard.

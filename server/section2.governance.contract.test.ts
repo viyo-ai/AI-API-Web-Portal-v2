@@ -13,7 +13,7 @@ import {
 } from "./buildRunner/loadGovernance";
 
 describe("Section 2 per-task governance auto-load contracts", () => {
-  it("adds additive Build Target governance schema surfaces without removing Phase 1 target fields", () => {
+  it("adds additive Project governance schema surfaces without removing Phase 1 target fields", () => {
     expect(buildTargets.governanceFilesJson).toBeDefined();
     expect(buildTargets.governanceBudgetEnforced).toBeDefined();
     expect(buildTargets.repoUrl).toBeDefined();
@@ -21,20 +21,20 @@ describe("Section 2 per-task governance auto-load contracts", () => {
     expect(buildTargets.githubTokenEnvVar).toBeDefined();
   });
 
-  it("exposes Build Target settings procedures that accept Governance Files through existing namespaces", () => {
+  it("exposes Project settings procedures that accept Project rule books through existing namespaces", () => {
     const procedures = appRouter._def.procedures;
     expect(procedures["buildTargets.updateSettings"]).toBeDefined();
     expect(procedures["buildTarget.updateSettings"]).toBeDefined();
   });
 
-  it("validates Governance Files for safe paths, governance document presence, and dynamic placeholder resolver rows", () => {
+  it("validates Project rule books for safe paths, rule book document presence, and dynamic placeholder resolver rows", () => {
     expect(validateGovernanceFiles([{ path: "docs/governance.md", required: true, dynamic: false, role: "governance" }])).toEqual([]);
     expect(validateGovernanceFiles([{ path: "../secret.md", required: true, dynamic: false, role: "governance" }]).join(" ")).toMatch(/relative/);
-    expect(validateGovernanceFiles([{ path: "resolvers/task-slug.txt", required: true, dynamic: false, role: "placeholder_resolver", resolverKey: "taskSlug" }]).join(" ")).toMatch(/at least one governance document/);
+    expect(validateGovernanceFiles([{ path: "resolvers/task-slug.txt", required: true, dynamic: false, role: "placeholder_resolver", resolverKey: "taskSlug" }]).join(" ")).toMatch(/at least one rule book document/);
     expect(validateGovernanceFiles([{ path: "docs/{taskSlug}.md", required: true, dynamic: true, role: "governance" }]).join(" ")).toMatch(/without a matching placeholder_resolver/);
   });
 
-  it("round-trips normalized Governance Files JSON and rejects invalid configuration", () => {
+  it("round-trips normalized Project rule books JSON and rejects invalid configuration", () => {
     const json = normalizeGovernanceFiles([
       { path: "resolvers/task-slug.txt", required: true, dynamic: false, role: "placeholder_resolver", resolverKey: "taskSlug" },
       { path: "docs/{taskSlug}.md", required: true, dynamic: true, role: "governance" },
@@ -62,24 +62,24 @@ describe("Section 2 per-task governance auto-load contracts", () => {
     expect(result.documents.some((document) => document.content.includes("truncated by portal"))).toBe(true);
   });
 
-  it("renders loaded governance documents into an authoritative provider prompt block", () => {
+  it("renders loaded rule book documents into an authoritative provider prompt block", () => {
     const block = renderGovernanceBlock({
       targetName: "VIYO",
       documents: [{ path: "docs/governance.md", resolvedPath: "docs/governance.md", content: "Use the approved architecture.", required: true }],
     });
     expect(block).toContain("VIYO build pipeline");
     expect(block).toContain("=== docs/governance.md ===");
-    expect(block).toContain("The following governance documents are authoritative");
-    expect(block).toContain("Do not modify any of the governance documents");
+    expect(block).toContain("The following rule book documents are authoritative");
+    expect(block).toContain("Do not modify any of the rule book documents");
   });
 
-  it("keeps Section 2 owner UI controls present without replacing the Phase 1 Build Target form", () => {
+  it("keeps Section 2 owner UI controls present without replacing the Phase 1 Project form", () => {
     const homeSource = readFileSync(path.resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
     expect(homeSource).toContain("data-testid=\"section2-governance-files-settings\"");
-    expect(homeSource).toContain("Governance Files");
-    expect(homeSource).toContain("Add governance row");
-    expect(homeSource).toContain("Save selected target settings");
-    expect(homeSource).toContain("Build Target name");
+    expect(homeSource).toContain("Project rule books");
+    expect(homeSource).toContain("Add rule book");
+    expect(homeSource).toContain("Save project settings");
+    expect(homeSource).toContain("Project name");
     expect(homeSource).toContain("Test connection");
   });
 });

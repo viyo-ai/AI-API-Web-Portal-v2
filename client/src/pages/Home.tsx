@@ -70,8 +70,17 @@ function ownerFacingText(value: string | null | undefined) {
   return (value ?? "")
     .replaceAll("Wrapper LLM", "AI coordinator")
     .replaceAll("Wrapper", "AI coordinator")
+    .replaceAll("governance files", "rule books")
+    .replaceAll("Governance", "Rule book")
+    .replaceAll("token budget", "AI context limit")
     .replaceAll("production three-pane shell", "plain-English AI coding workshop")
     .replaceAll("task-first production shell", "task-first production workspace");
+}
+
+function pushStatusLabel(value: string | null | undefined) {
+  if (value === "pushed") return "Pushed";
+  if (value === "push_failed") return "Last push failed";
+  return "Never pushed";
 }
 
 function eventTitle(actor: string, eventType: string) {
@@ -463,9 +472,9 @@ export default function Home() {
     const activeRows = rows.map((row) => ({ ...row, path: row.path.trim(), resolverKey: row.resolverKey?.trim() })).filter((row) => row.path);
     const errors: string[] = [];
     const resolverKeys = new Set(activeRows.filter((row) => row.role === "placeholder_resolver" && row.resolverKey).map((row) => row.resolverKey as string));
-    if (activeRows.length > 0 && !activeRows.some((row) => row.role === "governance")) errors.push("Add at least one governance document row before saving Governance Files.");
+    if (activeRows.length > 0 && !activeRows.some((row) => row.role === "governance")) errors.push("Add at least one rule book row before saving project rule books.");
     activeRows.forEach((row, index) => {
-      const label = `Governance row ${index + 1}`;
+      const label = `Rule book row ${index + 1}`;
       if (row.path.startsWith("/") || row.path.includes("..")) errors.push(`${label} must use a safe relative path and cannot include '..'.`);
       if (row.role === "placeholder_resolver" && !row.resolverKey) errors.push(`${label} needs a resolver key.`);
       if (row.dynamic) {
@@ -515,12 +524,12 @@ export default function Home() {
         governanceFiles,
         governanceBudgetEnforced: buildTargetGovernanceBudgetEnforced,
       });
-      const message = `Saved environment and Governance Files settings for ${updated?.name ?? selectedBuildTarget.name}.`;
+      const message = `Saved AI environment variables and project rule books for ${updated?.name ?? selectedBuildTarget.name}.`;
       setWorkspaceNotice(message);
       toast.success(message);
       await refreshWorkspace();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The Build Target settings could not be saved.";
+      const message = error instanceof Error ? error.message : "The project settings could not be saved.";
       setWorkspaceNotice(message);
       toast.error(message);
     }
@@ -537,7 +546,7 @@ export default function Home() {
       toast.success(message);
       await refreshWorkspace();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The Build Branch push was blocked by Section 4 policy.";
+      const message = error instanceof Error ? error.message : "The working branch push was blocked by project policy.";
       setWorkspaceNotice(message);
       toast.error(message);
       await refreshWorkspace();
@@ -546,7 +555,7 @@ export default function Home() {
 
   async function handleCreateBuildTarget() {
     if (!buildTargetRepoUrl.trim()) {
-      const message = "Add a GitHub repository URL before creating a Build Target.";
+      const message = "Add a GitHub repository URL before creating a project.";
       setWorkspaceNotice(message);
       toast.warning(message);
       return;
@@ -563,12 +572,12 @@ export default function Home() {
       });
       setSelectedBuildTargetId(created.id);
       setBuildTargetRepoUrl("");
-      const message = `Build Target created for ${created.name}.`;
+      const message = `Project created for ${created.name}.`;
       setWorkspaceNotice(message);
       toast.success(message);
       await refreshWorkspace();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The Build Target could not be created.";
+      const message = error instanceof Error ? error.message : "The project could not be created.";
       setWorkspaceNotice(message);
       toast.error(message);
     }
@@ -587,7 +596,7 @@ export default function Home() {
       if (result.status === "ok") toast.success(result.message);
       else toast.warning(`${result.status.replaceAll("_", " ")}: ${result.message}`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The Build Target connection test failed.";
+      const message = error instanceof Error ? error.message : "The project connection test failed.";
       setWorkspaceNotice(message);
       toast.error(message);
     }
@@ -595,7 +604,7 @@ export default function Home() {
 
   async function handleCreateBuildBranch() {
     if (!selectedBuildTarget) {
-      const message = "Create or select a Build Target before opening Build Mode.";
+      const message = "Create or select a project before opening project mode.";
       setWorkspaceNotice(message);
       toast.warning(message);
       return;
@@ -605,12 +614,12 @@ export default function Home() {
       const branch = await createBuildBranchMutation.mutateAsync({ buildTargetId: selectedBuildTarget.id, branchName: cleanBranchName, baseBranch: selectedBuildTarget.defaultBaseBranch, taskId: selectedTaskId });
       setBuildBranchName("");
       setOpenedBuildBranch(branch);
-      const message = branch.state === "clean" ? `Build Mode ready on ${branch.branchName}.` : `Build Branch recorded, but clone failed: ${branch.errorMessage ?? "check repository access"}.`;
+      const message = branch.state === "clean" ? `Project ready on ${branch.branchName}.` : `Working branch recorded, but clone failed: ${branch.errorMessage ?? "check repository access"}.`;
       setWorkspaceNotice(message);
       if (branch.state === "clean") toast.success(message); else toast.warning(message);
       await refreshWorkspace();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The Build Branch could not be created.";
+      const message = error instanceof Error ? error.message : "The working branch could not be created.";
       setWorkspaceNotice(message);
       toast.error(message);
     }
@@ -931,11 +940,11 @@ export default function Home() {
         <ScrollArea className="min-h-0 min-w-0 flex-1 px-3 py-3">
 
           <div className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">
-            <GitBranch className="h-3.5 w-3.5" /> Build Targets
+            <GitBranch className="h-3.5 w-3.5" /> Projects
           </div>
           <div className="mb-6 space-y-2">
             <div className="rounded-2xl border border-[#d9d8d1] bg-white p-3">
-              <Input value={buildTargetName} onChange={(event) => setBuildTargetName(event.target.value)} placeholder="Build Target name" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+              <Input value={buildTargetName} onChange={(event) => setBuildTargetName(event.target.value)} placeholder="Project name" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
               <Input value={buildTargetRepoUrl} onChange={(event) => setBuildTargetRepoUrl(event.target.value)} placeholder="https://github.com/org/repo" className="mt-2 h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
               <Input value={buildTargetTokenEnvVar} onChange={(event) => setBuildTargetTokenEnvVar(event.target.value)} placeholder="BUILD_TARGET_VIYO_GITHUB_TOKEN" className="mt-2 h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
               <p className="mt-1 text-[11px] leading-4 text-[#77766e]">Enter only the environment variable name where the GitHub PAT is set. The token value itself never goes in this form.</p>
@@ -944,16 +953,16 @@ export default function Home() {
               <Textarea value={buildTargetValidationCommands} onChange={(event) => setBuildTargetValidationCommands(event.target.value)} placeholder="Optional validation commands, one per line" className="mt-2 min-h-[62px] rounded-xl border-[#d9d8d1] bg-white text-xs" />
               <Textarea value={buildTargetServiceChecks} onChange={(event) => setBuildTargetServiceChecks(event.target.value)} placeholder="Optional service checks, one per line" className="mt-2 min-h-[50px] rounded-xl border-[#d9d8d1] bg-white text-xs" />
               <Textarea value={buildTargetAgentEnvMap} onChange={(event) => setBuildTargetAgentEnvMap(event.target.value)} placeholder="WORKSPACE_ENV=SERVER_ENV_SOURCE" className="mt-2 min-h-[62px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" data-testid="agent-env-var-map-input" />
-              <p className="mt-1 text-[11px] leading-4 text-[#77766e]">Section 4 injects these server-side secret mappings into a gitignored .env.agent file inside Build Branch workspaces.</p>
+              <p className="mt-1 text-[11px] leading-4 text-[#77766e]">Paste only the env var names where you set tokens and secrets. The actual values go in your portal environment, never in this form.</p>
               <Button type="button" variant="outline" onClick={handleTestBuildTargetConnection} disabled={isMutating || !buildTargetRepoUrl.trim() || !buildTargetTokenEnvVar.trim()} className="mt-2 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">Test connection</Button>
               <Button type="button" onClick={handleCreateBuildTarget} disabled={isMutating || !buildTargetRepoUrl.trim() || !buildTargetTokenEnvVar.trim()} className="mt-2 w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">
-                {createBuildTargetMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Plus className="mr-2 h-3.5 w-3.5" />} Add Build Target
+                {createBuildTargetMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Plus className="mr-2 h-3.5 w-3.5" />} Add Project
               </Button>
             </div>
             {buildTargetsQuery.isLoading ? (
-              <div className="rounded-2xl border border-[#d9d8d1] bg-white p-3 text-xs text-[#6d6d65]">Loading Build Targets...</div>
+              <div className="rounded-2xl border border-[#d9d8d1] bg-white p-3 text-xs text-[#6d6d65]">Loading projects...</div>
             ) : buildTargets.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white/70 p-3 text-xs leading-5 text-[#6d6d65]">No Build Targets yet. Section 1 keeps existing tasks intact until you connect a repository.</div>
+              <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white/70 p-3 text-xs leading-5 text-[#6d6d65]">No projects yet. Existing tasks stay intact until you connect a repository.</div>
             ) : (
               buildTargets.slice(0, 5).map((target) => (
                 <button key={target.id} type="button" onClick={() => setSelectedBuildTargetId(target.id)} className={`w-full rounded-2xl border p-3 text-left text-xs transition ${selectedBuildTarget?.id === target.id ? "border-emerald-300 bg-white shadow-sm" : "border-transparent bg-transparent hover:bg-white/70"}`}>
@@ -1033,32 +1042,32 @@ export default function Home() {
             {selectedBuildTarget ? (
               <div className="space-y-3">
                 <div className="rounded-2xl border border-emerald-100 bg-white p-3 text-xs leading-5 text-[#686861]" data-testid="section4-env-settings">
-                  <p className="font-semibold text-[#30302b]">Section 4 agent env injection</p>
-                  <p className="mt-1">Saved mappings generate <span className="font-mono">.env.agent</span> during Build Branch operations. The file is gitignored and push policy blocks it from being staged.</p>
+                  <p className="font-semibold text-[#30302b]">AI environment variables</p>
+                  <p className="mt-1">These get written into a hidden file inside the project's working folder so the AI can use them. The file is gitignored — the AI cannot accidentally commit your secrets.</p>
                   <p className="mt-1 font-mono text-[11px] text-emerald-800">Current: {Object.entries(selectedBuildTargetEnvMap).map(([key, value]) => `${key}←${value}`).join(", ") || "none"}</p>
                 </div>
                 <div className="rounded-2xl border border-violet-100 bg-white p-3 text-xs leading-5 text-[#686861]" data-testid="section2-governance-files-settings">
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <p className="font-semibold text-[#30302b]">Section 2 Governance Files</p>
-                      <p className="mt-1">These safe repository-relative paths are loaded on every Build Mode turn before Claude or Kimi starts. Required misses block execution; optional misses are logged.</p>
+                      <p className="font-semibold text-[#30302b]">Project rule books</p>
+                      <p className="mt-1">Files in your repo that the AI reads on every task before doing anything. Required rule books that are missing will block tasks until you add them.</p>
                     </div>
                     <Badge className="rounded-full border-violet-200 bg-violet-50 text-violet-800">{buildTargetGovernanceFiles.filter((row) => row.path.trim()).length} files</Badge>
                   </div>
                   <label className="mt-3 flex items-center gap-2 rounded-xl border border-violet-100 bg-violet-50 px-3 py-2 text-[11px] font-medium text-violet-900">
                     <input type="checkbox" checked={buildTargetGovernanceBudgetEnforced} onChange={(event) => setBuildTargetGovernanceBudgetEnforced(event.target.checked)} className="h-3.5 w-3.5 rounded border-violet-300" />
-                    Enforce Claude/Kimi governance token budget with optional drops and required truncation logging.
+                    Trim rule books if they're too long for the AI's brain. Recommended on: optional rule books are trimmed first, and required rule books note what was shortened.
                   </label>
                   <div className="mt-3 space-y-2">
                     {buildTargetGovernanceFiles.map((row, index) => (
                       <div key={`${index}-${row.path}`} className="rounded-xl border border-[#e4e2db] bg-[#fbfaf7] p-2" data-testid="governance-file-row">
-                        <Input value={row.path} onChange={(event) => updateGovernanceRow(index, { path: event.target.value })} placeholder="docs/governance.md or specs/{taskSlug}.md" className="h-8 rounded-lg border-[#d9d8d1] bg-white font-mono text-[11px]" />
+                        <Input value={row.path} onChange={(event) => updateGovernanceRow(index, { path: event.target.value })} aria-label="Path in repo" placeholder="docs/rules.md or specs/{taskSlug}.md" className="h-8 rounded-lg border-[#d9d8d1] bg-white font-mono text-[11px]" />
                         <div className="mt-2 grid grid-cols-2 gap-2">
-                          <label className="flex items-center gap-1.5 rounded-lg border border-[#deded8] bg-white px-2 py-1 text-[11px]"><input type="checkbox" checked={row.required} onChange={(event) => updateGovernanceRow(index, { required: event.target.checked })} /> Required</label>
-                          <label className="flex items-center gap-1.5 rounded-lg border border-[#deded8] bg-white px-2 py-1 text-[11px]"><input type="checkbox" checked={row.dynamic} onChange={(event) => updateGovernanceRow(index, { dynamic: event.target.checked })} /> Dynamic</label>
+                          <label className="flex items-center gap-1.5 rounded-lg border border-[#deded8] bg-white px-2 py-1 text-[11px]" title="If checked, missing this file blocks the AI from starting tasks."><input type="checkbox" checked={row.required} onChange={(event) => updateGovernanceRow(index, { required: event.target.checked })} /> Required</label>
+                          <label className="flex items-center gap-1.5 rounded-lg border border-[#deded8] bg-white px-2 py-1 text-[11px]" title="For advanced rule books whose path changes based on what the AI is currently working on. Leave unchecked unless you know you need this."><input type="checkbox" checked={row.dynamic} onChange={(event) => updateGovernanceRow(index, { dynamic: event.target.checked })} /> Path includes current focus</label>
                         </div>
                         <div className="mt-2 grid gap-2 sm:grid-cols-[1.2fr_1fr]">
-                          <div className="grid grid-cols-2 gap-1 rounded-lg border border-[#d9d8d1] bg-white p-1" aria-label="Governance row role">
+                          <div className="grid grid-cols-2 gap-1 rounded-lg border border-[#d9d8d1] bg-white p-1" aria-label="Rule book or current focus indicator">
                             {(["governance", "placeholder_resolver"] as const).map((role) => (
                               <button
                                 key={role}
@@ -1066,11 +1075,11 @@ export default function Home() {
                                 onClick={() => updateGovernanceRow(index, { role })}
                                 className={`rounded-md px-2 py-1 text-[10px] font-semibold transition ${row.role === role ? "bg-[#242420] text-white" : "text-[#686861] hover:bg-[#f0efea]"}`}
                               >
-                                {role === "governance" ? "Governance" : "Resolver"}
+                                {role === "governance" ? "Rule book" : "Current focus indicator"}
                               </button>
                             ))}
                           </div>
-                          <Input value={row.resolverKey ?? ""} onChange={(event) => updateGovernanceRow(index, { resolverKey: event.target.value })} placeholder="Resolver key, e.g. taskSlug" className="h-8 rounded-lg border-[#d9d8d1] text-[11px]" />
+                          <Input value={row.resolverKey ?? ""} onChange={(event) => updateGovernanceRow(index, { resolverKey: event.target.value })} aria-label="Focus indicator name" placeholder="Focus indicator name, e.g. taskSlug" className="h-8 rounded-lg border-[#d9d8d1] text-[11px]" />
                         </div>
                         <div className="mt-2 grid grid-cols-3 gap-2">
                           <Button type="button" variant="outline" onClick={() => moveGovernanceRow(index, -1)} disabled={index === 0 || isMutating} className="h-8 rounded-lg border-[#d9d8d1] bg-white text-[11px]">Up</Button>
@@ -1080,8 +1089,8 @@ export default function Home() {
                       </div>
                     ))}
                   </div>
-                  <Button type="button" variant="outline" onClick={() => setBuildTargetGovernanceFiles((rows) => [...rows, defaultGovernanceRow()])} disabled={isMutating} className="mt-2 w-full rounded-xl border-violet-100 bg-violet-50 text-xs text-violet-900">Add governance row</Button>
-                  <Button type="button" variant="outline" onClick={handleUpdateBuildTargetSettings} disabled={isMutating} className="mt-2 w-full rounded-xl border-emerald-200 bg-emerald-50 text-xs text-emerald-900">Save selected target settings</Button>
+                  <Button type="button" variant="outline" onClick={() => setBuildTargetGovernanceFiles((rows) => [...rows, defaultGovernanceRow()])} disabled={isMutating} className="mt-2 w-full rounded-xl border-violet-100 bg-violet-50 text-xs text-violet-900">Add rule book</Button>
+                  <Button type="button" variant="outline" onClick={handleUpdateBuildTargetSettings} disabled={isMutating} className="mt-2 w-full rounded-xl border-emerald-200 bg-emerald-50 text-xs text-emerald-900">Save project settings</Button>
                 </div>
               </div>
             ) : null}
@@ -1102,7 +1111,7 @@ export default function Home() {
             <div className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="font-semibold">Build Mode target: {selectedBuildTarget.name}</p>
+                  <p className="font-semibold">Project: {selectedBuildTarget.name}</p>
                   <p className="mt-1 text-xs text-emerald-800">Base branch {selectedBuildTarget.defaultBaseBranch}. Protected branches are never direct push targets.</p>
                 </div>
                 <div className="flex min-w-[220px] flex-1 gap-2 sm:flex-none">
@@ -1119,12 +1128,12 @@ export default function Home() {
               </div>
               {isBuildModeOpen ? (
                 <div className="mt-3 rounded-xl bg-white/70 px-3 py-2 text-xs text-emerald-900" data-testid="section4-push-policy">
-                  <p className="font-semibold">Build Mode: {selectedBuildTarget.name} on branch {openedBuildBranch.branchName}</p>
-                  <p className="mt-1">Section 4 push policy: protected branches blocked, clean tree required, Conventional Commit required, and .env.agent is injected but never committed.</p>
+                  <p className="font-semibold">Project: {selectedBuildTarget.name} • Branch: {openedBuildBranch.branchName}</p>
+                  <p className="mt-1">Push checks: protected branches blocked, working tree must be clean, AI environment file is never committed.</p>
                   <Button type="button" variant="outline" onClick={handlePushBuildBranch} disabled={isMutating || openedBuildBranch.state !== "clean"} className="mt-2 rounded-xl border-emerald-200 bg-white text-xs text-emerald-900" data-testid="section4-push-button">
-                    {pushBuildBranchMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <GitBranch className="mr-2 h-3.5 w-3.5" />} Push branch with policy checks
+                    {pushBuildBranchMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <GitBranch className="mr-2 h-3.5 w-3.5" />} Push branch
                   </Button>
-                  <span className="ml-2 font-mono text-[11px]">Push state: {openedBuildBranch.pushState ?? "never_pushed"}</span>
+                  <span className="ml-2 font-mono text-[11px]">Push status: {pushStatusLabel(openedBuildBranch.pushState)}</span>
                 </div>
               ) : null}
             </div>
@@ -1614,8 +1623,8 @@ export default function Home() {
 
                   {selectedBuildTarget ? (
                     <div className="mb-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-xs leading-5 text-emerald-900">
-                      <p className="font-semibold">Read-only Build Target tree</p>
-                      <p className="mt-1">Section 1 links this task to {selectedBuildTarget.name}. Git writes remain behind explicit Build Branch actions; shipped task files below are not replaced.</p>
+                      <p className="font-semibold">Read-only project tree</p>
+                      <p className="mt-1">This task is linked to {selectedBuildTarget.name}. Git writes stay behind explicit working-branch actions; shipped task files below are not replaced.</p>
                     </div>
                   ) : null}
                   <FilesystemPanel workspaceId={selectedTaskId ?? undefined} />

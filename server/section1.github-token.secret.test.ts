@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { testBuildTargetConnection } from "./buildRunner";
 
 describe("Section 1 GitHub token secret validation", () => {
-  it("validates BUILD_TARGET_GITHUB_TOKEN can access the selected Build Target repository", async () => {
+  it("validates BUILD_TARGET_GITHUB_TOKEN can access the selected Project repository", async () => {
     expect(process.env.BUILD_TARGET_GITHUB_TOKEN, "BUILD_TARGET_GITHUB_TOKEN must be injected for Section 1 acceptance").toBeTruthy();
 
     const result = await testBuildTargetConnection({

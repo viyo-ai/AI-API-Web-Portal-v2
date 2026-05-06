@@ -742,7 +742,7 @@ export async function createBuildTarget(values: {
   governanceBudgetEnforced?: boolean;
 }) {
   const db = await getDb();
-  if (!db) throw new Error("Database is required for Build Targets");
+  if (!db) throw new Error("Database is required for Projects");
   const timestamp = nowMs();
   const defaultBaseBranch = (values.defaultBaseBranch ?? "main").trim() || "main";
   const insertValues: InsertBuildTarget = {
@@ -763,7 +763,7 @@ export async function createBuildTarget(values: {
   };
   await db.insert(buildTargets).values(insertValues);
   const created = await db.select().from(buildTargets).where(and(eq(buildTargets.ownerUserId, values.ownerUserId), eq(buildTargets.createdAt, timestamp))).orderBy(desc(buildTargets.id)).limit(1);
-  if (!created[0]) throw new Error("Failed to create Build Target");
+  if (!created[0]) throw new Error("Failed to create Project");
   return created[0];
 }
 
@@ -780,7 +780,7 @@ export async function updateBuildTarget(values: {
   governanceBudgetEnforced?: boolean;
 }) {
   const db = await getDb();
-  if (!db) throw new Error("Database is required for Build Targets");
+  if (!db) throw new Error("Database is required for Projects");
   const set: Partial<InsertBuildTarget> = { updatedAt: nowMs() };
   if (values.name !== undefined) set.name = sanitizeBuildTargetName(values.name);
   if (values.defaultBaseBranch !== undefined) set.defaultBaseBranch = values.defaultBaseBranch.trim() || "main";
@@ -804,20 +804,20 @@ export async function updateBuildTargetGovernanceSettings(values: { targetId: nu
 
 export async function archiveBuildTarget(targetId: number, ownerUserId: number) {
   const db = await getDb();
-  if (!db) throw new Error("Database is required for Build Targets");
+  if (!db) throw new Error("Database is required for Projects");
   await db.update(buildTargets).set({ status: "archived", updatedAt: nowMs() }).where(and(eq(buildTargets.id, targetId), eq(buildTargets.ownerUserId, ownerUserId)));
 }
 
 export async function listBuildTargetsForOwner(ownerUserId: number, includeArchived = false, limit = 50) {
   const db = await getDb();
-  if (!db) throw new Error("Database is required for Build Targets");
+  if (!db) throw new Error("Database is required for Projects");
   const where = includeArchived ? eq(buildTargets.ownerUserId, ownerUserId) : and(eq(buildTargets.ownerUserId, ownerUserId), eq(buildTargets.status, "active"));
   return db.select().from(buildTargets).where(where).orderBy(desc(buildTargets.updatedAt)).limit(limit);
 }
 
 export async function getBuildTargetForOwner(targetId: number, ownerUserId: number) {
   const db = await getDb();
-  if (!db) throw new Error("Database is required for Build Targets");
+  if (!db) throw new Error("Database is required for Projects");
   const result = await db.select().from(buildTargets).where(and(eq(buildTargets.id, targetId), eq(buildTargets.ownerUserId, ownerUserId))).limit(1);
   return result[0];
 }

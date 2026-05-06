@@ -108,7 +108,7 @@ async function pushOwnedBuildBranch(branchId: number, ownerUserId: number) {
   const branch = await getBuildBranchForOwner(branchId, ownerUserId);
   if (!branch) throw new Error("Build Branch not found or not owned by the authenticated user");
   const target = await getBuildTargetForOwner(branch.buildTargetId, ownerUserId);
-  if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+  if (!target) throw new Error("Project not found or not owned by the authenticated user");
   await updateBuildBranchPushState({ branchId: branch.id, ownerUserId, pushState: "pushing", lastPushedCommit: branch.lastPushedCommit ?? null, lastPushError: null });
   const result = await pushBranch({ workspacePath: branch.workspacePath, branchName: branch.branchName, target: buildTargetGitConfig(target) });
   const updated = await updateBuildBranchPushState({
@@ -324,13 +324,13 @@ async function runGenerationTurn(input: { task: OwnedTask; ownerUserId: number; 
       eventType: "status",
       status: governance.missingRequired.length > 0 ? "blocked" : "succeeded",
       content: governance.missingRequired.length > 0
-        ? `Governance loading blocked this Build Mode turn. Missing required file(s): ${governance.missingRequired.join(", ")}.`
-        : `Governance loaded for this Build Mode turn: ${governance.documents.length} document(s), ${governance.skippedOptional.length} optional file(s) skipped.`,
+        ? `Can't start: this project's rule book is missing — ${governance.missingRequired.join(", ")}.`
+        : `Loaded rule books for this task: ${governance.documents.length} document(s), ${governance.skippedOptional.length} optional file(s) skipped.`,
       metadataJson: serializeJson({ turnId: turn.id, governance }),
     });
 
     if (governance.missingRequired.length > 0) {
-      await failTurn(turn.id, input.ownerUserId, "GOVERNANCE_REQUIRED_FILES_MISSING", `Missing required governance files: ${governance.missingRequired.join(", ")}`, "blocked");
+      await failTurn(turn.id, input.ownerUserId, "GOVERNANCE_REQUIRED_FILES_MISSING", `Missing required rule books: ${governance.missingRequired.join(", ")}`, "blocked");
       await updateTaskStatus(input.task.id, input.ownerUserId, "blocked");
       return turn;
     }
@@ -635,14 +635,14 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const target = await getBuildTargetForOwner(input.targetId, ctx.user.id);
-        if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+        if (!target) throw new Error("Project not found or not owned by the authenticated user");
         return updateBuildTarget({ ...input, ownerUserId: ctx.user.id });
       }),
     updateSettings: protectedProcedure
       .input(z.object({ targetId: z.number().int().positive(), agentEnvVarMap: agentEnvVarMapSchema.optional(), governanceFiles: governanceFilesSchema.optional(), governanceBudgetEnforced: z.boolean().optional() }))
       .mutation(async ({ ctx, input }) => {
         const target = await getBuildTargetForOwner(input.targetId, ctx.user.id);
-        if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+        if (!target) throw new Error("Project not found or not owned by the authenticated user");
         if (input.governanceFiles !== undefined || input.governanceBudgetEnforced !== undefined) {
           return updateBuildTarget({
             targetId: input.targetId,
@@ -669,7 +669,7 @@ export const appRouter = router({
       .input(z.object({ targetId: z.number().int().positive() }))
       .query(async ({ ctx, input }) => {
         const target = await getBuildTargetForOwner(input.targetId, ctx.user.id);
-        if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+        if (!target) throw new Error("Project not found or not owned by the authenticated user");
         const branches = await listBuildBranchesForTarget(input.targetId, ctx.user.id, 100);
         return { target, branches };
       }),
@@ -683,13 +683,13 @@ export const appRouter = router({
     }),
     get: protectedProcedure.input(z.object({ targetId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       const target = await getBuildTargetForOwner(input.targetId, ctx.user.id);
-      if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+      if (!target) throw new Error("Project not found or not owned by the authenticated user");
       const branches = await listBuildBranchesForTarget(input.targetId, ctx.user.id, 100);
       return { target, branches };
     }),
     updateSettings: protectedProcedure.input(z.object({ targetId: z.number().int().positive(), agentEnvVarMap: agentEnvVarMapSchema.optional(), governanceFiles: governanceFilesSchema.optional(), governanceBudgetEnforced: z.boolean().optional() })).mutation(async ({ ctx, input }) => {
       const target = await getBuildTargetForOwner(input.targetId, ctx.user.id);
-      if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+      if (!target) throw new Error("Project not found or not owned by the authenticated user");
       if (input.governanceFiles !== undefined || input.governanceBudgetEnforced !== undefined) {
         return updateBuildTarget({ targetId: input.targetId, ownerUserId: ctx.user.id, agentEnvVarMap: input.agentEnvVarMap, governanceFiles: input.governanceFiles, governanceBudgetEnforced: input.governanceBudgetEnforced });
       }
@@ -703,7 +703,7 @@ export const appRouter = router({
       .input(z.object({ buildTargetId: z.number().int().positive(), branchName: z.string().trim().min(1).max(220), baseBranch: z.string().trim().min(1).max(160).optional(), taskId: z.number().int().positive().nullable().optional() }))
       .mutation(async ({ ctx, input }) => {
         const target = await getBuildTargetForOwner(input.buildTargetId, ctx.user.id);
-        if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+        if (!target) throw new Error("Project not found or not owned by the authenticated user");
         const branchName = assertSafeBranchName(input.branchName);
         const branch = await createBuildBranch({ buildTargetId: target.id, ownerUserId: ctx.user.id, branchName, baseBranch: input.baseBranch ?? target.defaultBaseBranch, workspacePath: getBuildBranchWorkspacePath({ ownerUserId: ctx.user.id, buildTargetId: target.id, branchId: Date.now(), branchName }), taskId: input.taskId ?? null });
         void cloneOrSyncBranch({ ownerUserId: ctx.user.id, buildTargetId: target.id, branchId: branch.id, branchName, baseBranch: input.baseBranch ?? target.defaultBaseBranch, workspacePath: branch.workspacePath, target: { repoUrl: target.repoUrl, defaultBaseBranch: target.defaultBaseBranch, githubTokenEnvVar: target.githubTokenEnvVar, protectedBranches: parseJsonStringArray(target.protectedBranchesJson, ["main", "staging"]) } })
@@ -731,9 +731,9 @@ export const appRouter = router({
     list: protectedProcedure.input(z.object({ buildTargetId: z.number().int().positive(), targetId: z.number().int().positive().optional(), limit: z.number().int().min(1).max(100).default(50) })).query(async ({ ctx, input }) => listBuildBranchesForTarget(input.buildTargetId ?? input.targetId!, ctx.user.id, input.limit)),
     create: protectedProcedure.input(z.object({ buildTargetId: z.number().int().positive().optional(), targetId: z.number().int().positive().optional(), branchName: z.string().trim().min(1).max(220), baseBranch: z.string().trim().min(1).max(160).optional(), taskId: z.number().int().positive().nullable().optional() })).mutation(async ({ ctx, input }) => {
       const buildTargetId = input.buildTargetId ?? input.targetId;
-      if (!buildTargetId) throw new Error("Build Target is required.");
+      if (!buildTargetId) throw new Error("Project is required.");
       const target = await getBuildTargetForOwner(buildTargetId, ctx.user.id);
-      if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+      if (!target) throw new Error("Project not found or not owned by the authenticated user");
       const branchName = assertSafeBranchName(input.branchName);
       const branch = await createBuildBranch({ buildTargetId: target.id, ownerUserId: ctx.user.id, branchName, baseBranch: input.baseBranch ?? target.defaultBaseBranch, workspacePath: getBuildBranchWorkspacePath({ ownerUserId: ctx.user.id, buildTargetId: target.id, branchId: Date.now(), branchName }), taskId: input.taskId ?? null });
       void cloneOrSyncBranch({ ownerUserId: ctx.user.id, buildTargetId: target.id, branchId: branch.id, branchName, baseBranch: input.baseBranch ?? target.defaultBaseBranch, workspacePath: branch.workspacePath, target: { repoUrl: target.repoUrl, defaultBaseBranch: target.defaultBaseBranch, githubTokenEnvVar: target.githubTokenEnvVar, protectedBranches: parseJsonStringArray(target.protectedBranchesJson, ["main", "staging"]) } })

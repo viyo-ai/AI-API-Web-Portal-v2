@@ -77,12 +77,12 @@ export function validateGovernanceFiles(entries: GovernanceFileConfig[]): string
   const resolverKeys = new Set(entries.filter((entry) => entry.role === "placeholder_resolver" && entry.resolverKey).map((entry) => entry.resolverKey as string));
 
   if (entries.length > 0 && !entries.some((entry) => entry.role === "governance")) {
-    errors.push("Governance Files must include at least one governance document when the list is not empty.");
+    errors.push("Project rule books must include at least one rule book document when the list is not empty.");
   }
 
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index];
-    const label = `Governance file #${index + 1}`;
+    const label = `Rule book #${index + 1}`;
     if (!entry.path.trim()) errors.push(`${label} requires a path.`);
     if (path.posix.isAbsolute(entry.path) || entry.path.startsWith("/") || entry.path.includes("..")) {
       errors.push(`${label} path must be relative and must not contain '..'.`);
@@ -123,14 +123,14 @@ export function normalizeGovernanceFiles(entries: GovernanceFileConfig[] | undef
 }
 
 function resolveWorkspacePath(workspacePath: string, relativePath: string) {
-  if (!relativePath.trim()) throw new Error("Governance file path is required.");
+  if (!relativePath.trim()) throw new Error("Rule book path is required.");
   if (path.posix.isAbsolute(relativePath) || relativePath.startsWith("/") || relativePath.includes("..")) {
-    throw new Error(`Unsafe governance file path: ${relativePath}`);
+    throw new Error(`Unsafe rule book path: ${relativePath}`);
   }
   const root = path.resolve(workspacePath);
   const absolute = path.resolve(root, relativePath);
   if (absolute !== root && !absolute.startsWith(`${root}${path.sep}`)) {
-    throw new Error(`Unsafe governance file path: ${relativePath}`);
+    throw new Error(`Unsafe rule book path: ${relativePath}`);
   }
   return absolute;
 }
@@ -161,7 +161,7 @@ export async function loadGovernanceForTask(taskId: string | number): Promise<Go
 
   const { getDb } = await import("../db");
   const db = await getDb();
-  if (!db) throw new Error("Database is required for governance loading");
+  if (!db) throw new Error("Database is required for rule book loading");
 
   const taskRows = await db.select().from(tasks).where(eq(tasks.id, numericTaskId)).limit(1);
   const task = taskRows[0];
@@ -186,7 +186,7 @@ export async function loadGovernanceForTask(taskId: string | number): Promise<Go
     .limit(1);
   const target = targetRows[0];
   if (!target) {
-    return { documents: [], missingRequired: [`Build Target ${branch.buildTargetId}`], skippedOptional: [], loadDurationMs: Date.now() - startedAt, budgetEnforcementEnabled: true };
+    return { documents: [], missingRequired: [`Project ${branch.buildTargetId}`], skippedOptional: [], loadDurationMs: Date.now() - startedAt, budgetEnforcementEnabled: true };
   }
 
   const config = parseGovernanceFiles(target.governanceFilesJson);
@@ -307,5 +307,5 @@ export function renderGovernanceBlock(input: { targetName?: string; documents: L
   const documents = input.documents
     .map((document) => `=== ${document.path} ===\n${document.content}`)
     .join("\n\n");
-  return `${targetLine}\n\nThe following governance documents are authoritative for this task. Read them\nin order before responding to the task instruction. Treat any conflict between\nyour prior knowledge and these documents as resolved by the documents.\n\n${documents}\n\nHard rules:\n- Do not modify any of the governance documents listed above\n- Out-of-scope work is logged, not done; use the file the project's governance designates for gap logging\n- Conventional commits with task ID\n- Run validation before claiming complete`;
+  return `${targetLine}\n\nThe following rule book documents are authoritative for this task. Read them\nin order before responding to the task instruction. Treat any conflict between\nyour prior knowledge and these documents as resolved by the documents.\n\n${documents}\n\nHard rules:\n- Do not modify any of the rule book documents listed above\n- Out-of-scope work is logged, not done; use the file the project's governance designates for gap logging\n- Conventional commits with task ID\n- Run validation before claiming complete`;
 }

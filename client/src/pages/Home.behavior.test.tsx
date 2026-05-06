@@ -140,6 +140,22 @@ let mockCredentialStates = [
   { provider: "claude", configured: false, status: "missing", reason: "Missing CLAUDE_API_KEY." },
   { provider: "kimi", configured: true, status: "configured", reason: "Cloudflare Workers AI credentials are present." },
 ];
+let mockBuildTargets: Array<{
+  id: number;
+  ownerUserId: number;
+  name: string;
+  repoUrl: string;
+  defaultBaseBranch: string;
+  protectedBranchesJson: string;
+  validationCommandsJson: string;
+  serviceChecksJson: string;
+  agentEnvVarMapJson: string;
+  governanceFilesJson: string;
+  governanceBudgetEnforced: boolean;
+  archivedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}> = [];
 
 vi.mock("@/_core/hooks/useAuth", () => ({
   useAuth: () => ({
@@ -238,7 +254,7 @@ vi.mock("@/lib/trpc", () => ({
       upload: { useMutation: () => ({ mutateAsync: uploadWorkspaceFileMock, isPending: false }) },
     },
     buildTargets: {
-      list: { useQuery: () => ({ data: [], isLoading: false }) },
+      list: { useQuery: () => ({ data: mockBuildTargets, isLoading: false }) },
       get: { useQuery: () => ({ data: undefined, isLoading: false }) },
       create: { useMutation: () => ({ mutateAsync: createBuildTargetMock, isPending: false }) },
       updateSettings: { useMutation: () => ({ mutateAsync: updateBuildTargetSettingsMock, isPending: false }) },
@@ -324,6 +340,7 @@ beforeEach(() => {
   credentialsRefreshMock.mockReset();
   createBuildTargetMock.mockReset();
   createBuildBranchMock.mockReset();
+  pushBuildBranchMock.mockReset();
   filesystemTreeRefetchMock.mockReset();
   filesystemWriteMock.mockReset();
   filesystemMkdirMock.mockReset();
@@ -337,6 +354,8 @@ beforeEach(() => {
   stopGenerationMock.mockResolvedValue({ stopped: true, stop: { destructiveOperation: false, boundary: "before_next_generation_step" } });
   createFileMetadataMock.mockResolvedValue(mockTaskFiles[0]);
   attachGlobalToTaskMock.mockResolvedValue({ id: 501, taskId: 7, globalFileId: 56, attachedLabel: "Owner playbook.pdf", file: mockGlobalFiles[0] });
+  createBuildBranchMock.mockResolvedValue({ id: 301, branchName: "feature/plain-language", state: "clean", pushState: "never_pushed", workspacePath: "/tmp/plain-language", taskId: 7 });
+  pushBuildBranchMock.mockResolvedValue({ id: 301, branchName: "feature/plain-language", state: "clean", pushState: "pushed", workspacePath: "/tmp/plain-language", taskId: 7 });
   uploadWorkspaceFileMock.mockResolvedValue({
     relativePath: "uploads/1777999300000-owner-brief.txt",
     storageKey: "task-7/uploads/owner-brief.txt",
@@ -394,6 +413,7 @@ beforeEach(() => {
     { provider: "claude", configured: false, status: "missing", reason: "Missing CLAUDE_API_KEY." },
     { provider: "kimi", configured: true, status: "configured", reason: "Cloudflare Workers AI credentials are present." },
   ];
+  mockBuildTargets = [];
 } );
 
 afterEach(() => {
@@ -431,6 +451,51 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(screen.queryByText(/TerminalPanel|WorkspaceCommandCenter|FilesystemPanel/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/PTY shell terminal/i)).not.toBeInTheDocument();
     expect(FakeWebSocket.instances).toHaveLength(0);
+  });
+
+  it("renders §3A plain-language project and rule-book vocabulary without legacy owner labels", async () => {
+    const user = userEvent.setup();
+    mockBuildTargets = [
+      {
+        id: 77,
+        ownerUserId: 42,
+        name: "AI API Portal",
+        repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2",
+        defaultBaseBranch: "main",
+        protectedBranchesJson: JSON.stringify(["main", "staging"]),
+        validationCommandsJson: JSON.stringify(["pnpm check", "pnpm test"]),
+        serviceChecksJson: JSON.stringify([]),
+        agentEnvVarMapJson: JSON.stringify({ WORKSHOP_GITHUB_TOKEN: "BUILD_TARGET_GITHUB_TOKEN" }),
+        governanceFilesJson: JSON.stringify([{ path: "docs/rules.md", role: "governance", required: true, dynamic: false }]),
+        governanceBudgetEnforced: true,
+        archivedAt: null,
+        createdAt: 1777999300000,
+        updatedAt: 1777999400000,
+      },
+    ];
+
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    expect(screen.getAllByText(/Projects/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Project: AI API Portal/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Project rule books/i)).toBeInTheDocument();
+    expect(screen.getByText(/Files in your repo that the AI reads on every task/i)).toBeInTheDocument();
+    expect(screen.getByText(/Path includes current focus/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Rule book/i }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /Current focus indicator/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Focus indicator name/i)).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText(/feature\/portal-task/i), "feature/plain-language");
+    await user.click(screen.getByRole("button", { name: /^Open$/i }));
+    expect(await screen.findByText(/Push checks: protected branches blocked/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Push branch$/i })).toBeInTheDocument();
+    expect(screen.getByText(/Push status: Never pushed/i)).toBeInTheDocument();
+
+    const ownerCopy = document.body.textContent ?? "";
+    ["Build Target", "Build Mode", "Governance Files", "Validation Commands", "Service Checks", "Agent Env Var", "Conventional Commit", "Token Budget", "Pre-push Hook"].forEach((legacyLabel) => {
+      expect(ownerCopy).not.toContain(legacyLabel);
+    });
   });
 
   it("drafts an empty-memory note into the focused task composer", async () => {
