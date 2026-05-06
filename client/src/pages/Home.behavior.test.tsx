@@ -300,7 +300,14 @@ describe("Home v2 task-first workspace behavior", () => {
     expect((await screen.findAllByText("Implement v2 shell")).length).toBeGreaterThan(0);
     expect(screen.getByText(/Task-first production workspace/i)).toBeInTheDocument();
     expect(screen.getByText(/Center task thread/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/Task-scoped files/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Task folder/i)).toBeInTheDocument();
+    expect(screen.getByTestId("handoff-indicator")).toBeInTheDocument();
+    expect(screen.getByTestId("handoff-explanation")).toBeInTheDocument();
+    expect(screen.getByTestId("worker-action-log")).toBeInTheDocument();
+    expect(screen.getByText(/read-only activity feed/i)).toBeInTheDocument();
+    expect(screen.getByTestId("windows-file-manager")).toBeInTheDocument();
+    expect(screen.getByText(/normal folder view stays non-technical/i)).toBeInTheDocument();
+    expect(screen.getByText(/Claude → shared task context → Kimi/i)).toBeInTheDocument();
     expect(screen.getByText(/Wire the task-first AI coordinator workspace/i)).toBeInTheDocument();
     expect(screen.getByTestId("center-task-thread-scroll")).toHaveClass("overflow-y-auto");
     expect(screen.getByTestId("manus-style-composer")).toBeInTheDocument();
@@ -334,7 +341,7 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(screen.getByText(/Missing Cloudflare Workers AI credentials\./i)).toBeInTheDocument();
   });
 
-  it("shows newest owner-facing task messages first and hides technical orchestration details until requested", async () => {
+  it("shows owner-facing task messages in normal chat order with the newest message closest to the composer", async () => {
     const user = userEvent.setup();
     mockThread = {
       task: sampleTask,
@@ -378,13 +385,15 @@ describe("Home v2 task-first workspace behavior", () => {
 
     render(<Home />);
 
-    const newest = await screen.findByText("Newest plain answer from Kimi after initialization.");
-    const older = screen.getByText("Older owner request");
-    expect(newest.compareDocumentPosition(older) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const older = await screen.findByText("Older owner request");
+    const newest = screen.getByText("Newest plain answer from Kimi after initialization.");
+    expect(older.compareDocumentPosition(newest) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText("Route AUTO selected dual Claude and Kimi initialization.")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("chat-bubble-ai").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("chat-bubble-user").length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: /show technical details/i }));
-    expect(screen.getByText("Route AUTO selected dual Claude and Kimi initialization.")).toBeInTheDocument();
+    expect(screen.getAllByText("Route AUTO selected dual Claude and Kimi initialization.").length).toBeGreaterThan(0);
   });
 
   it("summarizes empty Kimi responses as owner-friendly recovery guidance while keeping raw diagnostics in technical details", async () => {
@@ -420,11 +429,11 @@ describe("Home v2 task-first workspace behavior", () => {
 
     render(<Home />);
 
-    expect(await screen.findByText(/Kimi did not return usable text/i)).toBeInTheDocument();
+    expect((await screen.findAllByText(/Kimi did not return usable text/i)).length).toBeGreaterThan(0);
     expect(screen.queryByText("Kimi returned an empty response.")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /show technical details/i }));
-    expect(screen.getByText("Kimi returned an empty response.")).toBeInTheDocument();
+    expect(screen.getAllByText("Kimi returned an empty response.").length).toBeGreaterThan(0);
   });
 
   it("submits the selected task message with Enter and respects the explicit Kimi route selector", async () => {
@@ -526,9 +535,10 @@ describe("Home v2 task-first workspace behavior", () => {
     render(<Home />);
 
     await screen.findAllByText("Implement v2 shell");
+    await user.click(screen.getByText(/Advanced: connect a stored file manually/i));
     await user.type(screen.getByPlaceholderText("relative/path.md"), "docs/implementation-note.md");
     await user.type(screen.getByPlaceholderText("/manus-storage/..."), "/manus-storage/real-task-file-reference");
-    await user.click(screen.getByRole("button", { name: /record file metadata/i }));
+    await user.click(screen.getByRole("button", { name: /add file to this task/i }));
 
     expect(createFileMetadataMock).toHaveBeenCalledWith({
       taskId: 7,

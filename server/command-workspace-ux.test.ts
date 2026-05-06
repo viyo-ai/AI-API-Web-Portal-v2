@@ -16,9 +16,9 @@ describe("v2 task-first workspace production regressions", () => {
     expect(source).toContain("Live tasks");
     expect(source).toContain("Global memory");
     expect(source).toContain("Center task thread");
-    expect(source).toContain("Task files and context");
-    expect(source).toContain("Task-scoped files");
-    expect(source).toContain("Master files view");
+    expect(source).toContain("Files and activity");
+    expect(source).toContain("Task folder");
+    expect(source).toContain("All recorded files");
     expect(source).toContain("bg-[#f7f6f2]");
   });
 
@@ -29,7 +29,7 @@ describe("v2 task-first workspace production regressions", () => {
 
     expect(source).toContain("TerminalPanel");
     expect(source).toContain("FilesystemPanel");
-    expect(source).toContain("developer-only controls");
+    expect(source).toContain("Advanced tools");
     expect(source).toContain("Show developer diagnostics");
     expect(source).not.toContain("WorkspaceCommandCenter");
     expect(source).not.toMatch(/Draft safe plan|Approve and run|opencode\.ai background CLI/i);
@@ -59,12 +59,12 @@ describe("v2 task-first workspace production regressions", () => {
 
     expect(source).toContain("overflow-x-hidden");
     expect(source).toContain("xl:grid-cols-[300px_minmax(0,1fr)_390px]");
-    expect(source).toContain("flex h-screen min-h-0 min-w-0 flex-col border-l");
+    expect(source).toContain("flex h-screen min-h-0 min-w-0 flex-col overflow-hidden border-l");
     expect(source).toContain("lg:col-span-2 xl:col-span-1");
-    expect(source).toContain("Task-scoped files");
-    expect(source).toContain("Developer diagnostics");
+    expect(source).toContain("Task folder");
+    expect(source).toContain("Advanced tools");
     expect(source).toContain("showAdvancedTools ?");
-    expect(source).toContain("Open, AI-change, rollback, download, and library-promotion intentions unlock only after real task file metadata is recorded");
+    expect(source).toContain("normal folder view stays non-technical");
   });
 
   it("exposes an explicit Auto, Kimi, and Claude route selector without a hidden provider dropdown", () => {
@@ -119,9 +119,9 @@ describe("v2 task-first workspace production regressions", () => {
 
     expect(source).toContain("No live tasks yet");
     expect(source).toContain("Durable memory is empty");
-    expect(source).toContain("No files have been attached to this task yet");
+    expect(source).toContain("This task folder is empty. Files will appear here only after a real storage-backed file record exists.");
     expect(source).toContain("The all-files index is empty");
-    expect(source).toContain("No fake seeded files or memories");
+    expect(source).toContain("only after a real storage-backed file record exists");
     expect(source).not.toMatch(/demo task|sample task|placeholder task|fake task/i);
   });
 });

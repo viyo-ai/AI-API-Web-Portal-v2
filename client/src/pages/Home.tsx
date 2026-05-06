@@ -11,19 +11,19 @@ import TerminalPanel from "@/components/TerminalPanel";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import {
+  Activity,
   Archive,
   Bot,
   Brain,
   CheckCircle2,
   CircleAlert,
   Clock3,
+  Download,
+  File,
   FileCode2,
   FileText,
+  Folder,
   FolderOpen,
-  History,
-  Library,
-  RotateCcw,
-  Download,
   Loader2,
   LockKeyhole,
   MessageSquareText,
@@ -32,10 +32,12 @@ import {
   PanelRight,
   Paperclip,
   Plus,
+  RotateCcw,
   Search,
   SendHorizontal,
   ShieldCheck,
   Smile,
+  Sparkles,
   Workflow,
 } from "lucide-react";
 
@@ -80,6 +82,78 @@ function eventTitle(actor: string, eventType: string) {
   return `${actor} · ${eventType.replaceAll("_", " ")}`;
 }
 
+type TaskFileRecord = {
+  id: number;
+  taskId?: number;
+  storageUrl: string;
+  relativePath: string;
+  version: number;
+  mimeType: string | null;
+  createdAt?: number;
+  sizeBytes?: number | null;
+};
+
+function fileNameFromPath(relativePath: string) {
+  return relativePath.split("/").filter(Boolean).pop() || relativePath || "Untitled file";
+}
+
+function folderNameFromPath(relativePath: string) {
+  const parts = relativePath.split("/").filter(Boolean);
+  return parts.length > 1 ? parts[0] : "";
+}
+
+function readableFileKind(file: TaskFileRecord) {
+  const path = file.relativePath.toLowerCase();
+  if (file.mimeType?.includes("markdown") || path.endsWith(".md")) return "Markdown document";
+  if (file.mimeType?.includes("json") || path.endsWith(".json")) return "JSON file";
+  if (path.endsWith(".ts") || path.endsWith(".tsx") || path.endsWith(".js") || path.endsWith(".jsx")) return "Code file";
+  if (file.mimeType?.includes("image")) return "Image file";
+  if (file.mimeType?.includes("pdf") || path.endsWith(".pdf")) return "PDF document";
+  return file.mimeType ?? "File";
+}
+
+function activityStepForEvent(event: ThreadEvent) {
+  const baseDescription = ownerFacingText(event.content);
+  if (event.eventType === "route_decision") {
+    return { title: "AI coordinator chose the next worker", description: "The route for this turn was checked or selected. Provider availability remains visible in the credential status card.", tone: "slate" };
+  }
+  if (event.eventType === "context_snapshot") {
+    return { title: "Shared context was prepared", description: "The task thread, saved memory, and task files were gathered so Claude and Kimi work from the same context.", tone: "sky" };
+  }
+  if (event.eventType === "model_start") {
+    return { title: "AI worker started", description: baseDescription, tone: "amber" };
+  }
+  if (event.actor === "claude" && event.eventType === "model_review") {
+    return { title: "Claude prepared a plan or review", description: "Claude added planning or review guidance for this task turn.", tone: "violet" };
+  }
+  if (event.actor === "claude") {
+    return { title: "Claude answered", description: "Claude added an owner-visible response to the task thread.", tone: "violet" };
+  }
+  if (event.actor === "kimi") {
+    return { title: "Kimi drafted execution", description: "Kimi added the implementation-oriented response for this task turn.", tone: "cyan" };
+  }
+  if (event.eventType === "file_event") {
+    return { title: "Task files were updated", description: baseDescription, tone: "emerald" };
+  }
+  if (event.eventType === "error" || event.status === "failed" || event.status === "blocked") {
+    return { title: "A worker needs attention", description: ownerProviderFailureMessage(event) ?? baseDescription, tone: "rose" };
+  }
+  if (event.eventType === "status") {
+    return { title: "Task turn was saved", description: "The latest model output was recorded in this task timeline.", tone: "emerald" };
+  }
+  return { title: eventTitle(event.actor, event.eventType), description: baseDescription, tone: "slate" };
+}
+
+const activityDotTone: Record<string, string> = {
+  amber: "bg-amber-400",
+  cyan: "bg-cyan-400",
+  emerald: "bg-emerald-500",
+  rose: "bg-rose-500",
+  sky: "bg-sky-500",
+  slate: "bg-slate-400",
+  violet: "bg-violet-500",
+};
+
 type ThreadEvent = {
   id: number;
   taskId?: number;
@@ -99,6 +173,11 @@ function eventTimestamp(event: ThreadEvent) {
 function newestFirst(a: ThreadEvent, b: ThreadEvent) {
   const delta = eventTimestamp(b) - eventTimestamp(a);
   return delta || b.id - a.id;
+}
+
+function oldestFirst(a: ThreadEvent, b: ThreadEvent) {
+  const delta = eventTimestamp(a) - eventTimestamp(b);
+  return delta || a.id - b.id;
 }
 
 function isOwnerVisibleEvent(event: ThreadEvent) {
@@ -174,12 +253,12 @@ export default function Home() {
   const selectedThread = threadQuery.data;
   const selectedTask = selectedThread?.task ?? tasks.find((task) => task.id === selectedTaskId) ?? null;
   const events = ((selectedThread?.events ?? []) as ThreadEvent[]);
-  const ownerVisibleEvents = useMemo(() => events.filter(isOwnerVisibleEvent).sort(newestFirst), [events]);
+  const ownerVisibleEvents = useMemo(() => events.filter(isOwnerVisibleEvent).sort(oldestFirst), [events]);
   const technicalEvents = useMemo(() => events.filter((event) => !isOwnerVisibleEvent(event)).sort(newestFirst), [events]);
   const latestProviderFailure = useMemo(() => technicalEvents.find((event) => event.status === "failed" || event.status === "blocked"), [technicalEvents]);
   const providerFailureCopy = ownerProviderFailureMessage(latestProviderFailure);
-  const taskFiles = taskFilesQuery.data ?? [];
-  const allFiles = allFilesQuery.data ?? [];
+  const taskFiles = (taskFilesQuery.data ?? []) as TaskFileRecord[];
+  const allFiles = (allFilesQuery.data ?? []) as TaskFileRecord[];
   const memories = memoryQuery.data ?? [];
   const credentials = credentialsQuery.data?.runtimeStates ?? [];
 
@@ -188,6 +267,31 @@ export default function Home() {
     if (!query) return tasks;
     return tasks.filter((task) => `${task.title} ${task.summary ?? ""} ${task.status}`.toLowerCase().includes(query));
   }, [tasks, searchTerm]);
+
+  const fileExplorerGroups = useMemo(() => {
+    const folders = new Map<string, TaskFileRecord[]>();
+    const rootFiles: TaskFileRecord[] = [];
+    for (const file of taskFiles) {
+      const folder = folderNameFromPath(file.relativePath);
+      if (!folder) {
+        rootFiles.push(file);
+        continue;
+      }
+      folders.set(folder, [...(folders.get(folder) ?? []), file]);
+    }
+    return {
+      folders: Array.from(folders.entries()).map(([name, files]) => ({ name, files })),
+      rootFiles,
+    };
+  }, [taskFiles]);
+
+  const workerActivityItems = useMemo(() => {
+    return events
+      .filter((event) => event.eventType !== "message")
+      .sort(newestFirst)
+      .slice(0, 8)
+      .map((event) => ({ ...activityStepForEvent(event), id: event.id, status: event.status, createdAt: event.createdAt }));
+  }, [events]);
 
   const isMutating = createTask.isPending || updateTaskStatus.isPending || submitMessage.isPending || createFileMetadata.isPending;
 
@@ -326,12 +430,12 @@ export default function Home() {
   }
 
   return (
-    <main className="grid h-screen overflow-hidden overflow-x-hidden bg-[#f7f6f2] text-[#242420] lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_390px]">
-      <aside className="flex h-screen min-h-0 flex-col border-r border-[#d9d8d1] bg-[#f0efeb]">
+    <main className="grid h-screen w-full min-w-0 overflow-hidden overflow-x-hidden bg-[#f7f6f2] text-[#242420] lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_390px]">
+      <aside className="flex h-screen min-h-0 min-w-0 flex-col overflow-hidden border-r border-[#d9d8d1] bg-[#f0efeb]">
         <div className="border-b border-[#d9d8d1] p-4">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-lg font-semibold tracking-[-0.03em] text-[#1f1f1f]">
-              <Bot className="h-5 w-5" /> manus
+            <div className="flex min-w-0 items-center gap-2 text-lg font-semibold tracking-[-0.03em] text-[#1f1f1f]">
+              <Bot className="h-5 w-5 shrink-0" /> <span className="truncate">manus</span>
             </div>
             <Badge className="rounded-full border-emerald-200 bg-emerald-100 text-emerald-800">v2</Badge>
           </div>
@@ -349,7 +453,7 @@ export default function Home() {
           <Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="New task title" className="h-10 rounded-xl border-[#d9d8d1] bg-white text-sm" />
         </div>
 
-        <ScrollArea className="min-h-0 flex-1 px-3 py-3">
+        <ScrollArea className="min-h-0 min-w-0 flex-1 px-3 py-3">
           <div className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">
             <PanelLeft className="h-3.5 w-3.5" /> Live tasks
           </div>
@@ -364,7 +468,7 @@ export default function Home() {
               filteredTasks.map((task) => (
                 <article
                   key={task.id}
-                  className={`w-full rounded-2xl border p-3 text-left transition ${selectedTaskId === task.id ? "border-sky-300 bg-white shadow-sm" : "border-transparent bg-transparent hover:bg-white/70"}`}
+                  className={`w-full overflow-hidden rounded-2xl border p-3 text-left transition ${selectedTaskId === task.id ? "border-sky-300 bg-white shadow-sm" : "border-transparent bg-transparent hover:bg-white/70"}`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <button type="button" onClick={() => setSelectedTaskId(task.id)} className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200">
@@ -444,6 +548,13 @@ export default function Home() {
 
         <div className="min-h-0 flex-1 overflow-y-auto p-5" data-testid="center-task-thread-scroll">
           <div className="mx-auto max-w-4xl space-y-4">
+            {selectedTaskId ? (
+              <div data-testid="handoff-indicator" className="flex flex-wrap items-center gap-2 rounded-2xl border border-sky-100 bg-sky-50/80 px-3 py-2 text-xs leading-5 text-[#4f5f68]">
+                <Sparkles className="h-4 w-4 text-sky-600" />
+                <span className="font-semibold text-[#26333a]">Claude → shared task context → Kimi</span>
+                <span>Claude’s plan can be passed into Kimi automatically during Auto coordination; both workers read the same task thread, saved memory, and task files for the turn.</span>
+              </div>
+            ) : null}
             {!selectedTaskId ? (
               <div className="flex min-h-[42vh] items-end justify-center pb-8 text-center text-sm leading-6 text-[#77766e]">
                 <p className="max-w-lg">Start typing below. A task record is created quietly, and the first submitted message starts the selected model route.</p>
@@ -460,43 +571,12 @@ export default function Home() {
                   </div>
                 ) : null}
 
-                {providerFailureCopy ? (
-                  <article className="rounded-3xl border border-amber-200 bg-amber-50/80 p-4 shadow-sm" data-testid="owner-provider-recovery">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <CircleAlert className="h-4 w-4 text-amber-700" />
-                        <h3 className="text-sm font-semibold text-[#2b2b27]">Plain-English recovery note</h3>
-                      </div>
-                      <Badge variant="outline" className="rounded-full border-amber-300 bg-white text-[10px] text-amber-800">needs attention</Badge>
-                    </div>
-                    <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[#3e3e39]">{providerFailureCopy}</p>
-                  </article>
-                ) : null}
-
-                {ownerVisibleEvents.map((event) => {
-                  const isUser = event.actor === "user";
-                  return (
-                    <div key={event.id} className={`flex gap-2 ${isUser ? "flex-row-reverse justify-end" : "flex-row justify-start"}`}>
-                      <div className={`flex-1 max-w-xl rounded-xl border p-3 shadow-sm text-sm leading-6 ${actorTone[event.actor] ?? actorTone.system}`}>
-                        <div className="flex items-center justify-between gap-2 mb-1">
-                          <h3 className="text-xs font-semibold text-[#2b2b27]">{ownerEventTitle(event)}</h3>
-                          <div className="flex items-center gap-1 text-[10px] text-[#77766e]">
-                            {event.status === "blocked" || event.status === "failed" ? <CircleAlert className="h-3 w-3 text-rose-600" /> : <CheckCircle2 className="h-3 w-3 text-emerald-600" />}
-                          </div>
-                        </div>
-                        <p className="whitespace-pre-wrap text-[#3e3e39]">{ownerEventBody(event)}</p>
-                        <div className="mt-1 text-[10px] text-[#77766e]">{compactDate(event.createdAt)}</div>
-                      </div>
-                    </div>
-                  );
-                })}
-
                 {technicalEvents.length > 0 ? (
                   <div className="rounded-3xl border border-[#deded8] bg-white p-4 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <h3 className="text-sm font-semibold text-[#2b2b27]">Technical history</h3>
-                        <p className="mt-1 text-xs leading-5 text-[#77766e]">Routing decisions, context snapshots, and model-call records are hidden from the normal owner thread.</p>
+                        <p className="mt-1 text-xs leading-5 text-[#77766e]">Routing decisions, context snapshots, and model-call records are hidden above the normal owner chat so the newest message stays closest to the type box.</p>
                       </div>
                       <Button type="button" variant="outline" onClick={() => setShowThreadDetails((value) => !value)} className="rounded-full border-[#d9d8d1] bg-white text-xs">
                         {showThreadDetails ? "Hide technical details" : `Show technical details (${technicalEvents.length})`}
@@ -519,6 +599,42 @@ export default function Home() {
                       </div>
                     ) : null}
                   </div>
+                ) : null}
+
+                {ownerVisibleEvents.map((event) => {
+                  const isUser = event.actor === "user";
+                  return (
+                    <div key={event.id} className={`flex w-full ${isUser ? "justify-end" : "justify-start"}`}>
+                      <div
+                        data-testid={isUser ? "chat-bubble-user" : "chat-bubble-ai"}
+                        className={`max-w-[78%] rounded-2xl border px-3 py-2 text-[13px] leading-5 shadow-sm sm:max-w-[65%] ${
+                          isUser
+                            ? "rounded-br-md border-[#242420] bg-[#242420] text-white"
+                            : `${actorTone[event.actor] ?? actorTone.system} rounded-bl-md text-[#30302b]`
+                        }`}
+                      >
+                        <div className={`mb-1 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] ${isUser ? "justify-end text-white/70" : "justify-between text-[#77766e]"}`}>
+                          <span>{ownerEventTitle(event)}</span>
+                          {event.status === "blocked" || event.status === "failed" ? <CircleAlert className="h-3 w-3 text-rose-500" /> : <CheckCircle2 className={`h-3 w-3 ${isUser ? "text-white/70" : "text-emerald-600"}`} />}
+                        </div>
+                        <p className={`whitespace-pre-wrap ${isUser ? "text-white" : "text-[#34342f]"}`}>{ownerEventBody(event)}</p>
+                        <div className={`mt-1 text-[10px] ${isUser ? "text-right text-white/60" : "text-[#77766e]"}`}>{compactDate(event.createdAt)}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {providerFailureCopy ? (
+                  <article className="rounded-3xl border border-amber-200 bg-amber-50/80 p-4 shadow-sm" data-testid="owner-provider-recovery">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <CircleAlert className="h-4 w-4 text-amber-700" />
+                        <h3 className="text-sm font-semibold text-[#2b2b27]">Plain-English recovery note</h3>
+                      </div>
+                      <Badge variant="outline" className="rounded-full border-amber-300 bg-white text-[10px] text-amber-800">needs attention</Badge>
+                    </div>
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[#3e3e39]">{providerFailureCopy}</p>
+                  </article>
                 ) : null}
               </div>
             )}
@@ -579,76 +695,131 @@ export default function Home() {
         </footer>
       </section>
 
-      <aside className="flex h-screen min-h-0 min-w-0 flex-col border-l border-[#d9d8d1] bg-[#f0efeb] lg:col-span-2 xl:col-span-1">
+      <aside className="flex h-screen min-h-0 min-w-0 flex-col overflow-hidden border-l border-[#d9d8d1] bg-[#f0efeb] lg:col-span-2 xl:col-span-1">
         <div className="border-b border-[#d9d8d1] p-4">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">
-            <PanelRight className="h-4 w-4" /> Task files and context
+            <PanelRight className="h-4 w-4" /> Files and activity
           </div>
-          <h2 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#20201d]">Task files</h2>
+          <h2 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#20201d]">Task folder</h2>
         </div>
 
-        <ScrollArea className="min-h-0 flex-1 p-4">
+        <ScrollArea className="min-h-0 min-w-0 flex-1 p-4">
           <div className="space-y-4">
-            <Card className="border-[#deded8] bg-white text-[#242420]">
+            <Card className="border-[#deded8] bg-white text-[#242420]" data-testid="handoff-explanation">
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Production safeguards</CardTitle>
+                <CardTitle className="flex items-center gap-2 text-base"><Workflow className="h-4 w-4 text-sky-600" /> Claude and Kimi handoff</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2 text-xs leading-5 text-[#686861]">
-                <p>The main UX remains task-first; developer diagnostics stay hidden unless the owner explicitly opens them.</p>
-                <p>Use the center composer toggle for Auto, Kimi, or Claude. Auto coordinates both approved providers; tags remain optional shortcuts.</p>
-                <p>No fake seeded files or memories. Empty states stay honest until real records exist.</p>
-                <p>The workspace operates on your task-scoped files and task history; unsupported file actions stay disabled until real file metadata exists.</p>
+              <CardContent className="space-y-3 text-xs leading-5 text-[#686861]">
+                <p><span className="font-semibold text-[#2f2f2a]">No memory is lost between workers.</span> Every turn assembles the selected task thread, saved memory, and task-file list before any provider call.</p>
+                <div className="rounded-2xl border border-sky-100 bg-sky-50/80 p-3">
+                  <p className="font-semibold text-[#26333a]">Auto route: Claude plans → Kimi executes → Claude can review.</p>
+                  <p className="mt-1">When Auto chooses a dual path, Kimi receives Claude’s plan in the same execution turn instead of starting from a blank conversation.</p>
+                </div>
+                <p className="text-[11px] text-[#77766e]">Credential gates remain explicit. If either worker is unavailable, the task blocks visibly rather than silently switching providers.</p>
               </CardContent>
             </Card>
 
-            <Card className="border-[#deded8] bg-white text-[#242420]">
+            <Card className="border-[#deded8] bg-white text-[#242420]" data-testid="worker-action-log">
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base"><FolderOpen className="h-4 w-4 text-sky-600" /> Task-scoped files</CardTitle>
+                <CardTitle className="flex items-center gap-2 text-base"><Activity className="h-4 w-4 text-emerald-600" /> What the AI is doing</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="rounded-2xl border border-emerald-100 bg-emerald-50/80 p-3 text-xs leading-5 text-[#4f6756]">This is a read-only activity feed for the AI coordinator, Claude, and Kimi. It does not run commands; terminal access remains a separate advanced diagnostic tool.</p>
+                {workerActivityItems.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">No worker activity has been recorded for this task yet. Send a message to start the first Claude or Kimi turn.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {workerActivityItems.map((item) => (
+                      <div key={item.id} className="flex gap-3 rounded-2xl border border-[#ededdf] bg-[#fbfaf7] p-3">
+                        <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${activityDotTone[item.tone] ?? activityDotTone.slate}`} />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-semibold text-[#30302b]">{item.title}</p>
+                          <p className="mt-1 line-clamp-3 text-xs leading-5 text-[#686861]">{item.description}</p>
+                          <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-[#8a8980]">{item.status} · {compactDate(item.createdAt)}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <Button type="button" variant="outline" onClick={() => setShowThreadDetails((value) => !value)} disabled={technicalEvents.length === 0} className="w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
+                  {showThreadDetails ? "Hide activity details" : `Show activity details (${technicalEvents.length})`}
+                </Button>
+                {showThreadDetails && technicalEvents.length > 0 ? (
+                  <div className="space-y-2 rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-3" data-testid="worker-technical-details">
+                    {technicalEvents.slice(0, 6).map((event) => (
+                      <div key={event.id} className="text-[11px] leading-5 text-[#66665f]">
+                        <span className="font-semibold text-[#30302b]">{eventTitle(event.actor, event.eventType)}:</span> {ownerFacingText(event.content)}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <Card className="border-[#deded8] bg-white text-[#242420]" data-testid="windows-file-manager">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base"><FolderOpen className="h-4 w-4 text-amber-600" /> Task files</CardTitle>
+                <div className="mt-2 flex items-center gap-1 rounded-xl border border-[#deded8] bg-[#fbfaf7] px-3 py-2 text-[11px] text-[#66665f]">
+                  <Folder className="h-3.5 w-3.5 text-amber-600" /> This task <span>/</span> Files
+                </div>
               </CardHeader>
               <CardContent className="space-y-3">
                 {taskFiles.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">No files have been attached to this task yet. Add metadata only when a real storage URL exists.</div>
+                  <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">This task folder is empty. Files will appear here only after a real storage-backed file record exists.</div>
                 ) : (
-                  taskFiles.map((file: { id: number; storageUrl: string; relativePath: string; version: number; mimeType: string | null }) => (
-                    <a key={file.id} href={file.storageUrl} className="block rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-3 text-sm hover:border-sky-200" target="_blank" rel="noreferrer">
-                      <div className="flex items-center gap-2 font-semibold text-[#30302b]"><FileCode2 className="h-4 w-4 text-sky-600" /> <span className="truncate">{file.relativePath}</span></div>
-                      <p className="mt-1 text-xs text-[#77766e]">v{file.version} · {file.mimeType ?? "unknown type"}</p>
-                    </a>
-                  ))
-                )}
-                <div className="space-y-2 rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-3">
-                  <Input value={filePath} onChange={(event) => setFilePath(event.target.value)} className="h-9 rounded-xl bg-white text-xs" placeholder="relative/path.md" />
-                  <Input value={fileUrl} onChange={(event) => setFileUrl(event.target.value)} className="h-9 rounded-xl bg-white text-xs" placeholder="/manus-storage/..." />
-                  <Button variant="outline" onClick={handleCreateFileMetadata} disabled={!selectedTaskId || !filePath.trim() || !fileUrl.trim() || createFileMetadata.isPending} className="w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
-                    <FileText className="mr-2 h-3.5 w-3.5" /> Record file metadata
-                  </Button>
-                  <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
-                    <Button type="button" variant="outline" disabled={taskFiles.length === 0} className="h-auto justify-start rounded-xl border-[#d9d8d1] bg-white px-3 py-2 text-left text-[11px] leading-4">
-                      <FileCode2 className="mr-2 h-3.5 w-3.5" /> Open real file
-                    </Button>
-                    <Button type="button" variant="outline" disabled={taskFiles.length === 0} className="h-auto justify-start rounded-xl border-[#d9d8d1] bg-white px-3 py-2 text-left text-[11px] leading-4">
-                      <History className="mr-2 h-3.5 w-3.5" /> View AI changes
-                    </Button>
-                    <Button type="button" variant="outline" disabled={taskFiles.length === 0} className="h-auto justify-start rounded-xl border-[#d9d8d1] bg-white px-3 py-2 text-left text-[11px] leading-4">
-                      <RotateCcw className="mr-2 h-3.5 w-3.5" /> Rollback intent
-                    </Button>
-                    <Button type="button" variant="outline" disabled={taskFiles.length === 0} className="h-auto justify-start rounded-xl border-[#d9d8d1] bg-white px-3 py-2 text-left text-[11px] leading-4">
-                      <Library className="mr-2 h-3.5 w-3.5" /> Promote to library
-                    </Button>
+                  <div className="space-y-2 rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-2">
+                    {fileExplorerGroups.folders.map((folder) => (
+                      <div key={folder.name} className="rounded-xl bg-white/80 p-2">
+                        <div className="flex items-center gap-2 text-xs font-semibold text-[#30302b]">
+                          <Folder className="h-4 w-4 text-amber-600" /> <span className="truncate">{folder.name}</span>
+                          <Badge variant="outline" className="ml-auto rounded-full text-[10px]">{folder.files.length} file{folder.files.length === 1 ? "" : "s"}</Badge>
+                        </div>
+                        <div className="mt-2 space-y-1 pl-4">
+                          {folder.files.map((file) => (
+                            <a key={file.id} href={file.storageUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-lg px-2 py-2 text-xs text-[#4d4d46] hover:bg-sky-50" aria-label={`Open or download ${file.relativePath}`}>
+                              <File className="h-3.5 w-3.5 text-sky-600" />
+                              <span className="min-w-0 flex-1 truncate">{fileNameFromPath(file.relativePath)}</span>
+                              <span className="hidden text-[10px] text-[#8a8980] sm:inline">v{file.version} · {readableFileKind(file)}</span>
+                              <Download className="h-3.5 w-3.5 text-[#8a8980]" />
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    {fileExplorerGroups.rootFiles.map((file) => (
+                      <a key={file.id} href={file.storageUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-xl bg-white/80 px-3 py-2 text-xs text-[#4d4d46] hover:bg-sky-50" aria-label={`Open or download ${file.relativePath}`}>
+                        <FileCode2 className="h-4 w-4 text-sky-600" />
+                        <span className="min-w-0 flex-1 truncate">{fileNameFromPath(file.relativePath)}</span>
+                        <span className="hidden text-[10px] text-[#8a8980] sm:inline">v{file.version} · {readableFileKind(file)}</span>
+                        <Download className="h-3.5 w-3.5 text-[#8a8980]" />
+                      </a>
+                    ))}
                   </div>
-                  <p className="text-[11px] leading-4 text-[#77766e]">
-                    Open, AI-change, rollback, download, and library-promotion intentions unlock only after real task file metadata is recorded; empty states never pretend a file exists.
-                  </p>
+                )}
+                <div className="rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-3 text-xs leading-5 text-[#686861]">
+                  <p className="font-semibold text-[#30302b]">Need to add a file?</p>
+                  <p className="mt-1">Files appear here after the app has a real stored file to show. Manual storage-link entry is kept as an advanced maintenance action so the normal folder view stays non-technical.</p>
+                  <details className="mt-3 rounded-xl border border-[#deded8] bg-white p-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-[#30302b]">Advanced: connect a stored file manually</summary>
+                    <div className="mt-3 space-y-2">
+                      <Input value={filePath} onChange={(event) => setFilePath(event.target.value)} className="h-9 rounded-xl bg-white text-xs" placeholder="relative/path.md" />
+                      <Input value={fileUrl} onChange={(event) => setFileUrl(event.target.value)} className="h-9 rounded-xl bg-white text-xs" placeholder="/manus-storage/..." />
+                      <Button variant="outline" onClick={handleCreateFileMetadata} disabled={!selectedTaskId || !filePath.trim() || !fileUrl.trim() || createFileMetadata.isPending} className="w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
+                        <FileText className="mr-2 h-3.5 w-3.5" /> Add file to this task
+                      </Button>
+                      <p className="text-[11px] leading-4 text-[#77766e]">Advanced fields record an existing storage-backed file reference only; they do not create fake files or run workspace commands.</p>
+                    </div>
+                  </details>
                 </div>
               </CardContent>
             </Card>
 
             <Card className="border-[#deded8] bg-white text-[#242420]">
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base"><PanelRight className="h-4 w-4 text-stone-600" /> Developer diagnostics</CardTitle>
+                <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4 text-stone-600" /> Advanced tools</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-xs leading-5 text-[#686861]">
-                <p>Filesystem and terminal diagnostics are developer-only controls. They stay closed during normal owner task work and opening them will mount the black terminal panel.</p>
+                <p>Developer filesystem and terminal controls stay closed during normal task work. Open them only when you need raw diagnostics.</p>
                 <Button type="button" variant="outline" onClick={() => setShowAdvancedTools((value) => !value)} className="w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
                   {showAdvancedTools ? "Hide developer diagnostics" : "Show developer diagnostics"}
                 </Button>
@@ -664,18 +835,18 @@ export default function Home() {
 
             <Card className="border-[#deded8] bg-white text-[#242420]">
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base"><Archive className="h-4 w-4 text-stone-600" /> Master files view</CardTitle>
+                <CardTitle className="flex items-center gap-2 text-base"><Archive className="h-4 w-4 text-stone-600" /> All recorded files</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
                 {allFiles.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">The all-files index is empty because no real task files have been recorded yet.</div>
                 ) : (
-                  allFiles.slice(0, 10).map((file: { id: number; relativePath: string; taskId: number; createdAt: number }) => (
-                    <div key={file.id} className="rounded-xl border border-[#deded8] bg-[#fbfaf7] p-2 text-xs text-[#5d5d55]">
+                  allFiles.slice(0, 10).map((file) => (
+                    <a key={file.id} href={file.storageUrl} target="_blank" rel="noreferrer" className="block rounded-xl border border-[#deded8] bg-[#fbfaf7] p-2 text-xs text-[#5d5d55] hover:border-sky-200" aria-label={`Open or download ${file.relativePath}`}>
                       <span className="font-semibold text-[#30302b]">{file.relativePath}</span>
-                      <p className="mt-1 text-[#77766e]">Task #{file.taskId} · {compactDate(file.createdAt)}</p>
-                      <p className="mt-1 flex items-center gap-1 text-[#77766e]"><Download className="h-3 w-3" /> Download intent follows the recorded storage URL.</p>
-                    </div>
+                      <p className="mt-1 text-[#77766e]">Task #{file.taskId ?? "unknown"} · {compactDate(file.createdAt)}</p>
+                      <p className="mt-1 flex items-center gap-1 text-[#77766e]"><Download className="h-3 w-3" /> Open or download from the recorded storage link.</p>
+                    </a>
                   ))
                 )}
               </CardContent>

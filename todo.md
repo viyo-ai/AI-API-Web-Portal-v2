@@ -117,3 +117,24 @@
 - [x] Browser-test actual `#claude` and `#kimi` tag overrides in message text and record results.
 - [x] Replace remaining SYSTEM labels with provider-specific Claude/Kimi labels for generated answers and failures.
 - [x] Browser-test real planning prompt, build prompt, manual Claude route override, and manual Kimi route override after fixes.
+
+- [x] Clarify owner-facing Claude-to-Kimi handoff behavior: whether Claude plans can automatically ask Kimi to execute, and whether task memory/context is shared without cross-memory loss.
+- [x] Fix the left navigation wrapper/clipping issue where task cards and action controls are cut off or squeezed at the right edge.
+- [x] Redesign the right-side Task-scoped files area into a basic non-programmer file manager experience similar to a simple Windows-style file list/folder view.
+- [x] Replace programmer-oriented file metadata language on the right side with plain-language file actions and empty states.
+- [x] Add regression coverage for left navigation clipping and the simplified right-side file manager UX.
+- [x] Run validation gates for the workspace UX and chat-ordering changes.
+
+- [x] Add a plain-English worker mini-action log that shows what the AI coordinator, Claude, and Kimi are doing during a task, with safe readable steps by default and technical terminal-style details only behind a collapsible advanced view.
+- [x] Clarify whether the worker mini-action log is an activity feed only or should become an actual interactive Opencode-style terminal in a later approved architecture phase.
+
+- [x] Add a plain-English worker mini-action log that shows what the AI coordinator, Claude, and Kimi are doing during a task, with safe readable steps by default and technical terminal-style details only behind a collapsible advanced view.
+- [x] Clarify whether the worker mini-action log is an activity feed only or should become an actual interactive Opencode-style terminal in a later approved architecture phase.
+- [x] Make center chat bubbles more compact and enforce alignment semantics: owner/user messages align right, Manus/AI/provider/worker messages align left.
+- [x] Reduce visual bulk in the center task thread by replacing large cards with smaller chat bubbles, tighter spacing, and clearer sender labels for non-programmers.
+
+- [x] Correct the center task thread ordering so older messages appear higher and the newest message appears closest to the type box, while preserving compact bubbles with owner messages aligned right and Manus/provider messages aligned left.
+- [x] Update regression tests to prove the newest task message renders nearest the composer instead of first at the top.
+- [x] Re-run validation for the corrected chat-order behavior.
+- [ ] Save a managed project checkpoint after the validated chat-ordering fix.
+- [ ] Report exactly what changed in the workspace UX/chat ordering and explicitly note remaining Claude-to-Kimi automation limitations.
