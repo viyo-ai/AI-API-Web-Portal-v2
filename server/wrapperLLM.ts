@@ -253,14 +253,13 @@ async function runClaudeReview(input: WrapperExecutionInput, contextJson: string
 export async function orchestrateWithOpenAI(userMessage: string): Promise<{ route: 'claude' | 'kimi'; reasoning: string }> {
   const openaiApiKey = process.env.OPENAI_API_KEY;
   if (!openaiApiKey) {
-    // Fallback to keyword-based classification if OpenAI is not configured
-    const intent = await classifyUserIntent(userMessage);
-    const route = intent === 'planning' ? 'claude' : intent === 'building' ? 'kimi' : 'claude';
-    return { route, reasoning: `Fallback: keyword-based classification detected ${intent} intent` };
+    // Fall back to internal Manus Forge LLM if external OpenAI is not configured
+    return await orchestrateWithManusForgeLLM(userMessage);
   }
 
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    // Try external OpenAI first
+    let response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${openaiApiKey}`,
@@ -290,11 +289,9 @@ Analyze the user's message and decide which provider is best suited. Respond wit
     });
 
     if (!response.ok) {
-      console.error(`OpenAI API error: ${response.status} ${response.statusText}`);
-      // Fallback to keyword-based classification
-      const intent = await classifyUserIntent(userMessage);
-      const route = intent === 'planning' ? 'claude' : intent === 'building' ? 'kimi' : 'claude';
-      return { route, reasoning: `Fallback (OpenAI error): keyword-based classification` };
+      console.error(`External OpenAI API error: ${response.status} ${response.statusText}`);
+      // Fall back to internal Manus OpenAI model
+      return await orchestrateWithManusForgeLLM(userMessage);
     }
 
     const data = await response.json();
@@ -306,16 +303,88 @@ Analyze the user's message and decide which provider is best suited. Respond wit
         return { route: decision.route, reasoning: decision.reasoning || 'OpenAI routing decision' };
       }
     } catch (e) {
-      console.error(`Failed to parse OpenAI response: ${content}`);
+      console.error(`Failed to parse external OpenAI response: ${content}`);
+    }
+    // Fall back to internal Manus OpenAI model if response is invalid
+    return await orchestrateWithManusForgeLLM(userMessage);
+  } catch (error) {
+    console.error(`External OpenAI orchestration error: ${error}`);
+    // Fall back to internal Manus OpenAI model
+    return await orchestrateWithManusForgeLLM(userMessage);
+  }
+}
+
+/**
+ * Fallback: Use internal Manus Forge LLM for orchestration when external OpenAI is unavailable.
+ */
+async function orchestrateWithManusForgeLLM(userMessage: string): Promise<{ route: 'claude' | 'kimi'; reasoning: string }> {
+  const forgeApiUrl = process.env.BUILT_IN_FORGE_API_URL;
+  const forgeApiKey = process.env.BUILT_IN_FORGE_API_KEY;
+  
+  if (!forgeApiUrl || !forgeApiKey) {
+    console.error('Manus Forge API not configured, falling back to keyword-based classification');
+    const intent = await classifyUserIntent(userMessage);
+    const route = intent === 'planning' ? 'claude' : intent === 'building' ? 'kimi' : 'claude';
+    return { route, reasoning: `Fallback (no Forge API): keyword-based classification` };
+  }
+
+  try {
+    const response = await fetch(`${forgeApiUrl}/llm/chat`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${forgeApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are an intelligent orchestration controller for an AI coding workshop. Your job is to analyze user requests and route them to the appropriate AI provider:
+
+- Claude Opus 4.7: Best for planning, architecture, design, analysis, decision-making, and strategic thinking
+- Kimi K2.6: Best for code writing, implementation, debugging, optimization, and execution
+
+Analyze the user's message and decide which provider is best suited. Respond with ONLY a JSON object (no markdown, no extra text):
+{"route": "claude" or "kimi", "reasoning": "brief explanation"}`,
+          },
+          {
+            role: 'user',
+            content: userMessage,
+          },
+        ],
+        temperature: 0.3,
+        max_tokens: 200,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error(`Manus Forge API error: ${response.status} ${response.statusText}`);
+      // Fall back to keyword-based classification
+      const intent = await classifyUserIntent(userMessage);
+      const route = intent === 'planning' ? 'claude' : intent === 'building' ? 'kimi' : 'claude';
+      return { route, reasoning: `Fallback (Forge error): keyword-based classification` };
     }
 
-    // Fallback to keyword-based classification
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
+    
+    try {
+      const decision = JSON.parse(content);
+      if (decision.route === 'claude' || decision.route === 'kimi') {
+        return { route: decision.route, reasoning: decision.reasoning || 'Manus Forge LLM routing decision' };
+      }
+    } catch (e) {
+      console.error(`Failed to parse Manus Forge response: ${content}`);
+    }
+
+    // Fall back to keyword-based classification
     const intent = await classifyUserIntent(userMessage);
     const route = intent === 'planning' ? 'claude' : intent === 'building' ? 'kimi' : 'claude';
     return { route, reasoning: `Fallback (parse error): keyword-based classification` };
   } catch (error) {
-    console.error(`OpenAI orchestration error: ${error}`);
-    // Fallback to keyword-based classification
+    console.error(`Manus Forge orchestration error: ${error}`);
+    // Fall back to keyword-based classification
     const intent = await classifyUserIntent(userMessage);
     const route = intent === 'planning' ? 'claude' : intent === 'building' ? 'kimi' : 'claude';
     return { route, reasoning: `Fallback (exception): keyword-based classification` };
