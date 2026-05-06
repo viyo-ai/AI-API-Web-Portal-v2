@@ -27,6 +27,7 @@ import {
   users,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { normalizeGovernanceFiles, parseGovernanceFiles, type GovernanceFileConfig } from "./buildRunner/loadGovernance";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -52,6 +53,7 @@ export type BuildTargetStatus = "active" | "archived";
 export type BuildBranchState = "clean" | "cloning" | "error";
 export type BuildBranchPushState = "never_pushed" | "pushing" | "pushed" | "blocked" | "error";
 export type AgentEnvVarMap = Record<string, string>;
+export type { GovernanceFileConfig } from "./buildRunner/loadGovernance";
 export type QueuedMessageState = "queued" | "processing" | "sent" | "cleared";
 export const MAX_QUEUED_MESSAGES_PER_TASK = 5;
 
@@ -693,6 +695,8 @@ function normalizeEnvName(value: string) {
   return normalized;
 }
 
+export { parseGovernanceFiles, normalizeGovernanceFiles };
+
 export function parseAgentEnvVarMap(value: string | null | undefined): AgentEnvVarMap {
   if (!value) return {};
   try {
@@ -734,6 +738,8 @@ export async function createBuildTarget(values: {
   validationCommands?: string[];
   serviceChecks?: string[];
   agentEnvVarMap?: AgentEnvVarMap;
+  governanceFiles?: GovernanceFileConfig[];
+  governanceBudgetEnforced?: boolean;
 }) {
   const db = await getDb();
   if (!db) throw new Error("Database is required for Build Targets");
@@ -749,6 +755,8 @@ export async function createBuildTarget(values: {
     validationCommandsJson: normalizeJsonStringArray(values.validationCommands, ["pnpm check", "pnpm test", "pnpm build"]),
     serviceChecksJson: normalizeJsonStringArray(values.serviceChecks, []),
     agentEnvVarMapJson: normalizeAgentEnvVarMap(values.agentEnvVarMap),
+    governanceFilesJson: normalizeGovernanceFiles(values.governanceFiles),
+    governanceBudgetEnforced: values.governanceBudgetEnforced ?? true,
     status: "active",
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -768,6 +776,8 @@ export async function updateBuildTarget(values: {
   validationCommands?: string[];
   serviceChecks?: string[];
   agentEnvVarMap?: AgentEnvVarMap;
+  governanceFiles?: GovernanceFileConfig[];
+  governanceBudgetEnforced?: boolean;
 }) {
   const db = await getDb();
   if (!db) throw new Error("Database is required for Build Targets");
@@ -778,12 +788,18 @@ export async function updateBuildTarget(values: {
   if (values.validationCommands !== undefined) set.validationCommandsJson = normalizeJsonStringArray(values.validationCommands, ["pnpm check", "pnpm test", "pnpm build"]);
   if (values.serviceChecks !== undefined) set.serviceChecksJson = normalizeJsonStringArray(values.serviceChecks, []);
   if (values.agentEnvVarMap !== undefined) set.agentEnvVarMapJson = normalizeAgentEnvVarMap(values.agentEnvVarMap);
+  if (values.governanceFiles !== undefined) set.governanceFilesJson = normalizeGovernanceFiles(values.governanceFiles);
+  if (values.governanceBudgetEnforced !== undefined) set.governanceBudgetEnforced = values.governanceBudgetEnforced;
   await db.update(buildTargets).set(set).where(and(eq(buildTargets.id, values.targetId), eq(buildTargets.ownerUserId, values.ownerUserId)));
   return getBuildTargetForOwner(values.targetId, values.ownerUserId);
 }
 
 export async function updateBuildTargetEnvMap(values: { targetId: number; ownerUserId: number; agentEnvVarMap: AgentEnvVarMap }) {
   return updateBuildTarget({ targetId: values.targetId, ownerUserId: values.ownerUserId, agentEnvVarMap: values.agentEnvVarMap });
+}
+
+export async function updateBuildTargetGovernanceSettings(values: { targetId: number; ownerUserId: number; governanceFiles: GovernanceFileConfig[]; governanceBudgetEnforced: boolean }) {
+  return updateBuildTarget({ targetId: values.targetId, ownerUserId: values.ownerUserId, governanceFiles: values.governanceFiles, governanceBudgetEnforced: values.governanceBudgetEnforced });
 }
 
 export async function archiveBuildTarget(targetId: number, ownerUserId: number) {

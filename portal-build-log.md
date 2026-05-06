@@ -13,3 +13,17 @@ Phase 1 is complete after Product Owner acceptance of all three directed section
 There are no Product Owner-approved Phase 1 deviations pending from these accepted sections. The final Section 8 acceptance evidence was supplied for PO review from the local repository because the GitHub web cache was stale. Phase 1 is now closed, and the project must not begin Phase 2 work until the Product Owner delivers `PORTAL_PHASE_2_DIRECTIVE.md`.
 
 Product Owner notification: "Phase 1 complete. Build Targets, branch isolation, queue/Stop behavior shipped. All acceptance gates passed. Ready for PO review and Phase 2 directive."
+
+## Phase 2 Section 2 Complete — Governance Auto-Load for Build Mode
+
+Section 2 shipped additive per-Build-Target governance auto-load without starting Section 3 or modifying accepted Phase 1 features. Build Targets now store ordered governance file configuration and budget settings; Build Mode turns resolve task → Build Branch → Build Target, load required and optional governance documents safely from the target workspace, block model execution when required governance files are missing, and prepend the loaded governance packet to wrapper prompts. The governance packet enforces provider-aware budget behavior by dropping optional documents first and truncating required documents only with explicit AI Activity evidence.
+
+| Section 2 acceptance area | Result | Evidence |
+|---|---|---|
+| Schema and migration | Passed | Added additive Build Target governance columns and generated migration `drizzle/0008_chief_night_nurse.sql`. |
+| Governance loader and blocking | Passed | Added safe loader and Build Mode gate before wrapper model execution; non-Build Mode legacy behavior remains unaffected. |
+| Prompt injection and budget guard | Passed | Wrapper prompt assembly now receives governance context and logs budget drop/truncation evidence. |
+| Owner Governance Files UI | Passed | Build Target settings now support add, remove, reorder, required, dynamic, role, resolver, and budget controls with validation. |
+| Automated validation | Passed | `pnpm check`, `pnpm test` with 22 files and 94 tests passing, and `pnpm build` all completed successfully. |
+
+Product Owner boundary: Section 2 is complete for review. Section 3 has not been started and must remain paused until the Product Owner explicitly instructs the build to proceed.

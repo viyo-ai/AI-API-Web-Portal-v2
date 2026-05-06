@@ -54,6 +54,7 @@ import {
   updateBuildBranchPushState,
   updateBuildBranchState,
   updateBuildTargetEnvMap,
+  updateBuildTargetGovernanceSettings,
   updateTaskStatus,
 } from "./db";
 import {
@@ -71,8 +72,27 @@ import { storagePut } from "./storage";
 import { getUserWorkspaceRoot } from "./terminal";
 import { CLAUDE_DEFAULT_MODEL, CLAUDE_OWNER_MODEL_LABEL, orchestrateWithOpenAI, executeWrapperTurn, getWrapperRuntimeCredentialStates, KIMI_K26_CLOUDFLARE_MODEL, KIMI_OWNER_MODEL_LABEL, resolveEffectiveRoute } from "./wrapperLLM";
 import { requestTurnStop } from "./wrapperLLM/stop-registry";
+import { loadGovernanceForTask, validateGovernanceFiles, type GovernanceLoadResult } from "./buildRunner/loadGovernance";
 
 const agentEnvVarMapSchema = z.record(z.string().trim().regex(/^[A-Z_][A-Z0-9_]*$/, "Use uppercase environment variable names."), z.string().trim().regex(/^[A-Z_][A-Z0-9_]*$/, "Use uppercase source environment variable names.")).default({});
+const governanceFileSchema = z.object({
+  path: z.string().trim().min(1).max(1024),
+  required: z.boolean().default(true),
+  dynamic: z.boolean().default(false),
+  role: z.enum(["governance", "placeholder_resolver"]),
+  resolverKey: z.string().trim().max(120).optional(),
+}).superRefine((value, ctx) => {
+  if (value.path.startsWith("/") || value.path.includes("..")) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["path"], message: "Path must be relative and must not contain '..'." });
+  }
+  if (value.role === "placeholder_resolver" && !value.resolverKey?.trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["resolverKey"], message: "Resolver key is required for placeholder resolver rows." });
+  }
+});
+const governanceFilesSchema = z.array(governanceFileSchema).max(50).superRefine((value, ctx) => {
+  const errors = validateGovernanceFiles(value);
+  for (const error of errors) ctx.addIssue({ code: z.ZodIssueCode.custom, message: error });
+});
 
 function buildTargetGitConfig(target: NonNullable<Awaited<ReturnType<typeof getBuildTargetForOwner>>>) {
   return {
@@ -293,6 +313,29 @@ async function runGenerationTurn(input: { task: OwnedTask; ownerUserId: number; 
     throw new Error("Wrapper route resolution produced an invalid runnable route.");
   }
 
+  const governance: GovernanceLoadResult = input.task.buildBranchId
+    ? await loadGovernanceForTask(input.task.id)
+    : { documents: [], missingRequired: [], skippedOptional: [], loadDurationMs: 0, budgetEnforcementEnabled: true };
+  if (input.task.buildBranchId) {
+    await appendTaskEvent({
+      taskId: input.task.id,
+      ownerUserId: input.ownerUserId,
+      actor: "wrapper",
+      eventType: "status",
+      status: governance.missingRequired.length > 0 ? "blocked" : "succeeded",
+      content: governance.missingRequired.length > 0
+        ? `Governance loading blocked this Build Mode turn. Missing required file(s): ${governance.missingRequired.join(", ")}.`
+        : `Governance loaded for this Build Mode turn: ${governance.documents.length} document(s), ${governance.skippedOptional.length} optional file(s) skipped.`,
+      metadataJson: serializeJson({ turnId: turn.id, governance }),
+    });
+
+    if (governance.missingRequired.length > 0) {
+      await failTurn(turn.id, input.ownerUserId, "GOVERNANCE_REQUIRED_FILES_MISSING", `Missing required governance files: ${governance.missingRequired.join(", ")}`, "blocked");
+      await updateTaskStatus(input.task.id, input.ownerUserId, "blocked");
+      return turn;
+    }
+  }
+
   const [priorEvents, memory, files] = await Promise.all([
     listTaskEvents(input.task.id, input.ownerUserId, 80),
     listMemoryByCategory(input.ownerUserId, undefined, 20),
@@ -310,6 +353,7 @@ async function runGenerationTurn(input: { task: OwnedTask; ownerUserId: number; 
       priorEvents,
       memory,
       files,
+      governance,
     });
   } catch {
     // executeWrapperTurn already persists the failed turn, task status, and timeline error.
@@ -595,11 +639,20 @@ export const appRouter = router({
         return updateBuildTarget({ ...input, ownerUserId: ctx.user.id });
       }),
     updateSettings: protectedProcedure
-      .input(z.object({ targetId: z.number().int().positive(), agentEnvVarMap: agentEnvVarMapSchema }))
+      .input(z.object({ targetId: z.number().int().positive(), agentEnvVarMap: agentEnvVarMapSchema.optional(), governanceFiles: governanceFilesSchema.optional(), governanceBudgetEnforced: z.boolean().optional() }))
       .mutation(async ({ ctx, input }) => {
         const target = await getBuildTargetForOwner(input.targetId, ctx.user.id);
         if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
-        return updateBuildTargetEnvMap({ targetId: input.targetId, ownerUserId: ctx.user.id, agentEnvVarMap: input.agentEnvVarMap });
+        if (input.governanceFiles !== undefined || input.governanceBudgetEnforced !== undefined) {
+          return updateBuildTarget({
+            targetId: input.targetId,
+            ownerUserId: ctx.user.id,
+            agentEnvVarMap: input.agentEnvVarMap,
+            governanceFiles: input.governanceFiles,
+            governanceBudgetEnforced: input.governanceBudgetEnforced,
+          });
+        }
+        return updateBuildTargetEnvMap({ targetId: input.targetId, ownerUserId: ctx.user.id, agentEnvVarMap: input.agentEnvVarMap ?? {} });
       }),
     delete: protectedProcedure
       .input(z.object({ targetId: z.number().int().positive(), confirm: z.literal("DELETE") }))
@@ -634,10 +687,13 @@ export const appRouter = router({
       const branches = await listBuildBranchesForTarget(input.targetId, ctx.user.id, 100);
       return { target, branches };
     }),
-    updateSettings: protectedProcedure.input(z.object({ targetId: z.number().int().positive(), agentEnvVarMap: agentEnvVarMapSchema })).mutation(async ({ ctx, input }) => {
+    updateSettings: protectedProcedure.input(z.object({ targetId: z.number().int().positive(), agentEnvVarMap: agentEnvVarMapSchema.optional(), governanceFiles: governanceFilesSchema.optional(), governanceBudgetEnforced: z.boolean().optional() })).mutation(async ({ ctx, input }) => {
       const target = await getBuildTargetForOwner(input.targetId, ctx.user.id);
       if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
-      return updateBuildTargetEnvMap({ targetId: input.targetId, ownerUserId: ctx.user.id, agentEnvVarMap: input.agentEnvVarMap });
+      if (input.governanceFiles !== undefined || input.governanceBudgetEnforced !== undefined) {
+        return updateBuildTarget({ targetId: input.targetId, ownerUserId: ctx.user.id, agentEnvVarMap: input.agentEnvVarMap, governanceFiles: input.governanceFiles, governanceBudgetEnforced: input.governanceBudgetEnforced });
+      }
+      return updateBuildTargetEnvMap({ targetId: input.targetId, ownerUserId: ctx.user.id, agentEnvVarMap: input.agentEnvVarMap ?? {} });
     }),
     testConnection: protectedProcedure.input(z.object({ repoUrl: z.string().trim().url().max(1024), githubTokenEnvVar: z.string().trim().min(1).max(120), defaultBaseBranch: z.string().trim().min(1).max(160).default("main") })).mutation(async ({ input }) => testBuildTargetConnection(input)),
   }),

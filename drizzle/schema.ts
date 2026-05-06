@@ -1,4 +1,4 @@
-import { bigint, index, int, longtext, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { bigint, boolean, index, int, longtext, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing the Manus OAuth flow.
@@ -182,6 +182,8 @@ export const buildTargets = mysqlTable(
     validationCommandsJson: longtext("validationCommandsJson").notNull(),
     serviceChecksJson: longtext("serviceChecksJson").notNull(),
     agentEnvVarMapJson: varchar("agentEnvVarMapJson", { length: 4096 }).default("{}").notNull(),
+    governanceFilesJson: longtext("governanceFilesJson"),
+    governanceBudgetEnforced: boolean("governanceBudgetEnforced").default(true).notNull(),
     status: mysqlEnum("status", ["active", "archived"]).default("active").notNull(),
     createdAt: bigint("createdAt", { mode: "number" }).notNull(),
     updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),

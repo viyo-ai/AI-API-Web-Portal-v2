@@ -213,6 +213,22 @@ type QueuedComposerMessage = {
   updatedAt: number | Date | string;
 };
 
+type GovernanceFileRow = {
+  path: string;
+  required: boolean;
+  dynamic: boolean;
+  role: "governance" | "placeholder_resolver";
+  resolverKey?: string;
+};
+
+const defaultGovernanceRow = (): GovernanceFileRow => ({
+  path: "docs/governance.md",
+  required: true,
+  dynamic: false,
+  role: "governance",
+  resolverKey: "",
+});
+
 type ActiveTurnRecord = {
   id: number;
   state: string;
@@ -285,6 +301,8 @@ export default function Home() {
   const [buildTargetValidationCommands, setBuildTargetValidationCommands] = useState("");
   const [buildTargetServiceChecks, setBuildTargetServiceChecks] = useState("");
   const [buildTargetAgentEnvMap, setBuildTargetAgentEnvMap] = useState("WORKSHOP_GITHUB_TOKEN=BUILD_TARGET_GITHUB_TOKEN");
+  const [buildTargetGovernanceFiles, setBuildTargetGovernanceFiles] = useState<GovernanceFileRow[]>([defaultGovernanceRow()]);
+  const [buildTargetGovernanceBudgetEnforced, setBuildTargetGovernanceBudgetEnforced] = useState(true);
   const [openedBuildBranch, setOpenedBuildBranch] = useState<any | null>(null);
   const [showThreadDetails, setShowThreadDetails] = useState(false);
   const [workspaceNotice, setWorkspaceNotice] = useState("");
@@ -362,6 +380,21 @@ export default function Home() {
       return {};
     }
   }, [selectedBuildTarget]);
+  const selectedBuildTargetGovernanceFiles = useMemo(() => {
+    try {
+      const parsed = selectedBuildTarget?.governanceFilesJson ? JSON.parse(selectedBuildTarget.governanceFilesJson) : [];
+      return Array.isArray(parsed) ? parsed as GovernanceFileRow[] : [];
+    } catch {
+      return [];
+    }
+  }, [selectedBuildTarget]);
+
+  useEffect(() => {
+    if (!selectedBuildTarget) return;
+    setBuildTargetAgentEnvMap(Object.entries(selectedBuildTargetEnvMap).map(([key, value]) => `${key}=${value}`).join("\n") || "WORKSHOP_GITHUB_TOKEN=BUILD_TARGET_GITHUB_TOKEN");
+    setBuildTargetGovernanceFiles(selectedBuildTargetGovernanceFiles.length > 0 ? selectedBuildTargetGovernanceFiles : [defaultGovernanceRow()]);
+    setBuildTargetGovernanceBudgetEnforced(selectedBuildTarget.governanceBudgetEnforced !== false);
+  }, [selectedBuildTarget, selectedBuildTargetEnvMap, selectedBuildTargetGovernanceFiles]);
 
   const filteredTasks = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -426,11 +459,63 @@ export default function Home() {
     return Object.fromEntries(entries);
   }
 
+  function governanceValidationErrors(rows: GovernanceFileRow[]) {
+    const activeRows = rows.map((row) => ({ ...row, path: row.path.trim(), resolverKey: row.resolverKey?.trim() })).filter((row) => row.path);
+    const errors: string[] = [];
+    const resolverKeys = new Set(activeRows.filter((row) => row.role === "placeholder_resolver" && row.resolverKey).map((row) => row.resolverKey as string));
+    if (activeRows.length > 0 && !activeRows.some((row) => row.role === "governance")) errors.push("Add at least one governance document row before saving Governance Files.");
+    activeRows.forEach((row, index) => {
+      const label = `Governance row ${index + 1}`;
+      if (row.path.startsWith("/") || row.path.includes("..")) errors.push(`${label} must use a safe relative path and cannot include '..'.`);
+      if (row.role === "placeholder_resolver" && !row.resolverKey) errors.push(`${label} needs a resolver key.`);
+      if (row.dynamic) {
+        const placeholders = Array.from(row.path.matchAll(/\{([A-Za-z0-9_-]+)\}/g)).map((match) => match[1]);
+        placeholders.forEach((placeholder) => {
+          if (!resolverKeys.has(placeholder)) errors.push(`${label} references {${placeholder}} without a matching placeholder resolver row.`);
+        });
+      }
+    });
+    return errors;
+  }
+
+  function normalizedGovernanceRows() {
+    return buildTargetGovernanceFiles
+      .map((row) => ({ path: row.path.trim(), required: row.required, dynamic: row.dynamic, role: row.role, resolverKey: row.resolverKey?.trim() || undefined }))
+      .filter((row) => row.path);
+  }
+
+  function updateGovernanceRow(index: number, patch: Partial<GovernanceFileRow>) {
+    setBuildTargetGovernanceFiles((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row));
+  }
+
+  function moveGovernanceRow(index: number, direction: -1 | 1) {
+    setBuildTargetGovernanceFiles((rows) => {
+      const next = [...rows];
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= next.length) return rows;
+      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+      return next;
+    });
+  }
+
   async function handleUpdateBuildTargetSettings() {
     if (!selectedBuildTarget) return;
     try {
-      const updated = await updateBuildTargetSettingsMutation.mutateAsync({ targetId: selectedBuildTarget.id, agentEnvVarMap: parseAgentEnvMapInput() });
-      const message = `Saved agent environment map for ${updated?.name ?? selectedBuildTarget.name}.`;
+      const governanceFiles = normalizedGovernanceRows();
+      const errors = governanceValidationErrors(governanceFiles);
+      if (errors.length > 0) {
+        const message = errors[0];
+        setWorkspaceNotice(message);
+        toast.warning(message);
+        return;
+      }
+      const updated = await updateBuildTargetSettingsMutation.mutateAsync({
+        targetId: selectedBuildTarget.id,
+        agentEnvVarMap: parseAgentEnvMapInput(),
+        governanceFiles,
+        governanceBudgetEnforced: buildTargetGovernanceBudgetEnforced,
+      });
+      const message = `Saved environment and Governance Files settings for ${updated?.name ?? selectedBuildTarget.name}.`;
       setWorkspaceNotice(message);
       toast.success(message);
       await refreshWorkspace();
@@ -946,11 +1031,58 @@ export default function Home() {
               ))
             )}
             {selectedBuildTarget ? (
-              <div className="rounded-2xl border border-emerald-100 bg-white p-3 text-xs leading-5 text-[#686861]" data-testid="section4-env-settings">
-                <p className="font-semibold text-[#30302b]">Section 4 agent env injection</p>
-                <p className="mt-1">Saved mappings generate <span className="font-mono">.env.agent</span> during Build Branch operations. The file is gitignored and push policy blocks it from being staged.</p>
-                <p className="mt-1 font-mono text-[11px] text-emerald-800">Current: {Object.entries(selectedBuildTargetEnvMap).map(([key, value]) => `${key}←${value}`).join(", ") || "none"}</p>
-                <Button type="button" variant="outline" onClick={handleUpdateBuildTargetSettings} disabled={isMutating} className="mt-2 w-full rounded-xl border-emerald-200 bg-emerald-50 text-xs text-emerald-900">Save env map to selected target</Button>
+              <div className="space-y-3">
+                <div className="rounded-2xl border border-emerald-100 bg-white p-3 text-xs leading-5 text-[#686861]" data-testid="section4-env-settings">
+                  <p className="font-semibold text-[#30302b]">Section 4 agent env injection</p>
+                  <p className="mt-1">Saved mappings generate <span className="font-mono">.env.agent</span> during Build Branch operations. The file is gitignored and push policy blocks it from being staged.</p>
+                  <p className="mt-1 font-mono text-[11px] text-emerald-800">Current: {Object.entries(selectedBuildTargetEnvMap).map(([key, value]) => `${key}←${value}`).join(", ") || "none"}</p>
+                </div>
+                <div className="rounded-2xl border border-violet-100 bg-white p-3 text-xs leading-5 text-[#686861]" data-testid="section2-governance-files-settings">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-semibold text-[#30302b]">Section 2 Governance Files</p>
+                      <p className="mt-1">These safe repository-relative paths are loaded on every Build Mode turn before Claude or Kimi starts. Required misses block execution; optional misses are logged.</p>
+                    </div>
+                    <Badge className="rounded-full border-violet-200 bg-violet-50 text-violet-800">{buildTargetGovernanceFiles.filter((row) => row.path.trim()).length} files</Badge>
+                  </div>
+                  <label className="mt-3 flex items-center gap-2 rounded-xl border border-violet-100 bg-violet-50 px-3 py-2 text-[11px] font-medium text-violet-900">
+                    <input type="checkbox" checked={buildTargetGovernanceBudgetEnforced} onChange={(event) => setBuildTargetGovernanceBudgetEnforced(event.target.checked)} className="h-3.5 w-3.5 rounded border-violet-300" />
+                    Enforce Claude/Kimi governance token budget with optional drops and required truncation logging.
+                  </label>
+                  <div className="mt-3 space-y-2">
+                    {buildTargetGovernanceFiles.map((row, index) => (
+                      <div key={`${index}-${row.path}`} className="rounded-xl border border-[#e4e2db] bg-[#fbfaf7] p-2" data-testid="governance-file-row">
+                        <Input value={row.path} onChange={(event) => updateGovernanceRow(index, { path: event.target.value })} placeholder="docs/governance.md or specs/{taskSlug}.md" className="h-8 rounded-lg border-[#d9d8d1] bg-white font-mono text-[11px]" />
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <label className="flex items-center gap-1.5 rounded-lg border border-[#deded8] bg-white px-2 py-1 text-[11px]"><input type="checkbox" checked={row.required} onChange={(event) => updateGovernanceRow(index, { required: event.target.checked })} /> Required</label>
+                          <label className="flex items-center gap-1.5 rounded-lg border border-[#deded8] bg-white px-2 py-1 text-[11px]"><input type="checkbox" checked={row.dynamic} onChange={(event) => updateGovernanceRow(index, { dynamic: event.target.checked })} /> Dynamic</label>
+                        </div>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-[1.2fr_1fr]">
+                          <div className="grid grid-cols-2 gap-1 rounded-lg border border-[#d9d8d1] bg-white p-1" aria-label="Governance row role">
+                            {(["governance", "placeholder_resolver"] as const).map((role) => (
+                              <button
+                                key={role}
+                                type="button"
+                                onClick={() => updateGovernanceRow(index, { role })}
+                                className={`rounded-md px-2 py-1 text-[10px] font-semibold transition ${row.role === role ? "bg-[#242420] text-white" : "text-[#686861] hover:bg-[#f0efea]"}`}
+                              >
+                                {role === "governance" ? "Governance" : "Resolver"}
+                              </button>
+                            ))}
+                          </div>
+                          <Input value={row.resolverKey ?? ""} onChange={(event) => updateGovernanceRow(index, { resolverKey: event.target.value })} placeholder="Resolver key, e.g. taskSlug" className="h-8 rounded-lg border-[#d9d8d1] text-[11px]" />
+                        </div>
+                        <div className="mt-2 grid grid-cols-3 gap-2">
+                          <Button type="button" variant="outline" onClick={() => moveGovernanceRow(index, -1)} disabled={index === 0 || isMutating} className="h-8 rounded-lg border-[#d9d8d1] bg-white text-[11px]">Up</Button>
+                          <Button type="button" variant="outline" onClick={() => moveGovernanceRow(index, 1)} disabled={index === buildTargetGovernanceFiles.length - 1 || isMutating} className="h-8 rounded-lg border-[#d9d8d1] bg-white text-[11px]">Down</Button>
+                          <Button type="button" variant="outline" onClick={() => setBuildTargetGovernanceFiles((rows) => rows.length > 1 ? rows.filter((_, rowIndex) => rowIndex !== index) : [defaultGovernanceRow()])} disabled={isMutating} className="h-8 rounded-lg border-rose-100 bg-rose-50 text-[11px] text-rose-700">Remove</Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <Button type="button" variant="outline" onClick={() => setBuildTargetGovernanceFiles((rows) => [...rows, defaultGovernanceRow()])} disabled={isMutating} className="mt-2 w-full rounded-xl border-violet-100 bg-violet-50 text-xs text-violet-900">Add governance row</Button>
+                  <Button type="button" variant="outline" onClick={handleUpdateBuildTargetSettings} disabled={isMutating} className="mt-2 w-full rounded-xl border-emerald-200 bg-emerald-50 text-xs text-emerald-900">Save selected target settings</Button>
+                </div>
               </div>
             ) : null}
           </div>

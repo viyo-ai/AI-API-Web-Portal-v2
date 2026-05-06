@@ -246,3 +246,12 @@
 - [x] Run Section 8 acceptance and full validation gates, repair only Section 8 defects, then checkpoint, commit, push to public `main`, and stop for PO review before declaring Phase 1 complete.
 
 - [x] Append Phase 1 final closeout entry to `portal-build-log.md` per §9.3 with accepted SHAs `e0571f3`, `52bf8376`, and `0649bb0`, then commit and push the closeout change.
+
+- [x] Section 2 governance schema: add Build Target governance files storage and generated migration.
+- [x] Section 2 governance loader: resolve task → Build Branch → Build Target, load static/dynamic governance documents, and report required/optional misses.
+- [x] Section 2 governance blocking: block Build Mode task execution when required governance files are missing and log clear AI Activity evidence.
+- [x] Section 2 governance prompt injection: prepend loaded governance documents on every Build Mode wrapper turn.
+- [x] Section 2 governance budget guard: enforce Claude/Kimi governance token budgets with optional drops, required truncation, and AI Activity logging.
+- [x] Section 2 Governance Files UI: add editable add/remove/reorder settings rows with required/dynamic/role/resolver validation.
+- [x] Section 2 acceptance tests: cover schema, loader, UI validation, blocking, prompt injection, legacy behavior, and token budget behavior without skipped tests.
+- [x] Section 2 closeout: pass validation, append portal build log, commit and push `feat(governance): add per-task governance auto-load [PORTAL-P2-S2-01]`.
