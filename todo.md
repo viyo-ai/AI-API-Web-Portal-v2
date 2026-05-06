@@ -244,3 +244,5 @@
 - [x] Implement Section 8 Stop behavior so users can stop active generation with clear UI state and no accidental duplicate sends.
 - [x] Add focused regression and browser acceptance coverage for Section 8 queue and Stop behavior.
 - [x] Run Section 8 acceptance and full validation gates, repair only Section 8 defects, then checkpoint, commit, push to public `main`, and stop for PO review before declaring Phase 1 complete.
+
+- [x] Append Phase 1 final closeout entry to `portal-build-log.md` per §9.3 with accepted SHAs `e0571f3`, `52bf8376`, and `0649bb0`, then commit and push the closeout change.
