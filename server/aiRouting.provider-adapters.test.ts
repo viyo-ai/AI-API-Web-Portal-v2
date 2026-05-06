@@ -69,14 +69,14 @@ function mockSuccessfulFetch() {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
     const requestUrl = String(url);
     const body = JSON.parse(String(init?.body ?? "{}"));
-    // Claude via Forge API
-    if (requestUrl.includes("forge.example.com/llm/chat")) {
+    // Claude via direct Anthropic API
+    if (requestUrl.includes("api.anthropic.com/v1/messages")) {
       const model = body.model;
-      const isReviewer = body.messages?.some((m: any) => typeof m.content === "string" && m.content.includes("Reviewer"));
+      const isReviewer = typeof body.system === "string" && body.system.includes("Reviewer");
       if (model === "claude-opus-4-7") {
         return new Response(
           JSON.stringify({
-            choices: [{ message: { content: isReviewer ? "Claude reviewed final answer." : "Claude produced a plan." } }],
+            content: [{ type: "text", text: isReviewer ? "Claude reviewed final answer." : "Claude produced a plan." }],
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         );
@@ -111,7 +111,7 @@ describe("Wrapper LLM v2 provider execution routes", () => {
 
     expect(result).toMatchObject({ route: "claude", finalAnswer: "Claude produced a plan." });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("forge.example.com/llm/chat");
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("api.anthropic.com/v1/messages");
     const requestBody = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
     expect(requestBody.model).toBe(CLAUDE_DEFAULT_MODEL);
     expect(dbMocks.completeTurn).toHaveBeenCalledWith(106, 9);
@@ -142,12 +142,12 @@ describe("Wrapper LLM v2 provider execution routes", () => {
       finalAnswer: "Claude reviewed final answer.",
     });
     expect(fetchSpy).toHaveBeenCalledTimes(3);
-    // All three calls should go to Forge API (Claude plan, Kimi execution, Claude review)
-    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("forge.example.com/llm/chat");
+    // Claude plan/review should use Anthropic, while Kimi execution should use Cloudflare Workers AI.
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("api.anthropic.com/v1/messages");
     expect(String(fetchSpy.mock.calls[1]?.[0])).toContain("api.cloudflare.com/client/v4/accounts");
     expect(String(fetchSpy.mock.calls[1]?.[0])).toContain("/ai/run/@cf/moonshotai/kimi-k2.6");
-    expect(String(fetchSpy.mock.calls[2]?.[0])).toContain("forge.example.com/llm/chat");
-    // Verify the models used in each call
+    expect(String(fetchSpy.mock.calls[2]?.[0])).toContain("api.anthropic.com/v1/messages");
+    // Verify the models used in each Claude call.
     const call0Body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body ?? "{}"));
     const call2Body = JSON.parse(String(fetchSpy.mock.calls[2]?.[1]?.body ?? "{}"));
     expect(call0Body.model).toBe("claude-opus-4-7"); // Claude plan

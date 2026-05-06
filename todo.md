@@ -91,7 +91,7 @@
 - [x] Replace keyword-based intent classification with OpenAI orchestration controller.
 - [x] Implement OpenAI routing function: analyzes user message, returns { route: "claude" | "kimi", reasoning }
 - [x] Integrate OpenAI routing into resolveWrapperRoute and submitMessage.
-- [ ] Add provider interjection logic: OpenAI detects Claude/Kimi failures and suggests recovery.
+- [x] Add provider recovery logic: wrapper-level Kimi empty-output handling records a failed provider turn and exposes owner-facing Claude recovery guidance.
 - [x] Update all tests for OpenAI orchestration flow.
 - [x] Run full validation: pnpm check, pnpm test, pnpm build.
 - [x] **CRITICAL FIX: Revert Kimi to Cloudflare Workers AI native** — Remove Forge API calls for Kimi, restore direct Cloudflare Workers AI invocation.
@@ -99,11 +99,21 @@
 - [x] Keep Orchestration via Forge API for routing decisions.
 - [x] Update all provider tests to reflect correct invocation paths.
 - [x] Run full validation: pnpm test (54/54 passing), pnpm build (successful).
-- [ ] **CRITICAL: Browser validation** — Test planning intent → Claude, building intent → Kimi, verify LLM responses are generated (not just error recovery notes).
-- [ ] Save checkpoint after provider architecture is fixed and working.
-- [ ] Evaluate entire workspace UX: left panel (tasks/memory), center (chat thread), right panel (files/context).
-- [ ] Audit Task Scoped Files section for UX issues and document improvement opportunities.
-- [ ] Verify Global Memory on left side is working correctly and accessible.
-- [ ] Create comprehensive architecture improvement plan with specific recommendations.
-- [ ] Document current state vs desired state for each workspace section.
-- [ ] Deliver UX audit report and architecture plan to user.
+- [x] **CRITICAL: Browser validation** — Test planning intent → Claude, building intent → Kimi, verify LLM responses are generated (not just error recovery notes).
+- [x] Save checkpoint after provider architecture is fixed and working.
+- [x] Evaluate entire workspace UX: left panel (tasks/memory), center (chat thread), right panel (files/context).
+- [x] Audit Task Scoped Files section for UX issues and document improvement opportunities.
+- [x] Validate Global Memory end-to-end in the UI/browser or tests (create/list/search/empty state/accessibility) and record the results.
+- [x] Create comprehensive architecture improvement plan with specific recommendations.
+- [x] Document current state vs desired state for each workspace section.
+- [x] Deliver UX audit report and architecture plan to user.
+
+- [x] Debug live provider execution failure causing recovery notes instead of Claude/Kimi responses.
+- [x] Verify orchestration source order: user OpenAI key first, Manus Forge fallback, keyword last resort.
+- [x] Verify Claude execution path in deployed runtime and fix response parsing/credential failures.
+- [x] Verify Kimi execution through Cloudflare Workers AI native endpoint.
+- [ ] Verify Opencode.ai task-start flow if it remains part of the intended scope.
+- [ ] Implement Opencode.ai initialization/connection step at task creation if confirmed as required for current workflow.
+- [x] Browser-test actual `#claude` and `#kimi` tag overrides in message text and record results.
+- [x] Replace remaining SYSTEM labels with provider-specific Claude/Kimi labels for generated answers and failures.
+- [x] Browser-test real planning prompt, build prompt, manual Claude route override, and manual Kimi route override after fixes.

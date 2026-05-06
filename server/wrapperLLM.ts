@@ -8,6 +8,7 @@ import {
   type CredentialStatus,
   type TurnRoute,
 } from "./db";
+import { invokeLLM } from "./_core/llm";
 import type { GlobalMemory, Task, TaskEvent, TaskFile } from "../drizzle/schema";
 
 export const CLAUDE_DEFAULT_MODEL = process.env.CLAUDE_MODEL || "claude-opus-4-7";
@@ -84,41 +85,64 @@ export function getWrapperRuntimeCredentialStates(): RuntimeCredentialState[] {
 }
 
 async function invokeClaude(messages: ModelMessage[]) {
-  const forgeApiUrl = process.env.BUILT_IN_FORGE_API_URL;
-  const forgeApiKey = process.env.BUILT_IN_FORGE_API_KEY;
-  
-  if (!forgeApiUrl || !forgeApiKey) {
-    throw new Error("Manus Forge API not configured. Claude invocation requires BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY.");
+  const apiKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+  const directErrors: string[] = [];
+
+  if (apiKey) {
+    try {
+      const system = messages.find((message) => message.role === "system")?.content ?? baseSystemPrompt("claude_planner");
+      const conversation = messages
+        .filter((message) => message.role !== "system")
+        .map((message) => ({ role: message.role === "assistant" ? "assistant" : "user", content: message.content }));
+
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: CLAUDE_DEFAULT_MODEL,
+          system,
+          messages: conversation.length > 0 ? conversation : [{ role: "user", content: "Continue." }],
+          max_tokens: 4096,
+        }),
+      });
+
+      const body = (await response.json().catch(() => null)) as
+        | { content?: Array<{ type?: string; text?: string }>; error?: { message?: string } }
+        | null;
+
+      if (!response.ok) {
+        throw new Error(body?.error?.message ?? `${response.status} ${response.statusText}`);
+      }
+
+      const text = normalizeModelText(body?.content?.map((part) => part.text ?? "").join("\n"));
+      if (text) return text;
+      throw new Error("Claude returned an empty response from Anthropic.");
+    } catch (error) {
+      directErrors.push(error instanceof Error ? error.message : String(error));
+    }
   }
 
-  const response = await fetch(`${forgeApiUrl}/llm/chat`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${forgeApiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "claude-opus-4-7",
+  try {
+    const response = await invokeLLM({
       messages,
-      temperature: 0.2,
       max_tokens: 4096,
-    }),
-  });
-
-  const body = (await response.json().catch(() => null)) as
-    | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
-    | null;
-
-  if (!response.ok) {
-    throw new Error(`Claude request failed via Forge API: ${body?.error?.message ?? response.status} ${response.statusText}`);
+    });
+    const text = normalizeModelText(response.choices?.[0]?.message?.content);
+    if (text) return text;
+    throw new Error("Manus Forge returned an empty Claude fallback response.");
+  } catch (error) {
+    const forgeError = error instanceof Error ? error.message : String(error);
+    const directContext = directErrors.length > 0
+      ? ` Anthropic direct error: ${directErrors.join("; ")}.`
+      : apiKey
+        ? ""
+        : " Anthropic direct skipped because no CLAUDE_API_KEY/ANTHROPIC_API_KEY is configured.";
+    throw new Error(`Claude request failed.${directContext} Manus Forge fallback error: ${forgeError}`);
   }
-
-  const text = body?.choices?.[0]?.message?.content?.trim();
-  if (!text) {
-    throw new Error("Claude returned an empty response.");
-  }
-
-  return text;
 }
 
 async function invokeKimi(messages: ModelMessage[]) {
@@ -137,7 +161,18 @@ async function invokeKimi(messages: ModelMessage[]) {
   });
 
   const body = (await response.json().catch(() => null)) as
-    | { success?: boolean; result?: { response?: string } | string; errors?: Array<{ code?: number; message?: string }> }
+    | {
+        success?: boolean;
+        result?:
+          | string
+          | {
+              response?: string;
+              generated_text?: string;
+              output_text?: string;
+              choices?: Array<{ message?: { content?: unknown }; text?: unknown }>;
+            };
+        errors?: Array<{ code?: number; message?: string }>;
+      }
     | null;
 
   if (!response.ok || body?.success === false) {
@@ -145,7 +180,14 @@ async function invokeKimi(messages: ModelMessage[]) {
     throw new Error(`Kimi request failed: ${message}`);
   }
 
-  const text = typeof body?.result === "string" ? body.result : body?.result?.response;
+  const result = body?.result;
+  const text = typeof result === "string"
+    ? result
+    : result?.response
+      ?? result?.generated_text
+      ?? result?.output_text
+      ?? result?.choices?.[0]?.message?.content
+      ?? result?.choices?.[0]?.text;
   const normalized = normalizeModelText(text);
   if (!normalized) {
     throw new Error("Kimi returned an empty response.");
@@ -308,76 +350,47 @@ Analyze the user's message and decide which provider is best suited. Respond wit
  * Fallback: Use internal Manus Forge LLM for orchestration when external OpenAI is unavailable.
  */
 async function orchestrateWithManusForgeLLM(userMessage: string): Promise<{ route: 'claude' | 'kimi'; reasoning: string }> {
-  const forgeApiUrl = process.env.BUILT_IN_FORGE_API_URL;
-  const forgeApiKey = process.env.BUILT_IN_FORGE_API_KEY;
-  
-  if (!forgeApiUrl || !forgeApiKey) {
-    console.error('Manus Forge API not configured, falling back to keyword-based classification');
+  const fallbackToKeywords = async (reason: string): Promise<{ route: 'claude' | 'kimi'; reasoning: string }> => {
     const intent = await classifyUserIntent(userMessage);
     const route = intent === 'planning' ? 'claude' : intent === 'building' ? 'kimi' : 'claude';
-    return { route, reasoning: `Fallback (no Forge API): keyword-based classification` };
-  }
+    return { route, reasoning: `${reason}; keyword fallback selected ${route}` };
+  };
 
   try {
-    const response = await fetch(`${forgeApiUrl}/llm/chat`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${forgeApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `You are an intelligent orchestration controller for an AI coding workshop. Your job is to analyze user requests and route them to the appropriate AI provider:
+    const response = await invokeLLM({
+      messages: [
+        {
+          role: 'system',
+          content: `You are an intelligent orchestration controller for an AI coding workshop. Your job is to analyze user requests and route them to the appropriate AI provider:
 
 - Claude Opus 4.7: Best for planning, architecture, design, analysis, decision-making, and strategic thinking
 - Kimi K2.6: Best for code writing, implementation, debugging, optimization, and execution
 
 Analyze the user's message and decide which provider is best suited. Respond with ONLY a JSON object (no markdown, no extra text):
 {"route": "claude" or "kimi", "reasoning": "brief explanation"}`,
-          },
-          {
-            role: 'user',
-            content: userMessage,
-          },
-        ],
-        temperature: 0.3,
-        max_tokens: 200,
-      }),
+        },
+        {
+          role: 'user',
+          content: userMessage,
+        },
+      ],
+      max_tokens: 200,
+      response_format: { type: 'json_object' },
     });
 
-    if (!response.ok) {
-      console.error(`Manus Forge API error: ${response.status} ${response.statusText}`);
-      // Fall back to keyword-based classification
-      const intent = await classifyUserIntent(userMessage);
-      const route = intent === 'planning' ? 'claude' : intent === 'building' ? 'kimi' : 'claude';
-      return { route, reasoning: `Fallback (Forge error): keyword-based classification` };
+    const content = normalizeModelText(response.choices?.[0]?.message?.content);
+    if (!content) {
+      return fallbackToKeywords('Manus Forge returned an empty orchestration response');
     }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
-    
-    try {
-      const decision = JSON.parse(content);
-      if (decision.route === 'claude' || decision.route === 'kimi') {
-        return { route: decision.route, reasoning: decision.reasoning || 'Manus Forge LLM routing decision' };
-      }
-    } catch (e) {
-      console.error(`Failed to parse Manus Forge response: ${content}`);
+    const decision = JSON.parse(content);
+    if (decision.route === 'claude' || decision.route === 'kimi') {
+      return { route: decision.route, reasoning: decision.reasoning || 'Manus Forge LLM routing decision' };
     }
-
-    // Fall back to keyword-based classification
-    const intent = await classifyUserIntent(userMessage);
-    const route = intent === 'planning' ? 'claude' : intent === 'building' ? 'kimi' : 'claude';
-    return { route, reasoning: `Fallback (parse error): keyword-based classification` };
+    return fallbackToKeywords('Manus Forge returned an invalid route');
   } catch (error) {
-    console.error(`Manus Forge orchestration error: ${error}`);
-    // Fall back to keyword-based classification
-    const intent = await classifyUserIntent(userMessage);
-    const route = intent === 'planning' ? 'claude' : intent === 'building' ? 'kimi' : 'claude';
-    return { route, reasoning: `Fallback (exception): keyword-based classification` };
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Manus Forge orchestration error: ${message}`);
+    return fallbackToKeywords(`Manus Forge orchestration unavailable: ${message}`);
   }
 }
 

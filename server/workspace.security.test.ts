@@ -289,4 +289,75 @@ describe("v2 task ownership and credential-gate security", () => {
     ).rejects.toThrow("Unsafe file path");
     expect(dbMocks.createTaskFile).not.toHaveBeenCalled();
   });
+
+  it("creates task-linked global memory only after source-task ownership is verified", async () => {
+    const memoryRecord = {
+      id: 501,
+      ownerUserId: 42,
+      category: "decision",
+      title: "Architecture decision",
+      content: "Keep provider diagnostics hidden unless the owner opens technical history.",
+      sourceTaskId: 77,
+      confidence: "verified",
+      createdAt: 1778000000000,
+      updatedAt: 1778000000000,
+    };
+    dbMocks.getTaskForOwner.mockResolvedValueOnce(ownedTask);
+    dbMocks.createMemory.mockResolvedValueOnce(memoryRecord);
+    const caller = appRouter.createCaller(createContext(42));
+
+    const result = await caller.memory.create({
+      category: "decision",
+      title: "Architecture decision",
+      content: "Keep provider diagnostics hidden unless the owner opens technical history.",
+      sourceTaskId: 77,
+      confidence: "verified",
+    });
+
+    expect(dbMocks.getTaskForOwner).toHaveBeenCalledWith(77, 42);
+    expect(dbMocks.createMemory).toHaveBeenCalledWith(expect.objectContaining({ ownerUserId: 42, category: "decision", sourceTaskId: 77, confidence: "verified" }));
+    expect(result).toMatchObject({ id: 501, title: "Architecture decision", sourceTaskId: 77 });
+  });
+
+  it("rejects memory creation when the source task is not owned by the authenticated user", async () => {
+    dbMocks.getTaskForOwner.mockResolvedValueOnce(undefined);
+    const caller = appRouter.createCaller(createContext(42));
+
+    await expect(
+      caller.memory.create({
+        category: "feature",
+        title: "Unowned task source",
+        content: "This memory should not be created.",
+        sourceTaskId: 999,
+        confidence: "medium",
+      }),
+    ).rejects.toThrow("Task not found or not owned by the authenticated user");
+
+    expect(dbMocks.createMemory).not.toHaveBeenCalled();
+  });
+
+  it("lists and searches global memory through owner-scoped backend helpers", async () => {
+    const memoryRecord = {
+      id: 601,
+      ownerUserId: 42,
+      category: "research",
+      title: "Provider routing evidence",
+      content: "Claude handles planning and Kimi handles code-oriented prompts.",
+      sourceTaskId: null,
+      confidence: "high",
+      createdAt: 1778000100000,
+      updatedAt: 1778000100000,
+    };
+    dbMocks.listMemoryByCategory.mockResolvedValueOnce([memoryRecord]);
+    dbMocks.searchMemory.mockResolvedValueOnce([memoryRecord]);
+    const caller = appRouter.createCaller(createContext(42));
+
+    const listed = await caller.memory.list({ category: "research", limit: 10 });
+    const searched = await caller.memory.search({ query: "routing", limit: 5 });
+
+    expect(dbMocks.listMemoryByCategory).toHaveBeenCalledWith(42, "research", 10);
+    expect(dbMocks.searchMemory).toHaveBeenCalledWith(42, "routing", 5);
+    expect(listed).toEqual([memoryRecord]);
+    expect(searched).toEqual([memoryRecord]);
+  });
 });
