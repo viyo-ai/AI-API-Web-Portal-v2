@@ -68,3 +68,18 @@
 - [x] Update the first-message flow so a newly created task with a typed message explicitly initializes/checks Kimi K2.6 via Cloudflare Workers AI and Claude Opus via API according to the source decisions.
 - [x] Correct the model/status copy so the owner can see that the first typed message is what starts the Claude/Kimi initialization and routing sequence.
 - [x] Add regression coverage proving task creation alone does not call providers, but task creation with a first message starts the required Claude/Kimi initialization checks and provider route handling.
+- [x] Reproduce and fix the missing scrollbar in the middle task-thread/chat area on the published workspace.
+- [x] Add a visible task-thread provider mode toggle with Auto as default plus Kimi and Claude options.
+- [x] Make Enter submit the task-thread message and initialize the selected provider route, while preserving Shift+Enter for multiline input.
+- [x] Fix the “What model am I using?” flow so the task thread returns a clear answer instead of no response.
+- [x] Remove, rename, or hide the confusing “Advanced technical tools” right-side card that activates the black terminal unless explicitly needed for developer diagnostics.
+- [x] Log in through the browser and repeatedly test the live/published workspace until the reported task workflow works as expected before saving a checkpoint.
+- [x] Inspect the provided Manus reference video and extract the middle-chat interaction/design requirements before redesigning the workspace composer.
+- [x] Replace the bulky middle composer area with a lightweight Manus-style chat-first input layout.
+- [x] Remove the four prompt-question tiles above the chat model selector unless they are replaced by a much subtler optional affordance.
+- [x] Preserve the visible Auto (Default), Kimi, and Claude route selection in a compact form that does not dominate the chat area.
+- [x] Preserve Enter-to-send, Shift+Enter multiline behavior, and first-message provider initialization in the redesigned composer.
+- [x] Validate the redesigned middle chat area in automated tests and browser preview before checkpointing.
+- [ ] Open the dev server in browser and visually validate the new Manus-style composer looks correct.
+- [ ] Test new task creation, typing a message, Enter-to-send, route selector switching, and model identity answer on published domain.
+- [ ] Save a new checkpoint after browser validation passes.

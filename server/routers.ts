@@ -41,7 +41,7 @@ import {
   writeWorkspaceFile,
 } from "./filesystem";
 import { getUserWorkspaceRoot } from "./terminal";
-import { executeWrapperTurn, getWrapperRuntimeCredentialStates } from "./wrapperLLM";
+import { CLAUDE_DEFAULT_MODEL, CLAUDE_OWNER_MODEL_LABEL, executeWrapperTurn, getWrapperRuntimeCredentialStates, KIMI_K26_CLOUDFLARE_MODEL, KIMI_OWNER_MODEL_LABEL } from "./wrapperLLM";
 
 const routeModes = ["auto", "claude", "kimi", "dual"] as const;
 const taskStatuses = ["active", "waiting", "blocked", "completed", "archived", "error"] as const;
@@ -89,9 +89,25 @@ export function getRuntimeCredentialStates(): CredentialState[] {
 function providersRequiredForRoute(route: RouteMode): CredentialProvider[] {
   if (route === "claude") return ["claude"];
   if (route === "kimi") return ["kimi"];
-  if (route === "dual") return ["claude", "kimi"];
-  return ["claude", "kimi"];
+  if (route === "dual" || route === "auto") return ["claude", "kimi"];
+  return [];
 }
+
+function isModelIdentityQuestion(message: string) {
+  const normalized = message.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  return /\bwhat\s+(model|ai|provider)\b/.test(normalized) || /\bwhich\s+(model|ai|provider)\b/.test(normalized) || /\bmodel\s+am\s+i\s+using\b/.test(normalized);
+}
+
+function modelIdentityAnswer(route: RouteMode) {
+  if (route === "claude") {
+    return `You are using Claude mode: ${CLAUDE_OWNER_MODEL_LABEL} through the Claude API. Internal model id: ${CLAUDE_DEFAULT_MODEL}.`;
+  }
+  if (route === "kimi") {
+    return `You are using Kimi mode: ${KIMI_OWNER_MODEL_LABEL} through Cloudflare Workers AI. Internal model id: ${KIMI_K26_CLOUDFLARE_MODEL}.`;
+  }
+  return `You are using Auto mode by default. Auto initializes both approved providers on the first submitted task message: ${CLAUDE_OWNER_MODEL_LABEL} through the Claude API and ${KIMI_OWNER_MODEL_LABEL} through Cloudflare Workers AI. Internal ids: ${CLAUDE_DEFAULT_MODEL} and ${KIMI_K26_CLOUDFLARE_MODEL}.`;
+}
+
 
 export function resolveWrapperRoute(message: string, preferredRoute: RouteMode = "auto"): WrapperRouteDecision {
   const override = detectRouteOverride(message);
@@ -259,7 +275,8 @@ export const appRouter = router({
         const task = await requireOwnedTask(input.taskId, ctx.user.id);
         const override = detectRouteOverride(input.message);
         const userContent = override.cleanedMessage || input.message.trim();
-        const decision = resolveWrapperRoute(input.message, input.routeMode ?? (task.routeMode as RouteMode));
+        const selectedRoute = input.routeMode ?? (task.routeMode as RouteMode);
+        const decision = resolveWrapperRoute(input.message, selectedRoute);
         await recordRuntimeCredentialSnapshots(ctx.user.id, decision.credentialStates);
 
         await appendTaskEvent({
@@ -271,6 +288,19 @@ export const appRouter = router({
           content: userContent,
           metadataJson: serializeJson({ requestedRoute: decision.requestedRoute, forcedByTag: decision.forcedByTag }),
         });
+
+        if (isModelIdentityQuestion(userContent)) {
+          await appendTaskEvent({
+            taskId: task.id,
+            ownerUserId: ctx.user.id,
+            actor: "system",
+            eventType: "message",
+            status: "succeeded",
+            content: modelIdentityAnswer(decision.requestedRoute === "dual" ? "auto" : selectedRoute),
+            metadataJson: serializeJson({ requestedRoute: decision.requestedRoute, effectiveRoute: decision.effectiveRoute, claudeModel: CLAUDE_DEFAULT_MODEL, kimiModel: KIMI_K26_CLOUDFLARE_MODEL }),
+          });
+          return getTaskThread(task.id, ctx.user.id);
+        }
 
         const turn = await createTurn({
           taskId: task.id,

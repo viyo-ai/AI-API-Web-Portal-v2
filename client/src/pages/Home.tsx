@@ -27,12 +27,15 @@ import {
   Loader2,
   LockKeyhole,
   MessageSquareText,
+  Mic,
   PanelLeft,
   PanelRight,
+  Paperclip,
   Plus,
   Search,
+  SendHorizontal,
   ShieldCheck,
-  Sparkles,
+  Smile,
   Workflow,
 } from "lucide-react";
 
@@ -52,13 +55,6 @@ const actorTone: Record<string, string> = {
   wrapper: "border-slate-300 bg-slate-50",
   system: "border-stone-200 bg-stone-50",
 };
-
-const starterPrompts = [
-  "Plan the next safe product step before changing anything.",
-  "Review this task and explain the missing pieces in plain English.",
-  "Use #kimi only if you want an execution draft for a narrowly scoped code change.",
-  "Use #claude only if you want a planning or review pass before build work.",
-];
 
 function compactDate(value: number | Date | string | null | undefined) {
   if (!value) return "No timestamp";
@@ -140,7 +136,8 @@ export default function Home() {
 
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [taskTitle, setTaskTitle] = useState("AI coding workshop task");
-  const [composerText, setComposerText] = useState("Architect the next production-safe step, verify wiring, then proceed only if it matches the approved v2 plan.");
+  const [composerText, setComposerText] = useState("");
+  const [routeMode, setRouteMode] = useState<"auto" | "kimi" | "claude">("auto");
   const [searchTerm, setSearchTerm] = useState("");
   const [filePath, setFilePath] = useState("");
   const [fileUrl, setFileUrl] = useState("");
@@ -209,28 +206,40 @@ export default function Home() {
     await utils.credentials.status.invalidate();
   }
 
-  async function handleCreateTask() {
+  async function createTaskRecordOnly() {
     const cleanTitle = taskTitle.trim() || "Untitled production task";
-    const cleanMessage = composerText.trim();
     const created = await createTask.mutateAsync({
       title: cleanTitle,
       summary: "Task-first v2 workspace item created from the plain-English AI coding workshop.",
-      routeMode: "auto",
+      routeMode,
     });
-    if (!created) return;
+    if (!created) return null;
     setSelectedTaskId(created.task.id);
-    if (cleanMessage) {
-      await submitMessage.mutateAsync({ taskId: created.task.id, message: cleanMessage, routeMode: "auto" });
-    }
+    await refreshWorkspace();
+    return created.task.id as number;
+  }
+
+  async function handleCreateTask() {
+    await createTaskRecordOnly();
+  }
+
+  async function handleSendMessage() {
+    const cleanMessage = composerText.trim();
+    if (!cleanMessage) return;
+    const taskId = selectedTaskId ?? (await createTaskRecordOnly());
+    if (!taskId) return;
+    await submitMessage.mutateAsync({ taskId, message: cleanMessage, routeMode });
     setComposerText("");
     await refreshWorkspace();
   }
 
-  async function handleSendMessage() {
-    if (!selectedTaskId || !composerText.trim()) return;
-    await submitMessage.mutateAsync({ taskId: selectedTaskId, message: composerText.trim(), routeMode: "auto" });
-    setComposerText("");
-    await refreshWorkspace();
+  function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (!isMutating && composerText.trim()) {
+        void handleSendMessage();
+      }
+    }
   }
 
   async function handleArchiveTask(taskId: number, title: string) {
@@ -316,8 +325,8 @@ export default function Home() {
   }
 
   return (
-    <main className="grid min-h-screen overflow-x-hidden bg-[#f7f6f2] text-[#242420] lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_390px]">
-      <aside className="flex min-h-screen flex-col border-r border-[#d9d8d1] bg-[#f0efeb]">
+    <main className="grid h-screen overflow-hidden overflow-x-hidden bg-[#f7f6f2] text-[#242420] lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_390px]">
+      <aside className="flex h-screen min-h-0 flex-col border-r border-[#d9d8d1] bg-[#f0efeb]">
         <div className="border-b border-[#d9d8d1] p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-lg font-semibold tracking-[-0.03em] text-[#1f1f1f]">
@@ -325,7 +334,7 @@ export default function Home() {
             </div>
             <Badge className="rounded-full border-emerald-200 bg-emerald-100 text-emerald-800">v2</Badge>
           </div>
-          <p className="mt-2 text-xs leading-5 text-[#67675f]">Task-first production workspace. No provider dropdown, terminal-first workflow, or demo command composer.</p>
+          <p className="mt-2 text-xs leading-5 text-[#67675f]">Task-first production workspace with an explicit Auto, Kimi, or Claude route selector in the center composer.</p>
         </div>
 
         <div className="space-y-3 border-b border-[#d9d8d1] p-4">
@@ -407,7 +416,7 @@ export default function Home() {
         </ScrollArea>
       </aside>
 
-      <section className="flex min-h-screen min-w-0 flex-col bg-[#fbfaf7]">
+      <section className="flex h-screen min-h-0 min-w-0 flex-col bg-[#fbfaf7]">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#deded8] bg-white/80 px-5 py-4 backdrop-blur">
           <div>
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">
@@ -432,16 +441,12 @@ export default function Home() {
           </div>
         </header>
 
-        <ScrollArea className="min-h-0 flex-1 p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto p-5" data-testid="center-task-thread-scroll">
           <div className="mx-auto max-w-4xl space-y-4">
             {!selectedTaskId ? (
-              <Card className="border-dashed border-[#cfcfc8] bg-white text-[#242420]">
-                <CardContent className="p-8 text-center">
-                  <Sparkles className="mx-auto mb-4 h-10 w-10 text-sky-500" />
-                  <h2 className="text-xl font-semibold tracking-[-0.03em]">Start with a production task</h2>
-                  <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[#686861]">Use the composer below to create the task record. The first submitted task-thread message starts Claude Opus 4.7 via API and Kimi K2.6 via Cloudflare Workers AI; AUTO can be overridden only with #claude or #kimi tags.</p>
-                </CardContent>
-              </Card>
+              <div className="flex min-h-[42vh] items-end justify-center pb-8 text-center text-sm leading-6 text-[#77766e]">
+                <p className="max-w-lg">Start typing below. A task record is created quietly, and the first submitted message starts the selected model route.</p>
+              </div>
             ) : threadQuery.isLoading ? (
               <div className="rounded-2xl border border-[#deded8] bg-white p-5 text-sm text-[#6d6d65]">Loading task thread...</div>
             ) : events.length === 0 ? (
@@ -515,36 +520,63 @@ export default function Home() {
               </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
 
-        <footer className="border-t border-[#deded8] bg-white p-4">
-          <div className="mx-auto max-w-4xl space-y-3">
-            <div className="grid gap-2 sm:grid-cols-2">
-              {starterPrompts.map((prompt) => (
-                <button key={prompt} type="button" onClick={() => setComposerText(prompt)} className="rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-3 text-left text-xs leading-5 text-[#55554e] hover:border-sky-200 hover:bg-sky-50">
-                  {prompt}
-                </button>
-              ))}
-            </div>
-            <Textarea value={composerText} onChange={(event) => setComposerText(event.target.value)} placeholder="Describe the next task step. Use #claude or #kimi only when you need an explicit override." className="min-h-28 rounded-2xl border-[#d9d8d1] bg-[#fbfaf7] text-sm leading-6" />
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="space-y-1 text-xs leading-5 text-[#77766e]">
-                <p>Task creation is record-only. Sending the first task-thread message initializes/checks Claude Opus 4.7 and Kimi K2.6; AUTO requires both credentials and never silently falls back.</p>
-                <Button type="button" variant="outline" onClick={handleRefreshCredentials} disabled={credentialsRefreshMutation.isPending} className="h-8 rounded-full border-[#d9d8d1] bg-white px-3 text-[11px]">
-                  {credentialsRefreshMutation.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <RotateCcw className="mr-2 h-3 w-3" />}
-                  Refresh credential status
+        <footer className="shrink-0 border-t border-[#deded8] bg-white/95 px-4 py-3 shadow-[0_-18px_45px_rgba(31,31,31,0.06)] backdrop-blur">
+          <div className="mx-auto max-w-4xl">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] leading-4 text-[#77766e]">
+              <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Model route">
+                {([
+                  { value: "auto", label: "Auto (Default)", detail: "dual" },
+                  { value: "kimi", label: "Kimi", detail: "K2.6" },
+                  { value: "claude", label: "Claude", detail: "Opus 4.7" },
+                ] as const).map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={routeMode === option.value}
+                    onClick={() => setRouteMode(option.value)}
+                    className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${routeMode === option.value ? "border-[#1f1f1f] bg-[#1f1f1f] text-white" : "border-[#d9d8d1] bg-white text-[#66665f] hover:border-sky-300 hover:text-[#242420]"}`}
+                  >
+                    {option.label} <span className="font-normal opacity-75">{option.detail}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="hidden sm:inline">Enter sends · Shift+Enter adds a line</span>
+                <Button type="button" variant="outline" onClick={handleRefreshCredentials} disabled={credentialsRefreshMutation.isPending} className="h-7 rounded-full border-[#d9d8d1] bg-white px-2.5 text-[11px]">
+                  {credentialsRefreshMutation.isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <RotateCcw className="mr-1.5 h-3 w-3" />}
+                  Credentials
                 </Button>
               </div>
-              <Button onClick={selectedTaskId ? handleSendMessage : handleCreateTask} disabled={isMutating || !composerText.trim()} className="rounded-full bg-[#1f1f1f] px-6 text-white hover:bg-black">
-                {isMutating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Workflow className="mr-2 h-4 w-4" />}
-                {selectedTaskId ? "Send to task thread" : "Create task"}
+            </div>
+
+            <div className="flex items-end gap-2 rounded-[1.65rem] border border-[#d9d8d1] bg-[#fbfaf7] p-2 shadow-sm focus-within:border-sky-300 focus-within:ring-2 focus-within:ring-sky-100" data-testid="manus-style-composer">
+              <div className="hidden items-center gap-1 pb-1 sm:flex" aria-hidden="true">
+                {[Plus, Paperclip, Smile, Mic].map((Icon, index) => (
+                  <span key={index} className="flex h-8 w-8 items-center justify-center rounded-full text-[#77766e]">
+                    <Icon className="h-4 w-4" />
+                  </span>
+                ))}
+              </div>
+              <Textarea
+                value={composerText}
+                onChange={(event) => setComposerText(event.target.value)}
+                onKeyDown={handleComposerKeyDown}
+                placeholder="Send message to the task..."
+                aria-label="Task message"
+                className="max-h-36 min-h-11 flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm leading-6 shadow-none focus-visible:ring-0"
+              />
+              <Button type="button" onClick={handleSendMessage} disabled={isMutating || !composerText.trim()} className="mb-1 h-9 w-9 shrink-0 rounded-full bg-[#1f1f1f] p-0 text-white hover:bg-black" aria-label="Send message">
+                {isMutating ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizontal className="h-4 w-4" />}
               </Button>
             </div>
           </div>
         </footer>
       </section>
 
-      <aside className="flex min-h-screen min-w-0 flex-col border-l border-[#d9d8d1] bg-[#f0efeb] lg:col-span-2 xl:col-span-1">
+      <aside className="flex h-screen min-h-0 min-w-0 flex-col border-l border-[#d9d8d1] bg-[#f0efeb] lg:col-span-2 xl:col-span-1">
         <div className="border-b border-[#d9d8d1] p-4">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">
             <PanelRight className="h-4 w-4" /> Task files and context
@@ -559,8 +591,8 @@ export default function Home() {
                 <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Production safeguards</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-xs leading-5 text-[#686861]">
-                <p>The main UX remains task-first; technical tools stay hidden unless you explicitly open advanced mode.</p>
-                <p>No provider dropdown. Tags are explicit overrides; AUTO remains coordinated behind the scenes.</p>
+                <p>The main UX remains task-first; developer diagnostics stay hidden unless the owner explicitly opens them.</p>
+                <p>Use the center composer toggle for Auto, Kimi, or Claude. Auto coordinates both approved providers; tags remain optional shortcuts.</p>
                 <p>No fake seeded files or memories. Empty states stay honest until real records exist.</p>
                 <p>The workspace operates on your task-scoped files and task history; unsupported file actions stay disabled until real file metadata exists.</p>
               </CardContent>
@@ -610,12 +642,12 @@ export default function Home() {
 
             <Card className="border-[#deded8] bg-white text-[#242420]">
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base"><PanelRight className="h-4 w-4 text-stone-600" /> Advanced technical tools</CardTitle>
+                <CardTitle className="flex items-center gap-2 text-base"><PanelRight className="h-4 w-4 text-stone-600" /> Developer diagnostics</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-xs leading-5 text-[#686861]">
-                <p>These tools are hidden during normal task work so the owner view stays focused on plain-English tasks, files, decisions, and results.</p>
+                <p>Filesystem and terminal diagnostics are developer-only controls. They stay closed during normal owner task work and opening them will mount the black terminal panel.</p>
                 <Button type="button" variant="outline" onClick={() => setShowAdvancedTools((value) => !value)} className="w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
-                  {showAdvancedTools ? "Hide advanced tools" : "Show advanced tools"}
+                  {showAdvancedTools ? "Hide developer diagnostics" : "Show developer diagnostics"}
                 </Button>
               </CardContent>
             </Card>

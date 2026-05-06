@@ -29,8 +29,8 @@ describe("v2 task-first workspace production regressions", () => {
 
     expect(source).toContain("TerminalPanel");
     expect(source).toContain("FilesystemPanel");
-    expect(source).toContain("technical tools stay hidden unless you explicitly open advanced mode");
-    expect(source).toContain("Show advanced tools");
+    expect(source).toContain("developer-only controls");
+    expect(source).toContain("Show developer diagnostics");
     expect(source).not.toContain("WorkspaceCommandCenter");
     expect(source).not.toMatch(/Draft safe plan|Approve and run|opencode\.ai background CLI/i);
     expect(terminalSource).toContain("@xterm/xterm");
@@ -59,22 +59,23 @@ describe("v2 task-first workspace production regressions", () => {
 
     expect(source).toContain("overflow-x-hidden");
     expect(source).toContain("xl:grid-cols-[300px_minmax(0,1fr)_390px]");
-    expect(source).toContain("flex min-h-screen min-w-0 flex-col border-l");
+    expect(source).toContain("flex h-screen min-h-0 min-w-0 flex-col border-l");
     expect(source).toContain("lg:col-span-2 xl:col-span-1");
     expect(source).toContain("Task-scoped files");
-    expect(source).toContain("Advanced technical tools");
+    expect(source).toContain("Developer diagnostics");
     expect(source).toContain("showAdvancedTools ?");
     expect(source).toContain("Open, AI-change, rollback, download, and library-promotion intentions unlock only after real task file metadata is recorded");
   });
 
-  it("keeps provider routing inside the Wrapper LLM instead of exposing a provider dropdown", () => {
+  it("exposes an explicit Auto, Kimi, and Claude route selector without a hidden provider dropdown", () => {
     const source = readProjectFile("client/src/pages/Home.tsx");
 
-    expect(source).toContain("Task creation is record-only");
-    expect(source).toContain("first task-thread message initializes/checks Claude Opus 4.7 and Kimi K2.6");
-    expect(source).toContain("#claude");
-    expect(source).toContain("#kimi");
-    expect(source).toContain("No provider dropdown");
+    expect(source).toContain("manus-style-composer");
+    expect(source).toContain("Enter sends · Shift+Enter adds a line");
+    expect(source).toContain("Send message to the task");
+    expect(source).toContain("Auto (Default)");
+    expect(source).toContain("Kimi");
+    expect(source).toContain("Claude");
     expect(source).toContain("No silent fallback");
     expect(source).not.toMatch(/<select|SelectItem|provider picker/i);
   });

@@ -31,6 +31,10 @@ const dbMocks = vi.hoisted(() => ({
 }));
 
 const wrapperMocks = vi.hoisted(() => ({
+  CLAUDE_DEFAULT_MODEL: "claude-opus-4-7",
+  CLAUDE_OWNER_MODEL_LABEL: "Claude Opus 4.7",
+  KIMI_K26_CLOUDFLARE_MODEL: "@cf/moonshotai/kimi-k2.6",
+  KIMI_OWNER_MODEL_LABEL: "Kimi K2.6",
   executeWrapperTurn: vi.fn(),
   getWrapperRuntimeCredentialStates: vi.fn(),
 }));
@@ -146,6 +150,27 @@ describe("v2 task ownership and credential-gate security", () => {
       content: expect.stringContaining("AUTO first-message initialization"),
     }));
     expect(wrapperMocks.executeWrapperTurn).toHaveBeenCalledWith(expect.objectContaining({ route: "dual", userMessage: "Start the task" }));
+  });
+
+  it("answers owner model-identity questions deterministically without opening a provider turn", async () => {
+    wrapperMocks.getWrapperRuntimeCredentialStates.mockReturnValue([
+      { provider: "claude", status: "configured", configured: true, reason: "Claude configured." },
+      { provider: "kimi", status: "configured", configured: true, reason: "Kimi configured." },
+    ]);
+    dbMocks.getTaskForOwner.mockResolvedValue(ownedTask);
+    const caller = appRouter.createCaller(createContext(42));
+
+    await caller.orchestration.submitMessage({ taskId: 77, message: "What model am I using?", routeMode: "auto" });
+
+    expect(dbMocks.appendTaskEvent).toHaveBeenCalledWith(expect.objectContaining({ actor: "user", content: "What model am I using?" }));
+    expect(dbMocks.appendTaskEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actor: "system",
+      eventType: "message",
+      status: "succeeded",
+      content: expect.stringContaining("You are using Auto mode by default"),
+    }));
+    expect(dbMocks.createTurn).not.toHaveBeenCalled();
+    expect(wrapperMocks.executeWrapperTurn).not.toHaveBeenCalled();
   });
 
   it("blocks AUTO first-message initialization instead of degrading to one provider when either required credential is missing", async () => {

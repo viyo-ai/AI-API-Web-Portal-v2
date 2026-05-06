@@ -294,7 +294,7 @@ afterEach(() => {
 });
 
 describe("Home v2 task-first workspace behavior", () => {
-  it("renders the production three-pane workspace without legacy terminal or provider-picker copy", async () => {
+  it("renders the production three-pane workspace with a bounded center scroller and explicit route selector", async () => {
     render(<Home />);
 
     expect((await screen.findAllByText("Implement v2 shell")).length).toBeGreaterThan(0);
@@ -302,9 +302,14 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(screen.getByText(/Center task thread/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Task-scoped files/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Wire the task-first AI coordinator workspace/i)).toBeInTheDocument();
-    expect(screen.getByText(/Task creation is record-only/i)).toBeInTheDocument();
-    expect(screen.getByText(/first task-thread message initializes\/checks Claude Opus 4\.7 and Kimi K2\.6/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/No provider dropdown/i).length).toBeGreaterThan(0);
+    expect(screen.getByTestId("center-task-thread-scroll")).toHaveClass("overflow-y-auto");
+    expect(screen.getByTestId("manus-style-composer")).toBeInTheDocument();
+    expect(screen.queryByText(/Plan the next safe product step/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Enter sends · Shift\+Enter adds a line/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Send message/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Auto \(Default\).*dual/i })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: /Kimi K2\.6/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Claude Opus 4\.7/i })).toBeInTheDocument();
     expect(screen.getAllByText(/No silent fallback/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/claude: missing/i)).toBeInTheDocument();
     expect(screen.getByText(/kimi: configured/i)).toBeInTheDocument();
@@ -422,23 +427,34 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(screen.getByText("Kimi returned an empty response.")).toBeInTheDocument();
   });
 
-  it("submits the selected task message through the task thread and refreshes v2 task context", async () => {
+  it("submits the selected task message with Enter and respects the explicit Kimi route selector", async () => {
     const user = userEvent.setup();
     render(<Home />);
 
     await screen.findAllByText("Implement v2 shell");
-    await user.click(screen.getByText(/Use #kimi only if you want an execution draft/i));
-    await user.click(screen.getByRole("button", { name: /send to task thread/i }));
+    await user.click(screen.getByRole("radio", { name: /Kimi K2\.6/i }));
+    await user.type(screen.getByLabelText(/Task message/i), "What model am I using?{enter}");
 
     expect(submitMessageMock).toHaveBeenCalledWith({
       taskId: 7,
-      message: "Use #kimi only if you want an execution draft for a narrowly scoped code change.",
-      routeMode: "auto",
+      message: "What model am I using?",
+      routeMode: "kimi",
     });
     await waitFor(() => expect(invalidateMock).toHaveBeenCalled());
   });
 
-  it("creates a new task from the sidebar with honest task-first defaults", async () => {
+  it("keeps Shift+Enter inside the composer without submitting the message", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    await user.type(screen.getByLabelText(/Task message/i), "Line one{shift>}{enter}{/shift}Line two");
+
+    expect(screen.getByLabelText(/Task message/i)).toHaveValue("Line one\nLine two");
+    expect(submitMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("creates a new task from the sidebar as a record-only action", async () => {
     const user = userEvent.setup();
     render(<Home />);
 
@@ -449,7 +465,23 @@ describe("Home v2 task-first workspace behavior", () => {
       summary: "Task-first v2 workspace item created from the plain-English AI coding workshop.",
       routeMode: "auto",
     });
-    expect(submitMessageMock).toHaveBeenCalledWith(expect.objectContaining({ taskId: 19, routeMode: "auto" }));
+    expect(submitMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("creates a task and submits the first message when Enter is pressed with no selected task", async () => {
+    const user = userEvent.setup();
+    mockTasks = [];
+    mockThread = undefined;
+    render(<Home />);
+
+    await user.type(screen.getByLabelText(/Task message/i), "Initialize the task with Auto.{enter}");
+
+    expect(createTaskMock).toHaveBeenCalledWith({
+      title: "AI coding workshop task",
+      summary: "Task-first v2 workspace item created from the plain-English AI coding workshop.",
+      routeMode: "auto",
+    });
+    expect(submitMessageMock).toHaveBeenCalledWith({ taskId: 19, message: "Initialize the task with Auto.", routeMode: "auto" });
     expect(createTaskMock.mock.invocationCallOrder[0]).toBeLessThan(submitMessageMock.mock.invocationCallOrder[0]);
   });
 
@@ -483,7 +515,7 @@ describe("Home v2 task-first workspace behavior", () => {
     const user = userEvent.setup();
     render(<Home />);
 
-    await user.click(screen.getByRole("button", { name: /refresh credential status/i }));
+    await user.click(screen.getByRole("button", { name: /credentials/i }));
 
     expect(credentialsRefreshMock).toHaveBeenCalledWith({ providers: ["claude", "kimi"] });
     await waitFor(() => expect(invalidateMock).toHaveBeenCalled());
@@ -514,7 +546,7 @@ describe("Home v2 task-first workspace behavior", () => {
     render(<Home />);
 
     await screen.findAllByText("Implement v2 shell");
-    await user.click(screen.getByRole("button", { name: /show advanced tools/i }));
+    await user.click(screen.getByRole("button", { name: /show developer diagnostics/i }));
     await user.type(screen.getByPlaceholderText("workspace directory, blank for root"), "notes");
     await user.click(screen.getByRole("button", { name: /mkdir/i }));
 
@@ -538,7 +570,7 @@ describe("Home v2 task-first workspace behavior", () => {
 
     await screen.findAllByText("Implement v2 shell");
     expect(FakeWebSocket.instances).toHaveLength(0);
-    await user.click(screen.getByRole("button", { name: /show advanced tools/i }));
+    await user.click(screen.getByRole("button", { name: /show developer diagnostics/i }));
     await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
     const socket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
 
@@ -577,7 +609,7 @@ describe("Home v2 task-first workspace behavior", () => {
 
     await screen.findAllByText("Implement v2 shell");
     expect(resizeObserverCallbacks.length).toBe(0);
-    await user.click(screen.getByRole("button", { name: /show advanced tools/i }));
+    await user.click(screen.getByRole("button", { name: /show developer diagnostics/i }));
     expect(resizeObserverCallbacks.length).toBeGreaterThan(0);
     const scheduledBeforeResize = requestAnimationFrameMock.mock.calls.length;
 
@@ -604,7 +636,7 @@ describe("Home v2 task-first workspace behavior", () => {
 
     await screen.findAllByText("Implement v2 shell");
     expect(FakeWebSocket.instances).toHaveLength(0);
-    await user.click(screen.getByRole("button", { name: /show advanced tools/i }));
+    await user.click(screen.getByRole("button", { name: /show developer diagnostics/i }));
     await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
     const socket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
 
