@@ -47,6 +47,8 @@ export type CredentialProvider = "claude" | "kimi";
 export type CredentialStatus = "configured" | "missing" | "invalid" | "untested" | "error";
 export type BuildTargetStatus = "active" | "archived";
 export type BuildBranchState = "clean" | "cloning" | "error";
+export type BuildBranchPushState = "never_pushed" | "pushing" | "pushed" | "blocked" | "error";
+export type AgentEnvVarMap = Record<string, string>;
 
 export function nowMs() {
   return Date.now();
@@ -593,6 +595,37 @@ export function normalizeJsonStringArray(values: string[] | undefined, fallback:
   return JSON.stringify(Array.from(new Set(source.map((value) => value.trim()).filter(Boolean))));
 }
 
+function normalizeEnvName(value: string) {
+  const normalized = value.trim();
+  if (!/^[A-Z_][A-Z0-9_]*$/.test(normalized)) throw new Error(`Invalid environment variable name: ${value}`);
+  return normalized;
+}
+
+export function parseAgentEnvVarMap(value: string | null | undefined): AgentEnvVarMap {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>)
+        .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+        .map(([workspaceEnvName, sourceEnvName]) => [normalizeEnvName(workspaceEnvName), normalizeEnvName(sourceEnvName)]),
+    );
+  } catch {
+    return {};
+  }
+}
+
+export function normalizeAgentEnvVarMap(values: AgentEnvVarMap | undefined): string {
+  if (!values) return "{}";
+  const normalized = Object.fromEntries(
+    Object.entries(values)
+      .map(([workspaceEnvName, sourceEnvName]) => [normalizeEnvName(workspaceEnvName), normalizeEnvName(sourceEnvName)] as const)
+      .filter(([workspaceEnvName, sourceEnvName]) => Boolean(workspaceEnvName && sourceEnvName)),
+  );
+  return JSON.stringify(normalized);
+}
+
 export function sanitizeBuildTargetName(input: string) {
   const normalized = input.replace(/\s+/g, " ").trim();
   if (!normalized) return "Untitled build target";
@@ -608,6 +641,7 @@ export async function createBuildTarget(values: {
   protectedBranches?: string[];
   validationCommands?: string[];
   serviceChecks?: string[];
+  agentEnvVarMap?: AgentEnvVarMap;
 }) {
   const db = await getDb();
   if (!db) throw new Error("Database is required for Build Targets");
@@ -622,6 +656,7 @@ export async function createBuildTarget(values: {
     protectedBranchesJson: normalizeJsonStringArray(values.protectedBranches, ["main", "staging"]),
     validationCommandsJson: normalizeJsonStringArray(values.validationCommands, ["pnpm check", "pnpm test", "pnpm build"]),
     serviceChecksJson: normalizeJsonStringArray(values.serviceChecks, []),
+    agentEnvVarMapJson: normalizeAgentEnvVarMap(values.agentEnvVarMap),
     status: "active",
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -640,6 +675,7 @@ export async function updateBuildTarget(values: {
   protectedBranches?: string[];
   validationCommands?: string[];
   serviceChecks?: string[];
+  agentEnvVarMap?: AgentEnvVarMap;
 }) {
   const db = await getDb();
   if (!db) throw new Error("Database is required for Build Targets");
@@ -649,8 +685,13 @@ export async function updateBuildTarget(values: {
   if (values.protectedBranches !== undefined) set.protectedBranchesJson = normalizeJsonStringArray(values.protectedBranches, ["main", "staging"]);
   if (values.validationCommands !== undefined) set.validationCommandsJson = normalizeJsonStringArray(values.validationCommands, ["pnpm check", "pnpm test", "pnpm build"]);
   if (values.serviceChecks !== undefined) set.serviceChecksJson = normalizeJsonStringArray(values.serviceChecks, []);
+  if (values.agentEnvVarMap !== undefined) set.agentEnvVarMapJson = normalizeAgentEnvVarMap(values.agentEnvVarMap);
   await db.update(buildTargets).set(set).where(and(eq(buildTargets.id, values.targetId), eq(buildTargets.ownerUserId, values.ownerUserId)));
   return getBuildTargetForOwner(values.targetId, values.ownerUserId);
+}
+
+export async function updateBuildTargetEnvMap(values: { targetId: number; ownerUserId: number; agentEnvVarMap: AgentEnvVarMap }) {
+  return updateBuildTarget({ targetId: values.targetId, ownerUserId: values.ownerUserId, agentEnvVarMap: values.agentEnvVarMap });
 }
 
 export async function archiveBuildTarget(targetId: number, ownerUserId: number) {
@@ -694,6 +735,9 @@ export async function createBuildBranch(values: {
     state: "cloning",
     errorMessage: null,
     lastSyncedCommit: null,
+    pushState: "never_pushed",
+    lastPushedCommit: null,
+    lastPushError: null,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -714,6 +758,27 @@ export async function updateBuildBranchState(values: {
   if (!db) throw new Error("Database is required for Build Branches");
   const timestamp = nowMs();
   await db.update(buildBranches).set({ state: values.state, errorMessage: values.errorMessage ?? null, lastSyncedCommit: values.lastSyncedCommit ?? null, updatedAt: timestamp }).where(and(eq(buildBranches.id, values.branchId), eq(buildBranches.ownerUserId, values.ownerUserId)));
+  return getBuildBranchForOwner(values.branchId, values.ownerUserId);
+}
+
+export async function updateBuildBranchPushState(values: {
+  branchId: number;
+  ownerUserId: number;
+  pushState: BuildBranchPushState;
+  lastPushedCommit?: string | null;
+  lastPushError?: string | null;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for Build Branches");
+  await db
+    .update(buildBranches)
+    .set({
+      pushState: values.pushState,
+      lastPushedCommit: values.lastPushedCommit ?? null,
+      lastPushError: values.lastPushError ?? null,
+      updatedAt: nowMs(),
+    })
+    .where(and(eq(buildBranches.id, values.branchId), eq(buildBranches.ownerUserId, values.ownerUserId)));
   return getBuildBranchForOwner(values.branchId, values.ownerUserId);
 }
 

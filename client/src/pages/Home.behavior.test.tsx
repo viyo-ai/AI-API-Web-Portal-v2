@@ -16,7 +16,9 @@ const uploadWorkspaceFileMock = vi.fn();
 const attachGlobalToTaskMock = vi.fn();
 const credentialsRefreshMock = vi.fn();
 const createBuildTargetMock = vi.fn();
+const updateBuildTargetSettingsMock = vi.fn();
 const createBuildBranchMock = vi.fn();
+const pushBuildBranchMock = vi.fn();
 const filesystemTreeRefetchMock = vi.fn(async () => undefined);
 const filesystemWriteMock = vi.fn();
 const filesystemMkdirMock = vi.fn();
@@ -167,9 +169,9 @@ vi.mock("@/lib/trpc", () => ({
       memory: { list: { invalidate: invalidateMock } },
       credentials: { status: { invalidate: invalidateMock } },
       filesystem: { tree: { invalidate: invalidateMock }, read: { invalidate: invalidateMock } },
-      buildTargets: { list: { invalidate: invalidateMock }, get: { invalidate: invalidateMock }, testConnection: { invalidate: invalidateMock } },
+      buildTargets: { list: { invalidate: invalidateMock }, get: { invalidate: invalidateMock }, testConnection: { invalidate: invalidateMock }, updateSettings: { invalidate: invalidateMock } },
       buildBranch: { list: { invalidate: invalidateMock }, getStatus: { invalidate: invalidateMock } },
-    buildBranches: { list: { invalidate: invalidateMock }, status: { invalidate: invalidateMock } },
+      buildBranches: { list: { invalidate: invalidateMock }, status: { invalidate: invalidateMock }, push: { invalidate: invalidateMock } },
     }),
     tasks: {
       list: { useQuery: () => ({ data: mockTasks, isLoading: false }) },
@@ -227,6 +229,7 @@ vi.mock("@/lib/trpc", () => ({
       list: { useQuery: () => ({ data: [], isLoading: false }) },
       get: { useQuery: () => ({ data: undefined, isLoading: false }) },
       create: { useMutation: () => ({ mutateAsync: createBuildTargetMock, isPending: false }) },
+      updateSettings: { useMutation: () => ({ mutateAsync: updateBuildTargetSettingsMock, isPending: false }) },
       testConnection: { useMutation: () => ({ mutateAsync: vi.fn(async () => ({ ok: false, message: "No token configured.", tokenConfigured: false })), isPending: false }) },
     },
     buildBranch: {
@@ -239,6 +242,7 @@ vi.mock("@/lib/trpc", () => ({
       list: { useQuery: () => ({ data: [], isLoading: false }) },
       create: { useMutation: () => ({ mutateAsync: createBuildBranchMock, isPending: false }) },
       linkTask: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
+      push: { useMutation: () => ({ mutateAsync: pushBuildBranchMock, isPending: false }) },
       status: { useQuery: () => ({ data: undefined, isLoading: false }) },
       workspaceTree: { useQuery: () => ({ data: { name: "workspace", relativePath: "", type: "directory", children: [] }, isLoading: false }) },
       cleanup: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },

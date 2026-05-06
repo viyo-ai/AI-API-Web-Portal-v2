@@ -225,3 +225,15 @@
 - [x] Validate `BUILD_TARGET_GITHUB_TOKEN` through a focused test/API path before continuing Section 1 acceptance.
 - [x] Use `https://github.com/viyo-ai/AI-API-Web-Portal-v2.git` as the Section 1 live browser acceptance Build Target repository.
 - [x] Commit the accepted Section 1 state and stop for PO review before starting any Section 4 work.
+
+- [x] Verify actual local and remote Git state for Section 1 by running `git log --oneline origin/main -10`, `git status`, and related remote checks.
+- [x] Push accepted Section 1 commits to `viyo-ai/AI-API-Web-Portal-v2` public `main` if they exist locally but are not visible on origin.
+- [x] Report the exact branch, remote commit state, push result, and confirm Section 4 remains paused until PO can see Section 1 on public `main`.
+
+- [x] Re-ingest `PORTAL_PHASE_1_DIRECTIVE.md` and enforce Section 4-only scope: Branch Isolation, Push Policy, and Environment Variable Injection.
+- [x] Commit `PORTAL_PHASE_1_DIRECTIVE.md` at the repository root as part of the first Section 4 commit.
+- [x] Implement Section 4 branch isolation so build work occurs only on dedicated feature branches and never directly on protected branches.
+- [x] Implement Section 4 push policy so direct pushes to protected branches are blocked and allowed pushes are constrained to the active isolated branch.
+- [x] Implement Section 4 environment variable injection so validation/build commands receive configured secret values by environment-variable name without exposing token values in UI, logs, or persisted records.
+- [x] Add/update focused and browser acceptance coverage for Section 4 branch isolation, push policy, and environment injection.
+- [x] Run Section 4 acceptance and full validation gates, repair only Section 4 defects, then checkpoint, commit, push to public `main`, and stop for PO review before Section 8.

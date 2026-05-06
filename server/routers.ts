@@ -41,10 +41,13 @@ import {
   type MemoryCategory,
   recordCredentialStatus,
   renameTask,
+  parseAgentEnvVarMap,
   parseJsonStringArray,
   type RouteMode,
   searchMemory,
+  updateBuildBranchPushState,
   updateBuildBranchState,
+  updateBuildTargetEnvMap,
   updateTaskStatus,
 } from "./db";
 import {
@@ -57,10 +60,40 @@ import {
   uploadWorkspaceFile,
   writeWorkspaceFile,
 } from "./filesystem";
-import { cleanupWorkspace, cloneOrSyncBranch, getBuildBranchGitStatus, getBuildBranchWorkspacePath, testBuildTargetConnection, assertSafeBranchName } from "./buildRunner";
+import { cleanupWorkspace, cloneOrSyncBranch, getBuildBranchGitStatus, getBuildBranchWorkspacePath, testBuildTargetConnection, assertSafeBranchName, pushBranch } from "./buildRunner";
 import { storagePut } from "./storage";
 import { getUserWorkspaceRoot } from "./terminal";
 import { CLAUDE_DEFAULT_MODEL, CLAUDE_OWNER_MODEL_LABEL, orchestrateWithOpenAI, executeWrapperTurn, getWrapperRuntimeCredentialStates, KIMI_K26_CLOUDFLARE_MODEL, KIMI_OWNER_MODEL_LABEL, resolveEffectiveRoute } from "./wrapperLLM";
+
+const agentEnvVarMapSchema = z.record(z.string().trim().regex(/^[A-Z_][A-Z0-9_]*$/, "Use uppercase environment variable names."), z.string().trim().regex(/^[A-Z_][A-Z0-9_]*$/, "Use uppercase source environment variable names.")).default({});
+
+function buildTargetGitConfig(target: NonNullable<Awaited<ReturnType<typeof getBuildTargetForOwner>>>) {
+  return {
+    repoUrl: target.repoUrl,
+    defaultBaseBranch: target.defaultBaseBranch,
+    githubTokenEnvVar: target.githubTokenEnvVar,
+    protectedBranches: parseJsonStringArray(target.protectedBranchesJson, ["main", "staging"]),
+    agentEnvVarMap: parseAgentEnvVarMap(target.agentEnvVarMapJson),
+  };
+}
+
+async function pushOwnedBuildBranch(branchId: number, ownerUserId: number) {
+  const branch = await getBuildBranchForOwner(branchId, ownerUserId);
+  if (!branch) throw new Error("Build Branch not found or not owned by the authenticated user");
+  const target = await getBuildTargetForOwner(branch.buildTargetId, ownerUserId);
+  if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+  await updateBuildBranchPushState({ branchId: branch.id, ownerUserId, pushState: "pushing", lastPushedCommit: branch.lastPushedCommit ?? null, lastPushError: null });
+  const result = await pushBranch({ workspacePath: branch.workspacePath, branchName: branch.branchName, target: buildTargetGitConfig(target) });
+  const updated = await updateBuildBranchPushState({
+    branchId: branch.id,
+    ownerUserId,
+    pushState: result.pushState,
+    lastPushedCommit: result.pushedCommit ?? null,
+    lastPushError: result.errorMessage ?? null,
+  });
+  if (result.pushState !== "pushed") throw new Error(result.errorMessage ?? "Push blocked by Section 4 policy.");
+  return { branch: updated, result };
+}
 
 const routeModes = ["auto", "claude", "kimi", "dual"] as const;
 const taskStatuses = ["active", "waiting", "blocked", "completed", "archived", "error"] as const;
@@ -474,6 +507,13 @@ export const appRouter = router({
         if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
         return updateBuildTarget({ ...input, ownerUserId: ctx.user.id });
       }),
+    updateSettings: protectedProcedure
+      .input(z.object({ targetId: z.number().int().positive(), agentEnvVarMap: agentEnvVarMapSchema }))
+      .mutation(async ({ ctx, input }) => {
+        const target = await getBuildTargetForOwner(input.targetId, ctx.user.id);
+        if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+        return updateBuildTargetEnvMap({ targetId: input.targetId, ownerUserId: ctx.user.id, agentEnvVarMap: input.agentEnvVarMap });
+      }),
     delete: protectedProcedure
       .input(z.object({ targetId: z.number().int().positive(), confirm: z.literal("DELETE") }))
       .mutation(async ({ ctx, input }) => {
@@ -507,6 +547,11 @@ export const appRouter = router({
       const branches = await listBuildBranchesForTarget(input.targetId, ctx.user.id, 100);
       return { target, branches };
     }),
+    updateSettings: protectedProcedure.input(z.object({ targetId: z.number().int().positive(), agentEnvVarMap: agentEnvVarMapSchema })).mutation(async ({ ctx, input }) => {
+      const target = await getBuildTargetForOwner(input.targetId, ctx.user.id);
+      if (!target) throw new Error("Build Target not found or not owned by the authenticated user");
+      return updateBuildTargetEnvMap({ targetId: input.targetId, ownerUserId: ctx.user.id, agentEnvVarMap: input.agentEnvVarMap });
+    }),
     testConnection: protectedProcedure.input(z.object({ repoUrl: z.string().trim().url().max(1024), githubTokenEnvVar: z.string().trim().min(1).max(120), defaultBaseBranch: z.string().trim().min(1).max(160).default("main") })).mutation(async ({ input }) => testBuildTargetConnection(input)),
   }),
   buildBranch: router({
@@ -530,6 +575,7 @@ export const appRouter = router({
       if (branch.state !== "clean") return { branch, gitStatus: null };
       return { branch, gitStatus: await getBuildBranchGitStatus(branch.workspacePath) };
     }),
+    push: protectedProcedure.input(z.object({ branchId: z.number().int().positive() })).mutation(async ({ ctx, input }) => pushOwnedBuildBranch(input.branchId, ctx.user.id)),
     delete: protectedProcedure.input(z.object({ branchId: z.number().int().positive(), confirm: z.literal("DELETE") })).mutation(async ({ ctx, input }) => {
       const branch = await getBuildBranchForOwner(input.branchId, ctx.user.id);
       if (!branch) throw new Error("Build Branch not found or not owned by the authenticated user");
@@ -579,6 +625,7 @@ export const appRouter = router({
       if (branch.state !== "clean") return { branch, tree: null };
       return { branch, tree: await listWorkspaceDirectory(branch.workspacePath, input.relativePath, input.depth) };
     }),
+    push: protectedProcedure.input(z.object({ branchId: z.number().int().positive() })).mutation(async ({ ctx, input }) => pushOwnedBuildBranch(input.branchId, ctx.user.id)),
     cleanup: protectedProcedure.input(z.object({ branchId: z.number().int().positive(), confirm: z.literal("DELETE") })).mutation(async ({ ctx, input }) => {
       const branch = await getBuildBranchForOwner(input.branchId, ctx.user.id);
       if (!branch) throw new Error("Build Branch not found or not owned by the authenticated user");

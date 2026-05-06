@@ -268,6 +268,7 @@ export default function Home() {
   const [buildTargetProtectedBranches, setBuildTargetProtectedBranches] = useState("main,staging");
   const [buildTargetValidationCommands, setBuildTargetValidationCommands] = useState("");
   const [buildTargetServiceChecks, setBuildTargetServiceChecks] = useState("");
+  const [buildTargetAgentEnvMap, setBuildTargetAgentEnvMap] = useState("WORKSHOP_GITHUB_TOKEN=BUILD_TARGET_GITHUB_TOKEN");
   const [openedBuildBranch, setOpenedBuildBranch] = useState<any | null>(null);
   const [showThreadDetails, setShowThreadDetails] = useState(false);
   const [workspaceNotice, setWorkspaceNotice] = useState("");
@@ -312,6 +313,8 @@ export default function Home() {
   const credentialsRefreshMutation = trpc.credentials.refresh.useMutation();
   const createBuildTargetMutation = trpc.buildTargets.create.useMutation();
   const createBuildBranchMutation = trpc.buildBranches.create.useMutation();
+  const updateBuildTargetSettingsMutation = trpc.buildTargets.updateSettings.useMutation();
+  const pushBuildBranchMutation = trpc.buildBranches.push.useMutation();
   const testBuildTargetConnectionMutation = trpc.buildTargets.testConnection.useMutation();
 
   const selectedThread = threadQuery.data;
@@ -330,6 +333,13 @@ export default function Home() {
   const buildTargets = buildTargetsQuery.data ?? [];
   const selectedBuildTarget = buildTargets.find((target) => target.id === selectedBuildTargetId) ?? buildTargets[0] ?? null;
   const isBuildModeOpen = Boolean(selectedBuildTarget && openedBuildBranch);
+  const selectedBuildTargetEnvMap = useMemo(() => {
+    try {
+      return selectedBuildTarget?.agentEnvVarMapJson ? JSON.parse(selectedBuildTarget.agentEnvVarMapJson) as Record<string, string> : {};
+    } catch {
+      return {};
+    }
+  }, [selectedBuildTarget]);
 
   const filteredTasks = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -362,7 +372,7 @@ export default function Home() {
       .map((event) => ({ ...activityStepForEvent(event), id: event.id, status: event.status, createdAt: event.createdAt }));
   }, [events]);
 
-  const isMutating = createTask.isPending || updateTaskStatus.isPending || submitMessage.isPending || createFileMetadata.isPending || uploadWorkspaceFileMutation.isPending || attachGlobalToTaskMutation.isPending || createBuildTargetMutation.isPending || createBuildBranchMutation.isPending || testBuildTargetConnectionMutation.isPending;
+  const isMutating = createTask.isPending || updateTaskStatus.isPending || submitMessage.isPending || createFileMetadata.isPending || uploadWorkspaceFileMutation.isPending || attachGlobalToTaskMutation.isPending || createBuildTargetMutation.isPending || createBuildBranchMutation.isPending || updateBuildTargetSettingsMutation.isPending || pushBuildBranchMutation.isPending || testBuildTargetConnectionMutation.isPending;
 
   async function refreshWorkspace() {
     await Promise.all([
@@ -379,6 +389,52 @@ export default function Home() {
       utils.buildBranches.list.invalidate(),
       utils.buildBranch.list.invalidate(),
     ]);
+  }
+
+  function parseAgentEnvMapInput() {
+    const entries = buildTargetAgentEnvMap
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [workspaceEnvName, ...sourceParts] = line.split("=");
+        return [workspaceEnvName?.trim(), sourceParts.join("=").trim()] as const;
+      })
+      .filter(([workspaceEnvName, sourceEnvName]) => Boolean(workspaceEnvName && sourceEnvName));
+    return Object.fromEntries(entries);
+  }
+
+  async function handleUpdateBuildTargetSettings() {
+    if (!selectedBuildTarget) return;
+    try {
+      const updated = await updateBuildTargetSettingsMutation.mutateAsync({ targetId: selectedBuildTarget.id, agentEnvVarMap: parseAgentEnvMapInput() });
+      const message = `Saved agent environment map for ${updated?.name ?? selectedBuildTarget.name}.`;
+      setWorkspaceNotice(message);
+      toast.success(message);
+      await refreshWorkspace();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The Build Target settings could not be saved.";
+      setWorkspaceNotice(message);
+      toast.error(message);
+    }
+  }
+
+  async function handlePushBuildBranch() {
+    if (!openedBuildBranch) return;
+    try {
+      const pushed = await pushBuildBranchMutation.mutateAsync({ branchId: openedBuildBranch.id });
+      if (pushed.branch) setOpenedBuildBranch(pushed.branch);
+      const commit = pushed.result.pushedCommit ? ` at ${pushed.result.pushedCommit.slice(0, 12)}` : "";
+      const message = `Pushed ${openedBuildBranch.branchName}${commit}.`;
+      setWorkspaceNotice(message);
+      toast.success(message);
+      await refreshWorkspace();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The Build Branch push was blocked by Section 4 policy.";
+      setWorkspaceNotice(message);
+      toast.error(message);
+      await refreshWorkspace();
+    }
   }
 
   async function handleCreateBuildTarget() {
@@ -756,6 +812,8 @@ export default function Home() {
               <Input value={buildTargetProtectedBranches} onChange={(event) => setBuildTargetProtectedBranches(event.target.value)} placeholder="Protected branches: main,staging" className="mt-2 h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
               <Textarea value={buildTargetValidationCommands} onChange={(event) => setBuildTargetValidationCommands(event.target.value)} placeholder="Optional validation commands, one per line" className="mt-2 min-h-[62px] rounded-xl border-[#d9d8d1] bg-white text-xs" />
               <Textarea value={buildTargetServiceChecks} onChange={(event) => setBuildTargetServiceChecks(event.target.value)} placeholder="Optional service checks, one per line" className="mt-2 min-h-[50px] rounded-xl border-[#d9d8d1] bg-white text-xs" />
+              <Textarea value={buildTargetAgentEnvMap} onChange={(event) => setBuildTargetAgentEnvMap(event.target.value)} placeholder="WORKSPACE_ENV=SERVER_ENV_SOURCE" className="mt-2 min-h-[62px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" data-testid="agent-env-var-map-input" />
+              <p className="mt-1 text-[11px] leading-4 text-[#77766e]">Section 4 injects these server-side secret mappings into a gitignored .env.agent file inside Build Branch workspaces.</p>
               <Button type="button" variant="outline" onClick={handleTestBuildTargetConnection} disabled={isMutating || !buildTargetRepoUrl.trim() || !buildTargetTokenEnvVar.trim()} className="mt-2 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">Test connection</Button>
               <Button type="button" onClick={handleCreateBuildTarget} disabled={isMutating || !buildTargetRepoUrl.trim() || !buildTargetTokenEnvVar.trim()} className="mt-2 w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">
                 {createBuildTargetMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Plus className="mr-2 h-3.5 w-3.5" />} Add Build Target
@@ -770,7 +828,7 @@ export default function Home() {
                 <button key={target.id} type="button" onClick={() => setSelectedBuildTargetId(target.id)} className={`w-full rounded-2xl border p-3 text-left text-xs transition ${selectedBuildTarget?.id === target.id ? "border-emerald-300 bg-white shadow-sm" : "border-transparent bg-transparent hover:bg-white/70"}`}>
                   <span className="block truncate text-sm font-semibold text-[#30302b]">{target.name}</span>
                   <a href={target.repoUrl} target="_blank" rel="noreferrer" className="mt-1 block truncate font-mono text-[11px] text-[#5c6f99] underline-offset-2 hover:underline" onClick={(event) => event.stopPropagation()}>{target.repoUrl}</a>
-                  <span className="mt-1 block truncate text-[#77766e]">Base {target.defaultBaseBranch} · Settings available in the form above</span>
+                  <span className="mt-1 block truncate text-[#77766e]">Base {target.defaultBaseBranch} · Env mappings: {Object.keys(JSON.parse(target.agentEnvVarMapJson || "{}")).length}</span>
                 </button>
               ))
             )}
@@ -841,6 +899,14 @@ export default function Home() {
                 </div>
               ))
             )}
+            {selectedBuildTarget ? (
+              <div className="rounded-2xl border border-emerald-100 bg-white p-3 text-xs leading-5 text-[#686861]" data-testid="section4-env-settings">
+                <p className="font-semibold text-[#30302b]">Section 4 agent env injection</p>
+                <p className="mt-1">Saved mappings generate <span className="font-mono">.env.agent</span> during Build Branch operations. The file is gitignored and push policy blocks it from being staged.</p>
+                <p className="mt-1 font-mono text-[11px] text-emerald-800">Current: {Object.entries(selectedBuildTargetEnvMap).map(([key, value]) => `${key}←${value}`).join(", ") || "none"}</p>
+                <Button type="button" variant="outline" onClick={handleUpdateBuildTargetSettings} disabled={isMutating} className="mt-2 w-full rounded-xl border-emerald-200 bg-emerald-50 text-xs text-emerald-900">Save env map to selected target</Button>
+              </div>
+            ) : null}
           </div>
         </ScrollArea>
       </aside>
@@ -873,7 +939,16 @@ export default function Home() {
                   ) : null}
                 </div>
               </div>
-              {isBuildModeOpen ? <p className="mt-3 rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-emerald-900">Build Mode: {selectedBuildTarget.name} on branch {openedBuildBranch.branchName}</p> : null}
+              {isBuildModeOpen ? (
+                <div className="mt-3 rounded-xl bg-white/70 px-3 py-2 text-xs text-emerald-900" data-testid="section4-push-policy">
+                  <p className="font-semibold">Build Mode: {selectedBuildTarget.name} on branch {openedBuildBranch.branchName}</p>
+                  <p className="mt-1">Section 4 push policy: protected branches blocked, clean tree required, Conventional Commit required, and .env.agent is injected but never committed.</p>
+                  <Button type="button" variant="outline" onClick={handlePushBuildBranch} disabled={isMutating || openedBuildBranch.state !== "clean"} className="mt-2 rounded-xl border-emerald-200 bg-white text-xs text-emerald-900" data-testid="section4-push-button">
+                    {pushBuildBranchMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <GitBranch className="mr-2 h-3.5 w-3.5" />} Push branch with policy checks
+                  </Button>
+                  <span className="ml-2 font-mono text-[11px]">Push state: {openedBuildBranch.pushState ?? "never_pushed"}</span>
+                </div>
+              ) : null}
             </div>
           ) : null}
           <div className="flex flex-col items-end gap-1">

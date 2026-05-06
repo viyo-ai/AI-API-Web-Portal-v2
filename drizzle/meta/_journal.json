@@ -43,6 +43,13 @@
       "when": 1778093726808,
       "tag": "0005_loose_master_mold",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1778099339857,
+      "tag": "0006_workable_paper_doll",
+      "breakpoints": true
     }
   ]
 }
