@@ -94,8 +94,13 @@
 - [ ] Add provider interjection logic: OpenAI detects Claude/Kimi failures and suggests recovery.
 - [x] Update all tests for OpenAI orchestration flow.
 - [x] Run full validation: pnpm check, pnpm test, pnpm build.
-- [ ] Browser validation: test planning intent → Claude, building intent → Kimi, provider interjection on failure.
-- [ ] Save checkpoint after OpenAI orchestration is verified working.
+- [x] **CRITICAL FIX: Revert Kimi to Cloudflare Workers AI native** — Remove Forge API calls for Kimi, restore direct Cloudflare Workers AI invocation.
+- [x] Keep Claude via Anthropic direct API or Forge API (user's choice).
+- [x] Keep Orchestration via Forge API for routing decisions.
+- [x] Update all provider tests to reflect correct invocation paths.
+- [x] Run full validation: pnpm test (54/54 passing), pnpm build (successful).
+- [ ] **CRITICAL: Browser validation** — Test planning intent → Claude, building intent → Kimi, verify LLM responses are generated (not just error recovery notes).
+- [ ] Save checkpoint after provider architecture is fixed and working.
 - [ ] Evaluate entire workspace UX: left panel (tasks/memory), center (chat thread), right panel (files/context).
 - [ ] Audit Task Scoped Files section for UX issues and document improvement opportunities.
 - [ ] Verify Global Memory on left side is working correctly and accessible.

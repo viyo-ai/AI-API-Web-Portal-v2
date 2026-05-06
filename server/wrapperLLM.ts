@@ -84,46 +84,36 @@ export function getWrapperRuntimeCredentialStates(): RuntimeCredentialState[] {
 }
 
 async function invokeClaude(messages: ModelMessage[]) {
-  const apiKey = getClaudeApiKey();
-  if (!apiKey) {
-    throw new Error("Claude credential is missing. Configure CLAUDE_API_KEY.");
+  const forgeApiUrl = process.env.BUILT_IN_FORGE_API_URL;
+  const forgeApiKey = process.env.BUILT_IN_FORGE_API_KEY;
+  
+  if (!forgeApiUrl || !forgeApiKey) {
+    throw new Error("Manus Forge API not configured. Claude invocation requires BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY.");
   }
 
-  const system = messages.find((message) => message.role === "system")?.content;
-  const nonSystemMessages = messages
-    .filter((message) => message.role !== "system")
-    .map((message) => ({ role: message.role as "user" | "assistant", content: message.content }));
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetch(`${forgeApiUrl}/llm/chat`, {
     method: "POST",
     headers: {
-      "content-type": "application/json",
-      "anthropic-version": "2023-06-01",
-      "x-api-key": apiKey,
+      "Authorization": `Bearer ${forgeApiKey}`,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: CLAUDE_DEFAULT_MODEL,
-      max_tokens: 4096,
+      model: "claude-opus-4-7",
+      messages,
       temperature: 0.2,
-      system,
-      messages: nonSystemMessages,
+      max_tokens: 4096,
     }),
   });
 
   const body = (await response.json().catch(() => null)) as
-    | { content?: Array<{ type?: string; text?: string }>; error?: { type?: string; message?: string } }
+    | { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
     | null;
 
   if (!response.ok) {
-    throw new Error(`Claude request failed: ${body?.error?.type ?? response.status} ${body?.error?.message ?? response.statusText}`);
+    throw new Error(`Claude request failed via Forge API: ${body?.error?.message ?? response.status} ${response.statusText}`);
   }
 
-  const text = body?.content
-    ?.filter((item) => item.type === "text" && typeof item.text === "string")
-    .map((item) => item.text)
-    .join("\n")
-    .trim();
-
+  const text = body?.choices?.[0]?.message?.content?.trim();
   if (!text) {
     throw new Error("Claude returned an empty response.");
   }

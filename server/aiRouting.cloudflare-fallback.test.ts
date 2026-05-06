@@ -98,6 +98,9 @@ describe("Wrapper LLM v2 credential gates and fallback policy", () => {
 
   it("does not fall back to Claude when a Kimi-routed turn is missing Cloudflare credentials", async () => {
     process.env.CLAUDE_API_KEY = "test-claude-key";
+    // Don't set Cloudflare credentials to simulate missing Kimi provider
+    delete process.env.CLOUDFLARE_ACCOUNT_ID;
+    delete process.env.CLOUDFLARE_API_TOKEN;
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 
     await expect(executeWrapperTurn(sampleExecutionInput("kimi"))).rejects.toThrow("Kimi credential is missing");

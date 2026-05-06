@@ -16,12 +16,14 @@ import { CLAUDE_DEFAULT_MODEL, executeWrapperTurn, KIMI_K26_CLOUDFLARE_MODEL } f
 
 type Route = "claude" | "kimi" | "dual";
 
-type EnvSnapshot = Pick<NodeJS.ProcessEnv, "CLAUDE_API_KEY" | "CLOUDFLARE_ACCOUNT_ID" | "CLOUDFLARE_API_TOKEN">;
+type EnvSnapshot = Pick<NodeJS.ProcessEnv, "CLAUDE_API_KEY" | "CLOUDFLARE_ACCOUNT_ID" | "CLOUDFLARE_API_TOKEN" | "BUILT_IN_FORGE_API_URL" | "BUILT_IN_FORGE_API_KEY">;
 
 const originalEnv: EnvSnapshot = {
   CLAUDE_API_KEY: process.env.CLAUDE_API_KEY,
   CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
   CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN,
+  BUILT_IN_FORGE_API_URL: process.env.BUILT_IN_FORGE_API_URL,
+  BUILT_IN_FORGE_API_KEY: process.env.BUILT_IN_FORGE_API_KEY,
 };
 
 function restoreProviderEnv() {
@@ -35,6 +37,8 @@ function configureProviderEnv() {
   process.env.CLAUDE_API_KEY = "test-claude-key";
   process.env.CLOUDFLARE_ACCOUNT_ID = "test-cloudflare-account";
   process.env.CLOUDFLARE_API_TOKEN = "test-cloudflare-token";
+  process.env.BUILT_IN_FORGE_API_URL = "https://forge.example.com";
+  process.env.BUILT_IN_FORGE_API_KEY = "test-forge-key";
 }
 
 function executionInput(route: Route) {
@@ -65,20 +69,25 @@ function mockSuccessfulFetch() {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
     const requestUrl = String(url);
     const body = JSON.parse(String(init?.body ?? "{}"));
-    if (requestUrl.includes("api.anthropic.com")) {
-      const isReviewer = typeof body.system === "string" && body.system.includes("Reviewer");
+    // Claude via Forge API
+    if (requestUrl.includes("forge.example.com/llm/chat")) {
+      const model = body.model;
+      const isReviewer = body.messages?.some((m: any) => typeof m.content === "string" && m.content.includes("Reviewer"));
+      if (model === "claude-opus-4-7") {
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: isReviewer ? "Claude reviewed final answer." : "Claude produced a plan." } }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+    }
+    // Kimi via Cloudflare Workers AI
+    if (requestUrl.includes("api.cloudflare.com/client/v4/accounts") && requestUrl.includes("/ai/run/@cf/moonshotai/kimi-k2.6")) {
       return new Response(
-        JSON.stringify({
-          content: [{ type: "text", text: isReviewer ? "Claude reviewed final answer." : "Claude produced a plan." }],
-        }),
+        JSON.stringify({ success: true, result: { response: "Kimi produced execution output." } }),
         { status: 200, headers: { "content-type": "application/json" } },
       );
-    }
-    if (requestUrl.includes("api.cloudflare.com")) {
-      return new Response(JSON.stringify({ success: true, result: { response: "Kimi produced execution output." } }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
     }
     return new Response(JSON.stringify({ error: "Unexpected provider URL" }), { status: 500 });
   });
@@ -102,7 +111,7 @@ describe("Wrapper LLM v2 provider execution routes", () => {
 
     expect(result).toMatchObject({ route: "claude", finalAnswer: "Claude produced a plan." });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("api.anthropic.com/v1/messages");
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("forge.example.com/llm/chat");
     const requestBody = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
     expect(requestBody.model).toBe(CLAUDE_DEFAULT_MODEL);
     expect(dbMocks.completeTurn).toHaveBeenCalledWith(106, 9);
@@ -115,9 +124,8 @@ describe("Wrapper LLM v2 provider execution routes", () => {
 
     expect(result).toMatchObject({ route: "kimi", finalAnswer: "Kimi produced execution output." });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe(
-      `https://api.cloudflare.com/client/v4/accounts/test-cloudflare-account/ai/run/${KIMI_K26_CLOUDFLARE_MODEL}`,
-    );
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("api.cloudflare.com/client/v4/accounts");
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/ai/run/@cf/moonshotai/kimi-k2.6");
     expect(dbMocks.completeTurn).toHaveBeenCalledWith(104, 9);
   });
 
@@ -134,9 +142,16 @@ describe("Wrapper LLM v2 provider execution routes", () => {
       finalAnswer: "Claude reviewed final answer.",
     });
     expect(fetchSpy).toHaveBeenCalledTimes(3);
-    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("api.anthropic.com/v1/messages");
-    expect(String(fetchSpy.mock.calls[1]?.[0])).toContain(`/ai/run/${KIMI_K26_CLOUDFLARE_MODEL}`);
-    expect(String(fetchSpy.mock.calls[2]?.[0])).toContain("api.anthropic.com/v1/messages");
+    // All three calls should go to Forge API (Claude plan, Kimi execution, Claude review)
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("forge.example.com/llm/chat");
+    expect(String(fetchSpy.mock.calls[1]?.[0])).toContain("api.cloudflare.com/client/v4/accounts");
+    expect(String(fetchSpy.mock.calls[1]?.[0])).toContain("/ai/run/@cf/moonshotai/kimi-k2.6");
+    expect(String(fetchSpy.mock.calls[2]?.[0])).toContain("forge.example.com/llm/chat");
+    // Verify the models used in each call
+    const call0Body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body ?? "{}"));
+    const call2Body = JSON.parse(String(fetchSpy.mock.calls[2]?.[1]?.body ?? "{}"));
+    expect(call0Body.model).toBe("claude-opus-4-7"); // Claude plan
+    expect(call2Body.model).toBe("claude-opus-4-7"); // Claude review
     expect(dbMocks.failTurn).not.toHaveBeenCalled();
   });
 });
