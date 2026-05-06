@@ -12,6 +12,7 @@ import { invokeLLM } from "./_core/llm";
 import type { GlobalMemory, Task, TaskEvent, TaskFile } from "../drizzle/schema";
 
 export const CLAUDE_DEFAULT_MODEL = process.env.CLAUDE_MODEL || "claude-opus-4-7";
+export const CLAUDE_ADAPTIVE_THINKING_CONFIG = { type: "adaptive" } as const;
 export const KIMI_K26_CLOUDFLARE_MODEL = "@cf/moonshotai/kimi-k2.6";
 export const CLAUDE_OWNER_MODEL_LABEL = "Claude Opus 4.7";
 export const KIMI_OWNER_MODEL_LABEL = "Kimi K2.6";
@@ -44,6 +45,41 @@ export type WrapperExecutionResult = {
 };
 
 type ModelMessage = { role: "system" | "user" | "assistant"; content: string };
+type ClaudeConversationMessage = { role: "user" | "assistant"; content: string };
+export type ClaudeMessagesRequestBody = {
+  model: string;
+  system: string;
+  messages: ClaudeConversationMessage[];
+  max_tokens: number;
+  thinking?: typeof CLAUDE_ADAPTIVE_THINKING_CONFIG;
+};
+
+type BuildClaudeMessagesRequestBodyInput = {
+  system: string;
+  messages: ClaudeConversationMessage[];
+  maxTokens?: number;
+  model?: string;
+};
+
+function shouldUseAdaptiveThinking(model: string) {
+  return model === "claude-opus-4-7";
+}
+
+export function buildClaudeMessagesRequestBody(input: BuildClaudeMessagesRequestBodyInput): ClaudeMessagesRequestBody {
+  const model = input.model ?? CLAUDE_DEFAULT_MODEL;
+  const body: ClaudeMessagesRequestBody = {
+    model,
+    system: input.system,
+    messages: input.messages.length > 0 ? input.messages : [{ role: "user", content: "Continue." }],
+    max_tokens: input.maxTokens ?? 4096,
+  };
+
+  if (shouldUseAdaptiveThinking(model)) {
+    body.thinking = CLAUDE_ADAPTIVE_THINKING_CONFIG;
+  }
+
+  return body;
+}
 
 function serializeJson(value: unknown) {
   return JSON.stringify(value, null, 2);
@@ -93,7 +129,7 @@ async function invokeClaude(messages: ModelMessage[]) {
       const system = messages.find((message) => message.role === "system")?.content ?? baseSystemPrompt("claude_planner");
       const conversation = messages
         .filter((message) => message.role !== "system")
-        .map((message) => ({ role: message.role === "assistant" ? "assistant" : "user", content: message.content }));
+        .map((message): ClaudeConversationMessage => ({ role: message.role === "assistant" ? "assistant" : "user", content: message.content }));
 
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -102,12 +138,11 @@ async function invokeClaude(messages: ModelMessage[]) {
           "anthropic-version": "2023-06-01",
           "content-type": "application/json",
         },
-        body: JSON.stringify({
-          model: CLAUDE_DEFAULT_MODEL,
+        body: JSON.stringify(buildClaudeMessagesRequestBody({
           system,
-          messages: conversation.length > 0 ? conversation : [{ role: "user", content: "Continue." }],
-          max_tokens: 4096,
-        }),
+          messages: conversation,
+          maxTokens: 4096,
+        })),
       });
 
       const body = (await response.json().catch(() => null)) as

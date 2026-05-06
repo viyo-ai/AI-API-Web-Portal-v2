@@ -170,3 +170,8 @@
 - [x] P0: Make smile and microphone composer controls honest by showing accessible coming-soon feedback instead of silent decorative icons.
 - [x] P0: Repair left navigation layout so task rows and archive/menu controls do not clip at the live preview viewport.
 - [x] P0: Add regression coverage for upload/drop controls, coming-soon controls, and left-navigation layout structure.
+
+- [x] Verify Anthropic adaptive-thinking documentation for Claude Opus 4.7 and identify the required request payload/settings.
+- [x] Update the Claude provider invocation path so adaptive thinking is enabled every time Claude Opus 4.7 is invoked.
+- [x] Add regression tests proving all Claude Opus 4.7 calls include adaptive-thinking configuration.
+- [x] Run validation gates for the adaptive-thinking change, save a checkpoint, and report the exact implementation result.

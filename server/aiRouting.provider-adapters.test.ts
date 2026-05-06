@@ -12,7 +12,7 @@ vi.mock("./db", () => ({
   ...dbMocks,
 }));
 
-import { CLAUDE_DEFAULT_MODEL, executeWrapperTurn, KIMI_K26_CLOUDFLARE_MODEL } from "./wrapperLLM";
+import { CLAUDE_ADAPTIVE_THINKING_CONFIG, CLAUDE_DEFAULT_MODEL, buildClaudeMessagesRequestBody, executeWrapperTurn, KIMI_K26_CLOUDFLARE_MODEL } from "./wrapperLLM";
 
 type Route = "claude" | "kimi" | "dual";
 
@@ -94,6 +94,26 @@ function mockSuccessfulFetch() {
 }
 
 describe("Wrapper LLM v2 provider execution routes", () => {
+  it("builds Claude Opus 4.7 Messages API bodies with adaptive thinking and no fixed budget", () => {
+    const body = buildClaudeMessagesRequestBody({
+      system: "Planner system prompt",
+      messages: [{ role: "user", content: "Plan a feature." }],
+      maxTokens: 4096,
+      model: "claude-opus-4-7",
+    });
+
+    expect(body.model).toBe("claude-opus-4-7");
+    expect(body.thinking).toEqual(CLAUDE_ADAPTIVE_THINKING_CONFIG);
+    expect(body.thinking).not.toHaveProperty("budget_tokens");
+
+    const nonOpusBody = buildClaudeMessagesRequestBody({
+      system: "Planner system prompt",
+      messages: [{ role: "user", content: "Plan a feature." }],
+      model: "claude-sonnet-4-5",
+    });
+    expect(nonOpusBody.thinking).toBeUndefined();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     configureProviderEnv();
@@ -114,6 +134,8 @@ describe("Wrapper LLM v2 provider execution routes", () => {
     expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("api.anthropic.com/v1/messages");
     const requestBody = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
     expect(requestBody.model).toBe(CLAUDE_DEFAULT_MODEL);
+    expect(requestBody.thinking).toEqual(CLAUDE_ADAPTIVE_THINKING_CONFIG);
+    expect(requestBody.thinking).not.toHaveProperty("budget_tokens");
     expect(dbMocks.completeTurn).toHaveBeenCalledWith(106, 9);
   });
 
@@ -152,6 +174,10 @@ describe("Wrapper LLM v2 provider execution routes", () => {
     const call2Body = JSON.parse(String(fetchSpy.mock.calls[2]?.[1]?.body ?? "{}"));
     expect(call0Body.model).toBe("claude-opus-4-7"); // Claude plan
     expect(call2Body.model).toBe("claude-opus-4-7"); // Claude review
+    expect(call0Body.thinking).toEqual(CLAUDE_ADAPTIVE_THINKING_CONFIG);
+    expect(call2Body.thinking).toEqual(CLAUDE_ADAPTIVE_THINKING_CONFIG);
+    expect(call0Body.thinking).not.toHaveProperty("budget_tokens");
+    expect(call2Body.thinking).not.toHaveProperty("budget_tokens");
     expect(dbMocks.failTurn).not.toHaveBeenCalled();
   });
 });
