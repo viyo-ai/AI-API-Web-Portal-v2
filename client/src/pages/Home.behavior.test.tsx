@@ -360,12 +360,12 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(screen.getByText(/Center task thread/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Task folder/i).length).toBeGreaterThan(0);
     expect(screen.getByTestId("handoff-indicator")).toBeInTheDocument();
-    expect(screen.getByTestId("handoff-explanation")).toBeInTheDocument();
-    expect(screen.getByTestId("worker-action-log")).toBeInTheDocument();
-    expect(screen.getByText(/read-only activity feed/i)).toBeInTheDocument();
+    expect(screen.getByTestId("task-inspector-tabs")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /files/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /AI Activity/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /context/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /diagnostics/i })).toBeInTheDocument();
     expect(screen.getByTestId("windows-file-manager")).toBeInTheDocument();
-    expect(screen.getByText(/normal folder view stays non-technical/i)).toBeInTheDocument();
-    expect(screen.getByText(/Claude → shared task context → Kimi/i)).toBeInTheDocument();
     expect(screen.getByText(/Wire the task-first AI coordinator workspace/i)).toBeInTheDocument();
     expect(screen.getByTestId("center-task-thread-scroll")).toHaveClass("overflow-y-auto");
     expect(screen.getByTestId("manus-style-composer")).toBeInTheDocument();
@@ -737,6 +737,7 @@ describe("Home v2 task-first workspace behavior", () => {
     render(<Home />);
 
     await screen.findAllByText("Implement v2 shell");
+    await user.click(screen.getByRole("tab", { name: /diagnostics/i }));
     await user.click(screen.getByRole("button", { name: /show developer diagnostics/i }));
     await user.type(screen.getByPlaceholderText("workspace directory, blank for root"), "notes");
     await user.click(screen.getByRole("button", { name: /mkdir/i }));
@@ -761,6 +762,7 @@ describe("Home v2 task-first workspace behavior", () => {
 
     await screen.findAllByText("Implement v2 shell");
     expect(FakeWebSocket.instances).toHaveLength(0);
+    await user.click(screen.getByRole("tab", { name: /diagnostics/i }));
     await user.click(screen.getByRole("button", { name: /show developer diagnostics/i }));
     await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
     const socket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
@@ -800,6 +802,7 @@ describe("Home v2 task-first workspace behavior", () => {
 
     await screen.findAllByText("Implement v2 shell");
     expect(resizeObserverCallbacks.length).toBe(0);
+    await user.click(screen.getByRole("tab", { name: /diagnostics/i }));
     await user.click(screen.getByRole("button", { name: /show developer diagnostics/i }));
     expect(resizeObserverCallbacks.length).toBeGreaterThan(0);
     const scheduledBeforeResize = requestAnimationFrameMock.mock.calls.length;
@@ -827,6 +830,7 @@ describe("Home v2 task-first workspace behavior", () => {
 
     await screen.findAllByText("Implement v2 shell");
     expect(FakeWebSocket.instances).toHaveLength(0);
+    await user.click(screen.getByRole("tab", { name: /diagnostics/i }));
     await user.click(screen.getByRole("button", { name: /show developer diagnostics/i }));
     await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
     const socket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
@@ -844,4 +848,49 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(FakeWebSocket.instances).toHaveLength(instancesAfterFatalClose);
     expect(screen.getAllByText(/error/i).length).toBeGreaterThan(0);
   });
+  it("organizes the right rail into task-inspector tabs while keeping advanced diagnostics opt-in", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findAllByText("Implement v2 shell");
+
+    expect(screen.getByTestId("task-inspector-tabs")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /files/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /AI Activity/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /context/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /diagnostics/i })).toBeInTheDocument();
+    expect(screen.getByTestId("windows-file-manager")).toBeInTheDocument();
+    expect(screen.getByTestId("global-file-library")).toBeInTheDocument();
+    expect(FakeWebSocket.instances).toHaveLength(0);
+
+    await user.click(screen.getByRole("tab", { name: /AI Activity/i }));
+    expect(screen.getByTestId("worker-action-log")).toBeInTheDocument();
+    expect(screen.getByTestId("handoff-explanation")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /diagnostics/i }));
+    expect(screen.getByText(/Diagnostics are intentionally opt-in/i)).toBeInTheDocument();
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: /show developer diagnostics/i }));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+  });
+
+  it("shows one-sentence next-action guidance with CTAs for empty tasks, task files, and Global Files", async () => {
+    mockTasks = [];
+    render(<Home />);
+    expect(await screen.findByText(/No live tasks yet/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create first task/i })).toBeInTheDocument();
+    cleanup();
+
+    mockTasks = [sampleTask];
+    mockThread = { task: sampleTask, activeTurn: null, events: [] };
+    mockTaskFiles = [];
+    mockGlobalFiles = [];
+    render(<Home />);
+    await screen.findAllByText("Implement v2 shell");
+
+    expect(screen.getByText(/This task folder is empty/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /upload first task file/i })).toBeInTheDocument();
+    expect(screen.getByText(/Global Files is empty/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /upload first Global File/i })).toBeInTheDocument();
+  });
+
 });

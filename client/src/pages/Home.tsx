@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import FilesystemPanel from "@/components/FilesystemPanel";
 import TerminalPanel from "@/components/TerminalPanel";
 import { getLoginUrl } from "@/const";
@@ -645,6 +646,7 @@ export default function Home() {
             ) : filteredTasks.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white/70 p-4 text-sm leading-6 text-[#6d6d65]">
                 No live tasks yet. Create one from the title and task message to establish Claude/Kimi coordination context.
+                <Button type="button" onClick={handleCreateTask} disabled={isMutating} className="mt-3 w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">Create first task</Button>
               </div>
             ) : (
               filteredTasks.map((task) => (
@@ -688,6 +690,7 @@ export default function Home() {
             {memories.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white/70 p-4 text-xs leading-5 text-[#6d6d65]">
                 Durable memory is empty. Decisions, features, research, and past-task learnings will appear here only after real records exist.
+                <Button type="button" variant="outline" onClick={() => setComposerText((value) => value || "Record the key decision or reusable context for this task.")} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">Draft memory note</Button>
               </div>
             ) : (
               memories.slice(0, 6).map((memory) => (
@@ -745,12 +748,13 @@ export default function Home() {
             ) : threadQuery.isLoading ? (
               <div className="rounded-2xl border border-[#deded8] bg-white p-5 text-sm text-[#6d6d65]">Loading task thread...</div>
             ) : events.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white p-8 text-center text-sm leading-6 text-[#6d6d65]">This task has no owner messages yet. Creating it only made the task record; send the first message to initialize Claude Opus 4.7 and Kimi K2.6 through the coordinator.</div>
+              <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white p-8 text-center text-sm leading-6 text-[#6d6d65]">This task has no owner messages yet. Creating it only made the task record; send the first message to initialize Claude Opus 4.7 and Kimi K2.6 through the coordinator.<Button type="button" onClick={() => setComposerText((value) => value || "Please plan the first implementation step for this task.")} className="mt-4 rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">Draft first message</Button></div>
             ) : (
               <div className="space-y-4">
                 {ownerVisibleEvents.length === 0 && !providerFailureCopy ? (
                   <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white p-8 text-center text-sm leading-6 text-[#6d6d65]">
                     No owner-facing task message is ready yet. Technical setup records are available below if you need them.
+                    <Button type="button" variant="outline" onClick={() => setShowThreadDetails(true)} disabled={technicalEvents.length === 0} className="mt-3 rounded-xl border-[#d9d8d1] bg-white text-xs">Review setup details</Button>
                   </div>
                 ) : null}
 
@@ -889,235 +893,285 @@ export default function Home() {
       </section>
 
       <aside className="flex h-screen min-h-0 min-w-0 flex-col overflow-hidden border-l border-[#d9d8d1] bg-[#f0efeb] lg:col-span-2 xl:col-span-1">
-        <div className="border-b border-[#d9d8d1] p-4">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">
-            <PanelRight className="h-4 w-4" /> Files and activity
+        <Tabs defaultValue="files" className="flex h-full min-h-0 flex-col" data-testid="task-inspector-tabs">
+          <div className="border-b border-[#d9d8d1] p-4">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">
+              <PanelRight className="h-4 w-4" /> Task inspector
+            </div>
+            <h2 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#20201d]">Files and activity, context, and diagnostics</h2>
+            <TabsList className="mt-4 grid w-full grid-cols-4 rounded-2xl border border-[#deded8] bg-white p-1">
+              <TabsTrigger value="files" className="rounded-xl px-2 text-[11px] data-[state=active]:bg-[#1f1f1f] data-[state=active]:text-white">Files</TabsTrigger>
+              <TabsTrigger value="activity" className="rounded-xl px-2 text-[11px] data-[state=active]:bg-[#1f1f1f] data-[state=active]:text-white">AI Activity</TabsTrigger>
+              <TabsTrigger value="context" className="rounded-xl px-2 text-[11px] data-[state=active]:bg-[#1f1f1f] data-[state=active]:text-white">Context</TabsTrigger>
+              <TabsTrigger value="diagnostics" className="rounded-xl px-2 text-[11px] data-[state=active]:bg-[#1f1f1f] data-[state=active]:text-white">Diagnostics</TabsTrigger>
+            </TabsList>
           </div>
-          <h2 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#20201d]">Task folder</h2>
-        </div>
 
-        <ScrollArea className="min-h-0 min-w-0 flex-1 p-4">
-          <div className="space-y-4">
-            <Card className="border-[#deded8] bg-white text-[#242420]" data-testid="handoff-explanation">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base"><Workflow className="h-4 w-4 text-sky-600" /> Claude and Kimi handoff</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-xs leading-5 text-[#686861]">
-                <p><span className="font-semibold text-[#2f2f2a]">No memory is lost between workers.</span> Every turn assembles the selected task thread, saved memory, and task-file list before any provider call.</p>
-                <div className="rounded-2xl border border-sky-100 bg-sky-50/80 p-3">
-                  <p className="font-semibold text-[#26333a]">Auto route: Claude plans → Kimi executes → Claude can review.</p>
-                  <p className="mt-1">When Auto chooses a dual path, Kimi receives Claude’s plan in the same execution turn instead of starting from a blank conversation.</p>
-                </div>
-                <p className="text-[11px] text-[#77766e]">Credential gates remain explicit. If either worker is unavailable, the task blocks visibly rather than silently switching providers.</p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-[#deded8] bg-white text-[#242420]" data-testid="worker-action-log">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base"><Activity className="h-4 w-4 text-emerald-600" /> AI Activity</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="rounded-2xl border border-emerald-100 bg-emerald-50/80 p-3 text-xs leading-5 text-[#4f6756]">This is a read-only activity feed for the AI coordinator, Claude, and Kimi. It does not run commands; terminal access remains a separate advanced diagnostic tool.</p>
-                {workerActivityItems.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">No worker activity has been recorded for this task yet. Send a message to start the first Claude or Kimi turn.</div>
-                ) : (
-                  <div className="space-y-2">
-                    {workerActivityItems.map((item) => (
-                      <div key={item.id} className="flex gap-3 rounded-2xl border border-[#ededdf] bg-[#fbfaf7] p-3">
-                        <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${activityDotTone[item.tone] ?? activityDotTone.slate}`} />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-semibold text-[#30302b]">{item.title}</p>
-                          <p className="mt-1 line-clamp-3 text-xs leading-5 text-[#686861]">{item.description}</p>
-                          <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-[#8a8980]">{item.status} · {compactDate(item.createdAt)}</p>
-                        </div>
-                      </div>
-                    ))}
+          <ScrollArea className="min-h-0 min-w-0 flex-1 p-4">
+            <TabsContent value="files" className="mt-0 space-y-4">
+              <Card
+                className={`border-[#deded8] bg-white text-[#242420] transition ${isFileDragActive ? "border-sky-300 ring-2 ring-sky-100" : ""}`}
+                data-testid="windows-file-manager"
+                aria-label="Task files drop zone"
+                onDragOver={handleFileDragOver}
+                onDragLeave={handleFileDragLeave}
+                onDrop={handleFileDrop}
+              >
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base"><FolderOpen className="h-4 w-4 text-amber-600" /> Task folder</CardTitle>
+                  <div className="mt-2 flex items-center gap-1 rounded-xl border border-[#deded8] bg-[#fbfaf7] px-3 py-2 text-[11px] text-[#66665f]">
+                    <Folder className="h-3.5 w-3.5 text-amber-600" /> This task <span>/</span> Files
                   </div>
-                )}
-                <Button type="button" variant="outline" onClick={() => setShowThreadDetails((value) => !value)} disabled={technicalEvents.length === 0} className="w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
-                  {showThreadDetails ? "Hide activity details" : `Show activity details (${technicalEvents.length})`}
-                </Button>
-                {showThreadDetails && technicalEvents.length > 0 ? (
-                  <div className="space-y-2 rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-3" data-testid="worker-technical-details">
-                    {technicalEvents.slice(0, 6).map((event) => (
-                      <div key={event.id} className="text-[11px] leading-5 text-[#66665f]">
-                        <span className="font-semibold text-[#30302b]">{eventTitle(event.actor, event.eventType)}:</span> {ownerFacingText(event.content)}
-                      </div>
-                    ))}
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className={`rounded-2xl border border-dashed p-3 text-xs leading-5 transition ${isFileDragActive ? "border-sky-300 bg-sky-50 text-sky-800" : "border-[#cfcfc8] bg-[#fbfaf7] text-[#6d6d65]"}`} data-testid="task-file-drop-zone">
+                    <p className="font-semibold text-[#30302b]">Drop files here or use plus/paperclip.</p>
+                    <p className="mt-1">Uploads are stored in the selected task folder and then appear in this file list.</p>
+                    <Button type="button" variant="outline" onClick={() => openUploadPicker("task")} disabled={!selectedTaskId || uploadWorkspaceFileMutation.isPending} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
+                      {uploadWorkspaceFileMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Paperclip className="mr-2 h-3.5 w-3.5" />}
+                      Upload file
+                    </Button>
                   </div>
-                ) : null}
-              </CardContent>
-            </Card>
-
-            <Card
-              className={`border-[#deded8] bg-white text-[#242420] transition ${isFileDragActive ? "border-sky-300 ring-2 ring-sky-100" : ""}`}
-              data-testid="windows-file-manager"
-              aria-label="Task files drop zone"
-              onDragOver={handleFileDragOver}
-              onDragLeave={handleFileDragLeave}
-              onDrop={handleFileDrop}
-            >
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base"><FolderOpen className="h-4 w-4 text-amber-600" /> Task files</CardTitle>
-                <div className="mt-2 flex items-center gap-1 rounded-xl border border-[#deded8] bg-[#fbfaf7] px-3 py-2 text-[11px] text-[#66665f]">
-                  <Folder className="h-3.5 w-3.5 text-amber-600" /> This task <span>/</span> Files
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className={`rounded-2xl border border-dashed p-3 text-xs leading-5 transition ${isFileDragActive ? "border-sky-300 bg-sky-50 text-sky-800" : "border-[#cfcfc8] bg-[#fbfaf7] text-[#6d6d65]"}`} data-testid="task-file-drop-zone">
-                  <p className="font-semibold text-[#30302b]">Drop files here or use plus/paperclip.</p>
-                  <p className="mt-1">Uploads are stored in the selected task folder and then appear in this file list.</p>
-                  <Button type="button" variant="outline" onClick={() => openUploadPicker("task")} disabled={!selectedTaskId || uploadWorkspaceFileMutation.isPending} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
-                    {uploadWorkspaceFileMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Paperclip className="mr-2 h-3.5 w-3.5" />}
-                    Upload file
-                  </Button>
-                </div>
-                {taskFiles.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">This task folder is empty. Files will appear here only after a real storage-backed file record exists.</div>
-                ) : (
-                  <div className="space-y-2 rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-2">
-                    {fileExplorerGroups.folders.map((folder) => (
-                      <div key={folder.name} className="rounded-xl bg-white/80 p-2">
-                        <div className="flex items-center gap-2 text-xs font-semibold text-[#30302b]">
-                          <Folder className="h-4 w-4 text-amber-600" /> <span className="truncate">{folder.name}</span>
-                          <Badge variant="outline" className="ml-auto rounded-full text-[10px]">{folder.files.length} file{folder.files.length === 1 ? "" : "s"}</Badge>
-                        </div>
-                        <div className="mt-2 space-y-1 pl-4">
-                          {folder.files.map((file) => (
-                            <a key={file.id} href={file.storageUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-lg px-2 py-2 text-xs text-[#4d4d46] hover:bg-sky-50" aria-label={`Open or download ${file.relativePath}`}>
-                              <File className="h-3.5 w-3.5 text-sky-600" />
-                              <span className="min-w-0 flex-1 truncate">{fileNameFromPath(file.relativePath)}</span>
-                              <span className="hidden text-[10px] text-[#8a8980] sm:inline">v{file.version} · {readableFileKind(file)}</span>
-                              <Download className="h-3.5 w-3.5 text-[#8a8980]" />
-                            </a>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                    {fileExplorerGroups.rootFiles.map((file) => (
-                      <a key={file.id} href={file.storageUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-xl bg-white/80 px-3 py-2 text-xs text-[#4d4d46] hover:bg-sky-50" aria-label={`Open or download ${file.relativePath}`}>
-                        <FileCode2 className="h-4 w-4 text-sky-600" />
-                        <span className="min-w-0 flex-1 truncate">{fileNameFromPath(file.relativePath)}</span>
-                        <span className="hidden text-[10px] text-[#8a8980] sm:inline">v{file.version} · {readableFileKind(file)}</span>
-                        <Download className="h-3.5 w-3.5 text-[#8a8980]" />
-                      </a>
-                    ))}
-                  </div>
-                )}
-                <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 text-xs leading-5 text-emerald-800" data-testid="attached-global-files">
-                  <p className="font-semibold text-[#30302b]">Attached Global Files</p>
-                  {attachedGlobalFiles.length === 0 ? (
-                    <p className="mt-1">No Global Files are attached to this task yet. Use “Attach to task” in Global Files below to reuse shared context without uploading another copy.</p>
+                  {taskFiles.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">This task folder is empty. Files will appear here only after a real storage-backed file record exists.<Button type="button" variant="outline" onClick={() => openUploadPicker("task")} disabled={!selectedTaskId || uploadWorkspaceFileMutation.isPending} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">Upload first task file</Button></div>
                   ) : (
-                    <div className="mt-2 space-y-1">
-                      {attachedGlobalFiles.map((link) => (
-                        <a key={link.id} href={link.file.storageUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-lg bg-white/80 px-2 py-2 text-[#345343] hover:bg-white" aria-label={`Open attached Global File ${link.file.relativePath}`}>
-                          <File className="h-3.5 w-3.5 text-emerald-600" />
-                          <span className="min-w-0 flex-1 truncate">{link.attachedLabel ?? link.file.displayName ?? fileNameFromPath(link.file.relativePath)}</span>
-                          <Badge variant="outline" className="rounded-full border-emerald-200 text-[10px]">Global</Badge>
+                    <div className="space-y-2 rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-2">
+                      {fileExplorerGroups.folders.map((folder) => (
+                        <div key={folder.name} className="rounded-xl bg-white/80 p-2">
+                            <div className="flex items-center gap-2 text-xs font-semibold text-[#30302b]">
+                              <Folder className="h-4 w-4 text-amber-600" /> <span className="truncate">{folder.name}</span>
+                              <Badge variant="outline" className="ml-auto rounded-full text-[10px]">{folder.files.length} file{folder.files.length === 1 ? "" : "s"}</Badge>
+                            </div>
+                            <div className="mt-2 space-y-1 pl-4">
+                              {folder.files.map((file) => (
+                                <a key={file.id} href={file.storageUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-lg px-2 py-2 text-xs text-[#4d4d46] hover:bg-sky-50" aria-label={`Open or download ${file.relativePath}`}>
+                                  <File className="h-3.5 w-3.5 text-sky-600" />
+                                  <span className="min-w-0 flex-1 truncate">{fileNameFromPath(file.relativePath)}</span>
+                                  <span className="hidden text-[10px] text-[#8a8980] sm:inline">v{file.version} · {readableFileKind(file)}</span>
+                                  <Download className="h-3.5 w-3.5 text-[#8a8980]" />
+                                </a>
+                              ))}
+                            </div>
+                        </div>
+                      ))}
+                      {fileExplorerGroups.rootFiles.map((file) => (
+                        <a key={file.id} href={file.storageUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-xl bg-white/80 px-3 py-2 text-xs text-[#4d4d46] hover:bg-sky-50" aria-label={`Open or download ${file.relativePath}`}>
+                            <FileCode2 className="h-4 w-4 text-sky-600" />
+                            <span className="min-w-0 flex-1 truncate">{fileNameFromPath(file.relativePath)}</span>
+                            <span className="hidden text-[10px] text-[#8a8980] sm:inline">v{file.version} · {readableFileKind(file)}</span>
+                            <Download className="h-3.5 w-3.5 text-[#8a8980]" />
                         </a>
                       ))}
                     </div>
                   )}
-                </div>
-
-                <div className="rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-3 text-xs leading-5 text-[#686861]">
-                  <p className="font-semibold text-[#30302b]">Need to add a file?</p>
-                  <p className="mt-1">Files now appear here after plus, paperclip, or drag-and-drop upload. Manual storage-link entry is kept as an advanced maintenance action so the normal folder view stays non-technical.</p>
-                  <details className="mt-3 rounded-xl border border-[#deded8] bg-white p-3">
-                    <summary className="cursor-pointer text-xs font-semibold text-[#30302b]">Advanced: connect a stored file manually</summary>
-                    <div className="mt-3 space-y-2">
-                      <Input value={filePath} onChange={(event) => setFilePath(event.target.value)} className="h-9 rounded-xl bg-white text-xs" placeholder="relative/path.md" />
-                      <Input value={fileUrl} onChange={(event) => setFileUrl(event.target.value)} className="h-9 rounded-xl bg-white text-xs" placeholder="/manus-storage/..." />
-                      <Button variant="outline" onClick={handleCreateFileMetadata} disabled={!selectedTaskId || !filePath.trim() || !fileUrl.trim() || createFileMetadata.isPending} className="w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
-                        <FileText className="mr-2 h-3.5 w-3.5" /> Add file to this task
-                      </Button>
-                      <p className="text-[11px] leading-4 text-[#77766e]">Advanced fields record an existing storage-backed file reference only; they do not create fake files or run workspace commands.</p>
-                    </div>
-                  </details>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card
-              className={`border-[#deded8] bg-white text-[#242420] transition ${isGlobalFileDragActive ? "border-emerald-300 ring-2 ring-emerald-100" : ""}`}
-              data-testid="global-file-library"
-              aria-label="Global Files drop zone"
-              onDragOver={handleGlobalFileDragOver}
-              onDragLeave={handleGlobalFileDragLeave}
-              onDrop={handleGlobalFileDrop}
-            >
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base"><Archive className="h-4 w-4 text-emerald-600" /> Global Files</CardTitle>
-                <div className="mt-2 flex items-center gap-1 rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-[11px] text-emerald-800">
-                  <Folder className="h-3.5 w-3.5 text-emerald-600" /> Reusable across tasks <span>/</span> Global Files
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className={`rounded-2xl border border-dashed p-3 text-xs leading-5 transition ${isGlobalFileDragActive ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-[#cfcfc8] bg-[#fbfaf7] text-[#6d6d65]"}`} data-testid="global-file-drop-zone">
-                  <p className="font-semibold text-[#30302b]">Drop reusable files here or choose upload.</p>
-                  <p className="mt-1">Global Files are owner-scoped reusable references. Attach them to a task when the task should use the same brief, screenshot, standard, or source file.</p>
-                  <Button type="button" variant="outline" onClick={() => openUploadPicker("global")} disabled={uploadWorkspaceFileMutation.isPending} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
-                    {uploadWorkspaceFileMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Paperclip className="mr-2 h-3.5 w-3.5" />}
-                    Upload to Global Files
-                  </Button>
-                </div>
-                {globalFiles.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">Global Files is empty. Add reusable briefs, standards, screenshots, or references here when they should not belong to only one task.</div>
-                ) : (
-                  <div className="space-y-2 rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-2">
-                    {globalFiles.slice(0, 12).map((file) => (
-                      <a key={file.id} href={file.storageUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-xl bg-white/80 px-3 py-2 text-xs text-[#4d4d46] hover:bg-emerald-50" aria-label={`Open or download global file ${file.relativePath}`}>
-                        <File className="h-4 w-4 text-emerald-600" />
-                        <span className="min-w-0 flex-1 truncate">{fileNameFromPath(file.relativePath)}</span>
-                        <span className="hidden text-[10px] text-[#8a8980] sm:inline">{readableFileKind(file)}</span>
-                        <Download className="h-3.5 w-3.5 text-[#8a8980]" />
-                      </a>
-                    ))}
+                  <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 text-xs leading-5 text-emerald-800" data-testid="attached-global-files">
+                    <p className="font-semibold text-[#30302b]">Attached Global Files</p>
+                    {attachedGlobalFiles.length === 0 ? (
+                      <p className="mt-1">No Global Files are attached to this task yet. Use “Attach to task” in Global Files below to reuse shared context without uploading another copy.</p>
+                    ) : (
+                      <div className="mt-2 space-y-1">
+                        {attachedGlobalFiles.map((link) => (
+                            <a key={link.id} href={link.file.storageUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-lg bg-white/80 px-2 py-2 text-[#345343] hover:bg-white" aria-label={`Open attached Global File ${link.file.relativePath}`}>
+                              <File className="h-3.5 w-3.5 text-emerald-600" />
+                              <span className="min-w-0 flex-1 truncate">{link.attachedLabel ?? link.file.displayName ?? fileNameFromPath(link.file.relativePath)}</span>
+                              <Badge variant="outline" className="rounded-full border-emerald-200 text-[10px]">Global</Badge>
+                            </a>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </CardContent>
-            </Card>
 
-            <Card className="border-[#deded8] bg-white text-[#242420]">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4 text-stone-600" /> Advanced tools</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-xs leading-5 text-[#686861]">
-                <p>Developer filesystem and terminal controls stay closed during normal task work. Open them only when you need raw diagnostics.</p>
-                <Button type="button" variant="outline" onClick={() => setShowAdvancedTools((value) => !value)} className="w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
-                  {showAdvancedTools ? "Hide developer diagnostics" : "Show developer diagnostics"}
-                </Button>
-              </CardContent>
-            </Card>
+                  <div className="rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-3 text-xs leading-5 text-[#686861]">
+                    <p className="font-semibold text-[#30302b]">Need to add a file?</p>
+                    <p className="mt-1">Files now appear here after plus, paperclip, or drag-and-drop upload. Manual storage-link entry is kept as an advanced maintenance action so the normal folder view stays non-technical.</p>
+                    <details className="mt-3 rounded-xl border border-[#deded8] bg-white p-3">
+                      <summary className="cursor-pointer text-xs font-semibold text-[#30302b]">Advanced: connect a stored file manually</summary>
+                      <div className="mt-3 space-y-2">
+                        <Input value={filePath} onChange={(event) => setFilePath(event.target.value)} className="h-9 rounded-xl bg-white text-xs" placeholder="relative/path.md" />
+                        <Input value={fileUrl} onChange={(event) => setFileUrl(event.target.value)} className="h-9 rounded-xl bg-white text-xs" placeholder="/manus-storage/..." />
+                        <Button variant="outline" onClick={handleCreateFileMetadata} disabled={!selectedTaskId || !filePath.trim() || !fileUrl.trim() || createFileMetadata.isPending} className="w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
+                            <FileText className="mr-2 h-3.5 w-3.5" /> Add file to this task
+                        </Button>
+                        <p className="text-[11px] leading-4 text-[#77766e]">Advanced fields record an existing storage-backed file reference only; they do not create fake files or run workspace commands.</p>
+                      </div>
+                    </details>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card
+                className={`border-[#deded8] bg-white text-[#242420] transition ${isGlobalFileDragActive ? "border-emerald-300 ring-2 ring-emerald-100" : ""}`}
+                data-testid="global-file-library"
+                aria-label="Global Files drop zone"
+                onDragOver={handleGlobalFileDragOver}
+                onDragLeave={handleGlobalFileDragLeave}
+                onDrop={handleGlobalFileDrop}
+              >
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base"><Archive className="h-4 w-4 text-emerald-600" /> Global Files</CardTitle>
+                  <div className="mt-2 flex items-center gap-1 rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-[11px] text-emerald-800">
+                    <Folder className="h-3.5 w-3.5 text-emerald-600" /> Reusable across tasks <span>/</span> Global Files
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className={`rounded-2xl border border-dashed p-3 text-xs leading-5 transition ${isGlobalFileDragActive ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-[#cfcfc8] bg-[#fbfaf7] text-[#6d6d65]"}`} data-testid="global-file-drop-zone">
+                    <p className="font-semibold text-[#30302b]">Drop reusable files here or choose upload.</p>
+                    <p className="mt-1">Global Files are owner-scoped reusable references. Attach them to a task when the task should use the same brief, screenshot, standard, or source file.</p>
+                    <Button type="button" variant="outline" onClick={() => openUploadPicker("global")} disabled={uploadWorkspaceFileMutation.isPending} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
+                      {uploadWorkspaceFileMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Paperclip className="mr-2 h-3.5 w-3.5" />}
+                      Upload to Global Files
+                    </Button>
+                  </div>
+                  {globalFiles.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">Global Files is empty. Add reusable briefs, standards, screenshots, or references here when they should not belong to only one task.<Button type="button" variant="outline" onClick={() => openUploadPicker("global")} disabled={uploadWorkspaceFileMutation.isPending} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">Upload first Global File</Button></div>
+                  ) : (
+                    <div className="space-y-2 rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-2">
+                      {globalFiles.slice(0, 12).map((file) => (
+                        <a key={file.id} href={file.storageUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-xl bg-white/80 px-3 py-2 text-xs text-[#4d4d46] hover:bg-emerald-50" aria-label={`Open or download global file ${file.relativePath}`}>
+                            <File className="h-4 w-4 text-emerald-600" />
+                            <span className="min-w-0 flex-1 truncate">{fileNameFromPath(file.relativePath)}</span>
+                            <span className="hidden text-[10px] text-[#8a8980] sm:inline">{readableFileKind(file)}</span>
+                            <Download className="h-3.5 w-3.5 text-[#8a8980]" />
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+              <Card className="border-[#deded8] bg-white text-[#242420]">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base"><Archive className="h-4 w-4 text-stone-600" /> All recorded files</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {allFiles.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">The all-files index is empty because no real task or global files have been recorded yet.<Button type="button" variant="outline" onClick={() => openUploadPicker("global")} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">Upload reusable file</Button></div>
+                  ) : (
+                    allFiles.slice(0, 10).map((file) => (
+                      <a key={file.id} href={file.storageUrl} target="_blank" rel="noreferrer" className="block rounded-xl border border-[#deded8] bg-[#fbfaf7] p-2 text-xs text-[#5d5d55] hover:border-sky-200" aria-label={`Open or download ${file.relativePath}`}>
+                        <span className="font-semibold text-[#30302b]">{file.relativePath}</span>
+                        <p className="mt-1 text-[#77766e]">{file.scope === "global" || file.taskId === null ? "Global Files" : `Task #${file.taskId ?? "unknown"}`} · {compactDate(file.createdAt)}</p>
+                        <p className="mt-1 flex items-center gap-1 text-[#77766e]"><Download className="h-3 w-3" /> Open or download from the recorded storage link.</p>
+                      </a>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
 
-            {showAdvancedTools ? (
-              <>
-                <FilesystemPanel workspaceId={selectedTaskId ?? undefined} />
-                <TerminalPanel />
-              </>
-            ) : null}
+            <TabsContent value="activity" className="mt-0 space-y-4">
+              <Card className="border-[#deded8] bg-white text-[#242420]" data-testid="worker-action-log">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base"><Activity className="h-4 w-4 text-emerald-600" /> AI Activity</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <p className="rounded-2xl border border-emerald-100 bg-emerald-50/80 p-3 text-xs leading-5 text-[#4f6756]">This is a read-only activity feed for the AI coordinator, Claude, and Kimi. It does not run commands; terminal access remains a separate advanced diagnostic tool.</p>
+                  {workerActivityItems.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">No worker activity has been recorded for this task yet. Send a message to start the first Claude or Kimi turn.<Button type="button" onClick={() => setComposerText((value) => value || "Start the first AI turn for this task.")} className="mt-3 w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">Draft first AI turn</Button></div>
+                  ) : (
+                    <div className="space-y-2">
+                      {workerActivityItems.map((item) => (
+                        <div key={item.id} className="flex gap-3 rounded-2xl border border-[#ededdf] bg-[#fbfaf7] p-3">
+                            <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${activityDotTone[item.tone] ?? activityDotTone.slate}`} />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-semibold text-[#30302b]">{item.title}</p>
+                              <p className="mt-1 line-clamp-3 text-xs leading-5 text-[#686861]">{item.description}</p>
+                              <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-[#8a8980]">{item.status} · {compactDate(item.createdAt)}</p>
+                            </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <Button type="button" variant="outline" onClick={() => setShowThreadDetails((value) => !value)} disabled={technicalEvents.length === 0} className="w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
+                    {showThreadDetails ? "Hide activity details" : `Show activity details (${technicalEvents.length})`}
+                  </Button>
+                  {showThreadDetails && technicalEvents.length > 0 ? (
+                    <div className="space-y-2 rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-3" data-testid="worker-technical-details">
+                      {technicalEvents.slice(0, 6).map((event) => (
+                        <div key={event.id} className="text-[11px] leading-5 text-[#66665f]">
+                            <span className="font-semibold text-[#30302b]">{eventTitle(event.actor, event.eventType)}:</span> {ownerFacingText(event.content)}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+              <Card className="border-[#deded8] bg-white text-[#242420]" data-testid="handoff-explanation">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base"><Workflow className="h-4 w-4 text-sky-600" /> Claude and Kimi handoff</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-xs leading-5 text-[#686861]">
+                  <p><span className="font-semibold text-[#2f2f2a]">No memory is lost between workers.</span> Every turn assembles the selected task thread, saved memory, and task-file list before any provider call.</p>
+                  <div className="rounded-2xl border border-sky-100 bg-sky-50/80 p-3">
+                    <p className="font-semibold text-[#26333a]">Auto route: Claude plans → Kimi executes → Claude can review.</p>
+                    <p className="mt-1">When Auto chooses a dual path, Kimi receives Claude’s plan in the same execution turn instead of starting from a blank conversation.</p>
+                  </div>
+                  <p className="text-[11px] text-[#77766e]">Credential gates remain explicit. If either worker is unavailable, the task blocks visibly rather than silently switching providers.</p>
+                </CardContent>
+              </Card>
+            </TabsContent>
 
-            <Card className="border-[#deded8] bg-white text-[#242420]">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base"><Archive className="h-4 w-4 text-stone-600" /> All recorded files</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {allFiles.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">The all-files index is empty because no real task or global files have been recorded yet.</div>
-                ) : (
-                  allFiles.slice(0, 10).map((file) => (
-                    <a key={file.id} href={file.storageUrl} target="_blank" rel="noreferrer" className="block rounded-xl border border-[#deded8] bg-[#fbfaf7] p-2 text-xs text-[#5d5d55] hover:border-sky-200" aria-label={`Open or download ${file.relativePath}`}>
-                      <span className="font-semibold text-[#30302b]">{file.relativePath}</span>
-                      <p className="mt-1 text-[#77766e]">{file.scope === "global" || file.taskId === null ? "Global Files" : `Task #${file.taskId ?? "unknown"}`} · {compactDate(file.createdAt)}</p>
-                      <p className="mt-1 flex items-center gap-1 text-[#77766e]"><Download className="h-3 w-3" /> Open or download from the recorded storage link.</p>
-                    </a>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </ScrollArea>
+            <TabsContent value="context" className="mt-0 space-y-4">
+              <Card className="border-[#deded8] bg-white text-[#242420]" data-testid="handoff-explanation">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base"><Workflow className="h-4 w-4 text-sky-600" /> Claude and Kimi handoff</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-xs leading-5 text-[#686861]">
+                  <p><span className="font-semibold text-[#2f2f2a]">No memory is lost between workers.</span> Every turn assembles the selected task thread, saved memory, and task-file list before any provider call.</p>
+                  <div className="rounded-2xl border border-sky-100 bg-sky-50/80 p-3">
+                    <p className="font-semibold text-[#26333a]">Auto route: Claude plans → Kimi executes → Claude can review.</p>
+                    <p className="mt-1">When Auto chooses a dual path, Kimi receives Claude’s plan in the same execution turn instead of starting from a blank conversation.</p>
+                  </div>
+                  <p className="text-[11px] text-[#77766e]">Credential gates remain explicit. If either worker is unavailable, the task blocks visibly rather than silently switching providers.</p>
+                </CardContent>
+              </Card>
+              <Card className="border-[#deded8] bg-white text-[#242420]" data-testid="context-memory-panel">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base"><Brain className="h-4 w-4 text-violet-600" /> Context memory</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-xs leading-5 text-[#686861]">
+                  <p>Claude and Kimi receive the selected task thread, task files, attached Global Files, and saved memory before each coordinated turn.</p>
+                  {memories.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">
+                      No saved memory records are available yet. Add a durable decision in the task thread, then it can appear here for future turns.
+                      <Button type="button" variant="outline" onClick={() => setComposerText((value) => value || "Record this decision as reusable context for future AI turns.")} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">Draft context note</Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {memories.slice(0, 6).map((memory) => (
+                        <div key={memory.id} className="rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="truncate text-xs font-semibold text-[#30302b]">{memory.title}</p>
+                            <Badge variant="outline" className="rounded-full text-[10px]">{memory.category.replace("_", " ")}</Badge>
+                          </div>
+                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#74746c]">{memory.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="diagnostics" className="mt-0 space-y-4">
+              <Card className="border-[#deded8] bg-white text-[#242420]" data-testid="diagnostics-summary">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Advanced tools</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-xs leading-5 text-[#686861]">
+                  <p>Diagnostics are intentionally opt-in. The normal folder view stays non-technical while raw terminal and filesystem controls stay hidden unless you explicitly open advanced tools.</p>
+                  <Button type="button" variant="outline" onClick={() => setShowAdvancedTools((value) => !value)} className="w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
+                    {showAdvancedTools ? "Hide developer diagnostics" : "Show developer diagnostics"}
+                  </Button>
+                </CardContent>
+              </Card>
+              {showAdvancedTools ? (
+                <div className="space-y-4">
+                  <FilesystemPanel workspaceId={selectedTaskId ?? undefined} />
+                  <TerminalPanel />
+                </div>
+              ) : null}
+            </TabsContent>
+          </ScrollArea>
+        </Tabs>
       </aside>
     </main>
   );

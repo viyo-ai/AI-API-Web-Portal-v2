@@ -200,3 +200,12 @@
 
 - [ ] Push the validated P1 Global Files and AI Activity implementation to GitHub and record branch/commit evidence.
 - [ ] Verify whether the rest of the AI Coding Workshop Portal Fortune 500 UX Audit and Fix Recommendations are fully implemented, with exact implemented/gap evidence.
+
+- [ ] Verify Claude API `service_tier` usage against the Standard Tier documentation and update code/docs if needed to avoid accidental priority-tier spend.
+- [ ] Review Claude Code routines-fire and API overview references to determine whether any full-loop testing or implementation follow-up is required.
+
+- [ ] Complete all remaining Fortune 500 UX Audit and Fix Recommendations before treating the Claude API Standard Tier review as actionable follow-up.
+- [ ] Perform full-loop testing only after the audit recommendations are implemented in full, including owner task creation, planning/approval, build/execution, review, final decision, files, Global Files, memory, credentials, and technical-details flows.
+- [ ] Defer Claude Standard Tier, routines-fire, and API overview checks until after the full audit implementation and full-loop testing pass.
+
+- [x] Surgical P2 regression alignment: update only stale tab/diagnostics expectations needed to validate the right-rail task inspector without broad source rework.
