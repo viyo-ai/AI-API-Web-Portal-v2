@@ -203,6 +203,22 @@ type ThreadEvent = {
   createdAt: number | Date | string;
 };
 
+type QueuedComposerMessage = {
+  id: number;
+  taskId: number;
+  position: number;
+  content: string;
+  state: "queued" | "processing" | "sent" | "cleared";
+  createdAt: number | Date | string;
+  updatedAt: number | Date | string;
+};
+
+type ActiveTurnRecord = {
+  id: number;
+  state: string;
+  route?: string | null;
+};
+
 function eventTimestamp(event: ThreadEvent) {
   return new Date(event.createdAt).getTime() || 0;
 }
@@ -307,6 +323,9 @@ export default function Home() {
   const createTask = trpc.tasks.create.useMutation();
   const updateTaskStatus = trpc.tasks.updateStatus.useMutation();
   const submitMessage = trpc.orchestration.submitMessage.useMutation();
+  const updateQueuedMessageMutation = trpc.orchestration.updateQueuedMessage.useMutation();
+  const clearQueuedMessageMutation = trpc.orchestration.clearQueuedMessage.useMutation();
+  const stopGenerationMutation = trpc.orchestration.stopGeneration.useMutation();
   const createFileMetadata = trpc.files.createMetadata.useMutation();
   const uploadWorkspaceFileMutation = trpc.filesystem.upload.useMutation();
   const attachGlobalToTaskMutation = trpc.files.attachGlobalToTask.useMutation();
@@ -319,6 +338,9 @@ export default function Home() {
 
   const selectedThread = threadQuery.data;
   const selectedTask = selectedThread?.task ?? tasks.find((task) => task.id === selectedTaskId) ?? null;
+  const activeTurn = selectedThread?.activeTurn as ActiveTurnRecord | null | undefined;
+  const queuedMessages = ((selectedThread?.queuedMessages ?? []) as QueuedComposerMessage[]);
+  const hasActiveGeneration = Boolean(activeTurn);
   const events = ((selectedThread?.events ?? []) as ThreadEvent[]);
   const ownerVisibleEvents = useMemo(() => events.filter(isOwnerVisibleEvent).sort(oldestFirst), [events]);
   const technicalEvents = useMemo(() => events.filter((event) => !isOwnerVisibleEvent(event)).sort(newestFirst), [events]);
@@ -372,7 +394,7 @@ export default function Home() {
       .map((event) => ({ ...activityStepForEvent(event), id: event.id, status: event.status, createdAt: event.createdAt }));
   }, [events]);
 
-  const isMutating = createTask.isPending || updateTaskStatus.isPending || submitMessage.isPending || createFileMetadata.isPending || uploadWorkspaceFileMutation.isPending || attachGlobalToTaskMutation.isPending || createBuildTargetMutation.isPending || createBuildBranchMutation.isPending || updateBuildTargetSettingsMutation.isPending || pushBuildBranchMutation.isPending || testBuildTargetConnectionMutation.isPending;
+  const isMutating = createTask.isPending || updateTaskStatus.isPending || submitMessage.isPending || updateQueuedMessageMutation.isPending || clearQueuedMessageMutation.isPending || stopGenerationMutation.isPending || createFileMetadata.isPending || uploadWorkspaceFileMutation.isPending || attachGlobalToTaskMutation.isPending || createBuildTargetMutation.isPending || createBuildBranchMutation.isPending || updateBuildTargetSettingsMutation.isPending || pushBuildBranchMutation.isPending || testBuildTargetConnectionMutation.isPending;
 
   async function refreshWorkspace() {
     await Promise.all([
@@ -536,15 +558,39 @@ export default function Home() {
     if (!cleanMessage) return;
     const taskId = selectedTaskId ?? (await createTaskRecordOnly());
     if (!taskId) return;
+    const queued = hasActiveGeneration;
     await submitMessage.mutateAsync({ taskId, message: cleanMessage, routeMode });
     setComposerText("");
+    setWorkspaceNotice(queued ? "Message queued. It will be sent automatically after the active generation finishes." : "Message sent to the task.");
+    await refreshWorkspace();
+  }
+
+  async function handleClearQueuedMessage(queueItemId: number) {
+    if (!selectedTaskId) return;
+    await clearQueuedMessageMutation.mutateAsync({ taskId: selectedTaskId, queueItemId });
+    setWorkspaceNotice("Queued message removed before generation resumed.");
+    await refreshWorkspace();
+  }
+
+  async function handleEditQueuedMessage(queueItem: QueuedComposerMessage) {
+    const nextContent = window.prompt("Edit queued message before it is sent after this generation:", queueItem.content);
+    if (!selectedTaskId || nextContent === null || !nextContent.trim()) return;
+    await updateQueuedMessageMutation.mutateAsync({ taskId: selectedTaskId, queueItemId: queueItem.id, content: nextContent.trim() });
+    setWorkspaceNotice("Queued message updated.");
+    await refreshWorkspace();
+  }
+
+  async function handleStopGeneration() {
+    if (!selectedTaskId || !activeTurn?.id) return;
+    const result = await stopGenerationMutation.mutateAsync({ taskId: selectedTaskId, turnId: activeTurn.id, activeOperation: activeTurn.state ?? null });
+    setWorkspaceNotice(result.stop?.destructiveOperation ? "Stop requested. A safe operation is finishing before the turn halts." : "Stop requested. The current generation will halt at the next safe boundary.");
     await refreshWorkspace();
   }
 
   function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if (!isMutating && composerText.trim()) {
+      if (!submitMessage.isPending && composerText.trim()) {
         void handleSendMessage();
       }
     }
@@ -1066,6 +1112,31 @@ export default function Home() {
 
         <footer className="shrink-0 border-t border-[#deded8] bg-white/95 px-4 py-3 shadow-[0_-18px_45px_rgba(31,31,31,0.06)] backdrop-blur">
           <div className="mx-auto max-w-4xl">
+            {hasActiveGeneration || queuedMessages.length > 0 ? (
+              <div className="mb-3 rounded-2xl border border-sky-100 bg-sky-50/90 px-3 py-2 text-xs leading-5 text-[#40545f]" data-testid="section8-generation-queue-panel">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    {hasActiveGeneration ? <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-700" /> : <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />}
+                    <span className="font-semibold text-[#26333a]">{hasActiveGeneration ? "Generating now" : "Generation queue"}</span>
+                    {hasActiveGeneration ? <span>Messages sent now are queued and auto-run after this generation.</span> : <span>Queued messages can be edited or removed before they are sent.</span>}
+                  </div>
+                  {activeTurn?.id ? <Badge variant="outline" className="rounded-full border-sky-200 bg-white text-[10px] text-sky-800">Turn #{activeTurn.id}</Badge> : null}
+                </div>
+                {queuedMessages.length > 0 ? (
+                  <div className="mt-2 flex flex-col gap-2" data-testid="section8-queued-messages">
+                    {queuedMessages.map((queueItem) => (
+                      <div key={queueItem.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-100 bg-white px-3 py-2">
+                        <p className="min-w-0 flex-1 truncate text-[#34434a]">Queued #{queueItem.position}: {queueItem.content}</p>
+                        <div className="flex items-center gap-1">
+                          <Button type="button" variant="outline" onClick={() => void handleEditQueuedMessage(queueItem)} disabled={isMutating} className="h-7 rounded-full border-[#d9d8d1] bg-white px-2 text-[11px]">Edit</Button>
+                          <Button type="button" variant="outline" onClick={() => void handleClearQueuedMessage(queueItem.id)} disabled={isMutating} className="h-7 rounded-full border-[#d9d8d1] bg-white px-2 text-[11px]">Remove</Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] leading-4 text-[#77766e]">
               <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Model route">
                 {([
@@ -1086,7 +1157,13 @@ export default function Home() {
                 ))}
               </div>
               <div className="flex items-center gap-2">
-                <span className="hidden sm:inline">Enter sends · Shift+Enter adds a line</span>
+                <span className="hidden sm:inline">{hasActiveGeneration ? "Enter queues · Shift+Enter adds a line" : "Enter sends · Shift+Enter adds a line"}</span>
+                {hasActiveGeneration ? (
+                  <Button type="button" variant="outline" onClick={() => void handleStopGeneration()} disabled={!activeTurn?.id || stopGenerationMutation.isPending} className="h-7 rounded-full border-rose-200 bg-white px-2.5 text-[11px] text-rose-700" data-testid="section8-stop-generation">
+                    {stopGenerationMutation.isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <CircleAlert className="mr-1.5 h-3 w-3" />}
+                    Stop
+                  </Button>
+                ) : null}
                 <Button type="button" variant="outline" onClick={handleRefreshCredentials} disabled={credentialsRefreshMutation.isPending} className="h-7 rounded-full border-[#d9d8d1] bg-white px-2.5 text-[11px]">
                   {credentialsRefreshMutation.isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <RotateCcw className="mr-1.5 h-3 w-3" />}
                   Credentials
@@ -1120,8 +1197,8 @@ export default function Home() {
                 aria-label="Task message"
                 className="max-h-36 min-h-11 flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm leading-6 shadow-none focus-visible:ring-0"
               />
-              <Button type="button" onClick={handleSendMessage} disabled={isMutating || !composerText.trim()} className="mb-1 h-9 w-9 shrink-0 rounded-full bg-[#1f1f1f] p-0 text-white hover:bg-black" aria-label="Send message">
-                {isMutating ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizontal className="h-4 w-4" />}
+              <Button type="button" onClick={handleSendMessage} disabled={submitMessage.isPending || !composerText.trim()} className={`mb-1 h-9 shrink-0 rounded-full px-3 text-white hover:bg-black ${hasActiveGeneration ? "w-auto bg-sky-700 hover:bg-sky-800" : "w-9 bg-[#1f1f1f] p-0"}`} aria-label={hasActiveGeneration ? "Queue message" : "Send message"} data-testid="section8-send-or-queue-button">
+                {submitMessage.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : hasActiveGeneration ? <span className="text-xs font-semibold">Queue</span> : <SendHorizontal className="h-4 w-4" />}
               </Button>
             </div>
             {workspaceNotice ? <p className="mt-2 text-xs leading-5 text-[#66665f]" role="status" aria-live="polite">{workspaceNotice}</p> : null}

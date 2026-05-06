@@ -20,6 +20,15 @@ const dbMocks = vi.hoisted(() => ({
   listTaskFiles: vi.fn(),
   listTasksForOwner: vi.fn(),
   listTurnsForTask: vi.fn(),
+  listQueuedMessages: vi.fn(),
+  markQueuedMessagesProcessing: vi.fn(),
+  markQueuedMessagesSent: vi.fn(),
+  enqueueTaskMessage: vi.fn(),
+  updateQueuedTaskMessage: vi.fn(),
+  cancelQueuedTaskMessage: vi.fn(),
+  findActiveTurnForTask: vi.fn(),
+  markTurnStopped: vi.fn(),
+  formatQueuedMessagesForGeneration: vi.fn((queued: Array<{ content: string }>) => queued.map((item) => item.content).join("\n")),
   recordCredentialStatus: vi.fn(),
   renameTask: vi.fn(),
   searchMemory: vi.fn(),
@@ -118,6 +127,14 @@ describe("v2 task ownership and credential-gate security", () => {
     dbMocks.listMemoryByCategory.mockResolvedValue([]);
     dbMocks.listTaskFiles.mockResolvedValue([]);
     dbMocks.listGlobalFilesForOwner.mockResolvedValue([]);
+    dbMocks.listQueuedMessages.mockResolvedValue([]);
+    dbMocks.markQueuedMessagesProcessing.mockResolvedValue([]);
+    dbMocks.markQueuedMessagesSent.mockResolvedValue(undefined);
+    dbMocks.findActiveTurnForTask.mockResolvedValue(null);
+    dbMocks.enqueueTaskMessage.mockResolvedValue({ id: 1, taskId: ownedTask.id, ownerUserId: ownedTask.ownerUserId, content: "queued", state: "queued", position: 1 });
+    dbMocks.updateQueuedTaskMessage.mockResolvedValue([]);
+    dbMocks.cancelQueuedTaskMessage.mockResolvedValue([]);
+    dbMocks.markTurnStopped.mockResolvedValue(undefined);
   });
 
   it("rejects orchestration messages for tasks not owned by the authenticated user", async () => {

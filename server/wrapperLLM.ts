@@ -2,6 +2,7 @@ import {
   appendTaskEvent,
   completeTurn,
   failTurn,
+  stopTurn,
   updateTaskStatus,
   updateTurnState,
   type CredentialProvider,
@@ -9,6 +10,7 @@ import {
   type TurnRoute,
 } from "./db";
 import { invokeLLM } from "./_core/llm";
+import { clearTurnStopRequest, getTurnStopRequest } from "./wrapperLLM/stop-registry";
 import type { GlobalMemory, Task, TaskEvent, TaskFile } from "../drizzle/schema";
 
 export const CLAUDE_DEFAULT_MODEL = process.env.CLAUDE_MODEL || "claude-opus-4-7";
@@ -482,6 +484,30 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
   const context = buildContext(input);
   const contextJson = serializeJson(context);
 
+  const stopIfRequested = async (operation: string) => {
+    const request = getTurnStopRequest(input.turnId);
+    if (!request || request.ownerUserId !== input.ownerUserId || request.taskId !== input.task.id) return null;
+    clearTurnStopRequest(input.turnId);
+    const marker = request.destructiveOperation
+      ? `(stopped ${request.boundary}; destructive operation was not interrupted mid-flight)`
+      : `(stopped ${request.boundary})`;
+    await stopTurn(input.turnId, input.ownerUserId, marker);
+    await updateTaskStatus(input.task.id, input.ownerUserId, "active");
+    await appendTaskEvent({
+      taskId: input.task.id,
+      ownerUserId: input.ownerUserId,
+      actor: "wrapper",
+      eventType: "status",
+      status: "informational",
+      content: `Generation stopped ${request.boundary}.`,
+      metadataJson: serializeJson({ turnId: input.turnId, route: input.route, operation, stopRequest: request }),
+    });
+    return marker;
+  };
+
+  const initialStop = await stopIfRequested("before context assembly");
+  if (initialStop) return { route: input.route, finalAnswer: initialStop };
+
   await updateTurnState(input.turnId, input.ownerUserId, "context_assembly", input.route, serializeJson(input.credentialStates));
   await appendTaskEvent({
     taskId: input.task.id,
@@ -512,6 +538,9 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
     let kimiResult: string | undefined;
     let claudeReview: string | undefined;
 
+    const beforeModelStop = await stopIfRequested("before model calls");
+    if (beforeModelStop) return { route: input.route, finalAnswer: beforeModelStop };
+
     if (input.route === "claude" || input.route === "dual") {
       claudePlan = await runClaudePlan(input, contextJson);
       await appendTaskEvent({
@@ -523,6 +552,8 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
         content: claudePlan,
         metadataJson: serializeJson({ turnId: input.turnId, model: CLAUDE_DEFAULT_MODEL, role: "planner" }),
       });
+      const afterClaudeStop = await stopIfRequested("after claude planning");
+      if (afterClaudeStop) return { route: input.route, claudePlan, finalAnswer: afterClaudeStop };
     }
 
     if (input.route === "kimi" || input.route === "dual") {
@@ -536,6 +567,8 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
         content: kimiResult,
         metadataJson: serializeJson({ turnId: input.turnId, model: KIMI_K26_CLOUDFLARE_MODEL, role: "executor" }),
       });
+      const afterKimiStop = await stopIfRequested("after kimi execution");
+      if (afterKimiStop) return { route: input.route, claudePlan, kimiResult, finalAnswer: afterKimiStop };
     }
 
     await updateTurnState(input.turnId, input.ownerUserId, "model_review", input.route, serializeJson(input.credentialStates));
@@ -551,12 +584,17 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
         content: claudeReview,
         metadataJson: serializeJson({ turnId: input.turnId, model: CLAUDE_DEFAULT_MODEL, role: "reviewer" }),
       });
+      const afterReviewStop = await stopIfRequested("after claude review");
+      if (afterReviewStop) return { route: input.route, claudePlan, kimiResult, claudeReview, finalAnswer: afterReviewStop };
     }
 
     const finalAnswer = claudeReview ?? kimiResult ?? claudePlan;
     if (!finalAnswer) {
       throw new Error("No model output was produced for the selected route.");
     }
+
+    const beforePersistStop = await stopIfRequested("before persisting output");
+    if (beforePersistStop) return { route: input.route, claudePlan, kimiResult, claudeReview, finalAnswer: beforePersistStop };
 
     await updateTurnState(input.turnId, input.ownerUserId, "persisting_output", input.route, serializeJson(input.credentialStates));
     await appendTaskEvent({

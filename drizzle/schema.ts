@@ -94,6 +94,7 @@ export const orchestrationTurns = mysqlTable(
       "completed",
       "blocked",
       "failed",
+      "stopped",
     ])
       .default("received")
       .notNull(),
@@ -239,6 +240,24 @@ export const taskFiles = mysqlTable(
   }),
 );
 
+export const taskMessageQueue = mysqlTable(
+  "task_message_queue",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    taskId: int("taskId").notNull(),
+    ownerUserId: int("ownerUserId").notNull(),
+    content: longtext("content").notNull(),
+    attachmentsJson: longtext("attachmentsJson"),
+    state: mysqlEnum("state", ["queued", "processing", "sent", "cleared"]).default("queued").notNull(),
+    position: int("position").notNull(),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+    updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
+    processedAt: bigint("processedAt", { mode: "number" }),
+  },
+  (table) => ({
+    taskOwnerStatePositionIdx: index("task_message_queue_task_owner_state_position_idx").on(table.taskId, table.ownerUserId, table.state, table.position),
+  }),
+);
 export const credentialStatusSnapshots = mysqlTable(
   "credential_status_snapshots",
   {
@@ -277,3 +296,5 @@ export type TaskFile = typeof taskFiles.$inferSelect;
 export type InsertTaskFile = typeof taskFiles.$inferInsert;
 export type CredentialStatusSnapshot = typeof credentialStatusSnapshots.$inferSelect;
 export type InsertCredentialStatusSnapshot = typeof credentialStatusSnapshots.$inferInsert;
+export type TaskMessageQueueItem = typeof taskMessageQueue.$inferSelect;
+export type InsertTaskMessageQueueItem = typeof taskMessageQueue.$inferInsert;

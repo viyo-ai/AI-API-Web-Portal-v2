@@ -7,6 +7,7 @@ const requiredV2Tables = [
   "orchestration_turns",
   "task_events",
   "task_files",
+  "task_message_queue",
   "tasks",
 ];
 

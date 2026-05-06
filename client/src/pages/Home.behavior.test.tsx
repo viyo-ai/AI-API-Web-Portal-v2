@@ -11,6 +11,9 @@ const invalidateMock = vi.fn(async () => undefined);
 const createTaskMock = vi.fn();
 const updateTaskStatusMock = vi.fn();
 const submitMessageMock = vi.fn();
+const updateQueuedMessageMock = vi.fn();
+const clearQueuedMessageMock = vi.fn();
+const stopGenerationMock = vi.fn();
 const createFileMetadataMock = vi.fn();
 const uploadWorkspaceFileMock = vi.fn();
 const attachGlobalToTaskMock = vi.fn();
@@ -196,6 +199,15 @@ vi.mock("@/lib/trpc", () => ({
           isPending: false,
         }),
       },
+      updateQueuedMessage: {
+        useMutation: () => ({ mutateAsync: updateQueuedMessageMock, isPending: false }),
+      },
+      clearQueuedMessage: {
+        useMutation: () => ({ mutateAsync: clearQueuedMessageMock, isPending: false }),
+      },
+      stopGeneration: {
+        useMutation: () => ({ mutateAsync: stopGenerationMock, isPending: false }),
+      },
     },
     files: {
       listForTask: { useQuery: () => ({ data: mockTaskFiles, isLoading: false }) },
@@ -303,6 +315,9 @@ beforeEach(() => {
   createTaskMock.mockReset();
   updateTaskStatusMock.mockReset();
   submitMessageMock.mockReset();
+  updateQueuedMessageMock.mockReset();
+  clearQueuedMessageMock.mockReset();
+  stopGenerationMock.mockReset();
   createFileMetadataMock.mockReset();
   uploadWorkspaceFileMock.mockReset();
   attachGlobalToTaskMock.mockReset();
@@ -317,6 +332,9 @@ beforeEach(() => {
   createTaskMock.mockResolvedValue({ task: { ...sampleTask, id: 19, title: "Created task" }, events: [], activeTurn: null });
   updateTaskStatusMock.mockResolvedValue({ ...sampleTask, status: "archived" });
   submitMessageMock.mockResolvedValue(mockThread);
+  updateQueuedMessageMock.mockResolvedValue([]);
+  clearQueuedMessageMock.mockResolvedValue([]);
+  stopGenerationMock.mockResolvedValue({ stopped: true, stop: { destructiveOperation: false, boundary: "before_next_generation_step" } });
   createFileMetadataMock.mockResolvedValue(mockTaskFiles[0]);
   attachGlobalToTaskMock.mockResolvedValue({ id: 501, taskId: 7, globalFileId: 56, attachedLabel: "Owner playbook.pdf", file: mockGlobalFiles[0] });
   uploadWorkspaceFileMock.mockResolvedValue({
@@ -555,6 +573,53 @@ describe("Home v2 task-first workspace behavior", () => {
       routeMode: "kimi",
     });
     await waitFor(() => expect(invalidateMock).toHaveBeenCalled());
+  });
+
+  it("queues composer submissions while generation is active and exposes queued message edit/remove controls", async () => {
+    const user = userEvent.setup();
+    mockThread = {
+      task: sampleTask,
+      activeTurn: { id: 44, taskId: 7, ownerUserId: 42, routeMode: "auto", state: "running", startedAt: 1777999200000, completedAt: null, errorMessage: null },
+      queuedMessages: [
+        { id: 901, taskId: 7, ownerUserId: 42, position: 1, content: "Already queued follow-up", state: "queued", createdAt: 1777999250000, updatedAt: 1777999250000 },
+      ],
+      events: [],
+    };
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValueOnce("Updated queued follow-up");
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    expect(screen.getByTestId("section8-generation-queue-panel")).toHaveTextContent(/Generating now/i);
+    expect(screen.getByTestId("section8-queued-messages")).toHaveTextContent(/Queued #1: Already queued follow-up/i);
+    await user.type(screen.getByLabelText(/Task message/i), "Please queue this next{enter}");
+
+    expect(submitMessageMock).toHaveBeenCalledWith({ taskId: 7, message: "Please queue this next", routeMode: "auto" });
+    expect(screen.getByRole("button", { name: /Queue message/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Edit$/i }));
+    expect(updateQueuedMessageMock).toHaveBeenCalledWith({ taskId: 7, queueItemId: 901, content: "Updated queued follow-up" });
+    await user.click(screen.getByRole("button", { name: /^Remove$/i }));
+    expect(clearQueuedMessageMock).toHaveBeenCalledWith({ taskId: 7, queueItemId: 901 });
+    promptSpy.mockRestore();
+  });
+
+  it("requests Stop for the active generation turn without sending duplicate composer content", async () => {
+    const user = userEvent.setup();
+    mockThread = {
+      task: sampleTask,
+      activeTurn: { id: 45, taskId: 7, ownerUserId: 42, routeMode: "auto", state: "running", startedAt: 1777999200000, completedAt: null, errorMessage: null },
+      queuedMessages: [],
+      events: [],
+    };
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    await user.type(screen.getByLabelText(/Task message/i), "Do not send this draft");
+    await user.click(screen.getByTestId("section8-stop-generation"));
+
+    expect(stopGenerationMock).toHaveBeenCalledWith({ taskId: 7, turnId: 45, activeOperation: "running" });
+    expect(submitMessageMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/Stop requested/i));
   });
 
   it("keeps Shift+Enter inside the composer without submitting the message", async () => {

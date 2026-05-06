@@ -237,3 +237,10 @@
 - [x] Implement Section 4 environment variable injection so validation/build commands receive configured secret values by environment-variable name without exposing token values in UI, logs, or persisted records.
 - [x] Add/update focused and browser acceptance coverage for Section 4 branch isolation, push policy, and environment injection.
 - [x] Run Section 4 acceptance and full validation gates, repair only Section 4 defects, then checkpoint, commit, push to public `main`, and stop for PO review before Section 8.
+
+- [x] Re-ingest `PORTAL_PHASE_1_DIRECTIVE.md` and enforce Section 8-only scope: Composer Behavior During Generation — queue plus Stop.
+- [x] Inspect current composer submit, generation-in-progress, task thread, and orchestration cancellation behavior before making additive Section 8 changes.
+- [x] Implement Section 8 queue behavior so composer submissions made during active generation are safely queued and visibly represented without losing user input.
+- [x] Implement Section 8 Stop behavior so users can stop active generation with clear UI state and no accidental duplicate sends.
+- [x] Add focused regression and browser acceptance coverage for Section 8 queue and Stop behavior.
+- [x] Run Section 8 acceptance and full validation gates, repair only Section 8 defects, then checkpoint, commit, push to public `main`, and stop for PO review before declaring Phase 1 complete.

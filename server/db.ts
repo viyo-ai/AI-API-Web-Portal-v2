@@ -16,11 +16,13 @@ import {
   InsertTask,
   InsertTaskEvent,
   InsertTaskFile,
+  InsertTaskMessageQueueItem,
   InsertUser,
   orchestrationTurns,
   taskEvents,
   taskFiles,
   taskGlobalFileLinks,
+  taskMessageQueue,
   tasks,
   users,
 } from "../drizzle/schema";
@@ -41,7 +43,8 @@ export type TurnState =
   | "persisting_output"
   | "completed"
   | "blocked"
-  | "failed";
+  | "failed"
+  | "stopped";
 export type MemoryCategory = "decision" | "feature" | "research" | "past_task";
 export type CredentialProvider = "claude" | "kimi";
 export type CredentialStatus = "configured" | "missing" | "invalid" | "untested" | "error";
@@ -49,6 +52,8 @@ export type BuildTargetStatus = "active" | "archived";
 export type BuildBranchState = "clean" | "cloning" | "error";
 export type BuildBranchPushState = "never_pushed" | "pushing" | "pushed" | "blocked" | "error";
 export type AgentEnvVarMap = Record<string, string>;
+export type QueuedMessageState = "queued" | "processing" | "sent" | "cleared";
+export const MAX_QUEUED_MESSAGES_PER_TASK = 5;
 
 export function nowMs() {
   return Date.now();
@@ -275,12 +280,89 @@ export async function getTaskThread(taskId: number, ownerUserId: number) {
 
   const events = (await listTaskEvents(taskId, ownerUserId, 200)).reverse();
   const activeTurns = await listTurnsForTask(taskId, ownerUserId, 1);
+  const queuedMessages = await listQueuedMessages(taskId, ownerUserId);
 
   return {
     task,
     events,
-    activeTurn: activeTurns[0]?.state === "completed" || activeTurns[0]?.state === "blocked" || activeTurns[0]?.state === "failed" ? null : activeTurns[0] ?? null,
+    queuedMessages,
+    activeTurn: activeTurns[0]?.state === "completed" || activeTurns[0]?.state === "blocked" || activeTurns[0]?.state === "failed" || activeTurns[0]?.state === "stopped" ? null : activeTurns[0] ?? null,
   };
+}
+
+export async function listQueuedMessages(taskId: number, ownerUserId: number, states: QueuedMessageState[] = ["queued"]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for queued messages");
+  const stateFilters = states.map((state) => eq(taskMessageQueue.state, state));
+  return db.select().from(taskMessageQueue)
+    .where(and(eq(taskMessageQueue.taskId, taskId), eq(taskMessageQueue.ownerUserId, ownerUserId), or(...stateFilters)))
+    .orderBy(taskMessageQueue.position, taskMessageQueue.createdAt, taskMessageQueue.id)
+    .limit(MAX_QUEUED_MESSAGES_PER_TASK);
+}
+
+export async function enqueueTaskMessage(values: { taskId: number; ownerUserId: number; content: string; attachmentsJson?: string | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for queued messages");
+  const content = values.content.trim();
+  if (!content) throw new Error("Queued message content is required");
+  const existing = await listQueuedMessages(values.taskId, values.ownerUserId);
+  if (existing.length >= MAX_QUEUED_MESSAGES_PER_TASK) throw new Error(`Queue limit reached. A task can hold up to ${MAX_QUEUED_MESSAGES_PER_TASK} queued messages while generation is running.`);
+  const timestamp = nowMs();
+  const position = existing.reduce((max, item) => Math.max(max, item.position), 0) + 1;
+  const insertValues: InsertTaskMessageQueueItem = { taskId: values.taskId, ownerUserId: values.ownerUserId, content, attachmentsJson: values.attachmentsJson ?? null, state: "queued", position, createdAt: timestamp, updatedAt: timestamp, processedAt: null };
+  await db.insert(taskMessageQueue).values(insertValues);
+  await touchTask(values.taskId, values.ownerUserId);
+  const result = await db.select().from(taskMessageQueue).where(and(eq(taskMessageQueue.taskId, values.taskId), eq(taskMessageQueue.ownerUserId, values.ownerUserId), eq(taskMessageQueue.createdAt, timestamp))).orderBy(desc(taskMessageQueue.id)).limit(1);
+  if (!result[0]) throw new Error("Failed to queue composer message");
+  return result[0];
+}
+
+export async function updateQueuedTaskMessage(values: { queueItemId: number; taskId: number; ownerUserId: number; content: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for queued messages");
+  const content = values.content.trim();
+  if (!content) throw new Error("Queued message content is required");
+  await db.update(taskMessageQueue).set({ content, updatedAt: nowMs() }).where(and(eq(taskMessageQueue.id, values.queueItemId), eq(taskMessageQueue.taskId, values.taskId), eq(taskMessageQueue.ownerUserId, values.ownerUserId), eq(taskMessageQueue.state, "queued")));
+  await touchTask(values.taskId, values.ownerUserId);
+  return listQueuedMessages(values.taskId, values.ownerUserId);
+}
+
+export async function cancelQueuedTaskMessage(values: { queueItemId: number; taskId: number; ownerUserId: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for queued messages");
+  await db.update(taskMessageQueue).set({ state: "cleared", updatedAt: nowMs() }).where(and(eq(taskMessageQueue.id, values.queueItemId), eq(taskMessageQueue.taskId, values.taskId), eq(taskMessageQueue.ownerUserId, values.ownerUserId), eq(taskMessageQueue.state, "queued")));
+  await touchTask(values.taskId, values.ownerUserId);
+  return listQueuedMessages(values.taskId, values.ownerUserId);
+}
+
+export async function markQueuedMessagesProcessing(taskId: number, ownerUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for queued messages");
+  const queued = await listQueuedMessages(taskId, ownerUserId);
+  if (queued.length === 0) return [];
+  const timestamp = nowMs();
+  for (const item of queued) await db.update(taskMessageQueue).set({ state: "processing", updatedAt: timestamp, processedAt: timestamp }).where(and(eq(taskMessageQueue.id, item.id), eq(taskMessageQueue.taskId, taskId), eq(taskMessageQueue.ownerUserId, ownerUserId), eq(taskMessageQueue.state, "queued")));
+  return queued;
+}
+
+export async function markQueuedMessagesSent(taskId: number, ownerUserId: number, queueItemIds: number[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for queued messages");
+  if (queueItemIds.length === 0) return;
+  const timestamp = nowMs();
+  for (const queueItemId of queueItemIds) await db.update(taskMessageQueue).set({ state: "sent", updatedAt: timestamp, processedAt: timestamp }).where(and(eq(taskMessageQueue.id, queueItemId), eq(taskMessageQueue.taskId, taskId), eq(taskMessageQueue.ownerUserId, ownerUserId)));
+  await touchTask(taskId, ownerUserId);
+}
+
+export function formatQueuedMessagesForGeneration(queued: Array<{ position: number; content: string }>) {
+  const numbered = queued.map((item, index) => `${index + 1}. ${item.content.trim()}`).join("\n");
+  return [
+    "Note: the following messages were queued during your previous response.",
+    "Apply them as additional context. If any are now obsolete based on what",
+    "you just produced, ask for clarification before acting on them.",
+    "",
+    numbered,
+  ].join("\n");
 }
 
 export async function createTurn(values: Omit<InsertOrchestrationTurn, "startedAt"> & { startedAt?: number }) {
@@ -339,6 +421,16 @@ export async function failTurn(turnId: number, ownerUserId: number, errorCode: s
   await db
     .update(orchestrationTurns)
     .set({ state, completedAt: nowMs(), errorCode, errorMessage })
+    .where(and(eq(orchestrationTurns.id, turnId), eq(orchestrationTurns.ownerUserId, ownerUserId)));
+}
+
+export async function stopTurn(turnId: number, ownerUserId: number, marker = "(stopped)") {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for orchestration turns");
+
+  await db
+    .update(orchestrationTurns)
+    .set({ state: "stopped", completedAt: nowMs(), errorCode: "GENERATION_STOPPED", errorMessage: marker })
     .where(and(eq(orchestrationTurns.id, turnId), eq(orchestrationTurns.ownerUserId, ownerUserId)));
 }
 

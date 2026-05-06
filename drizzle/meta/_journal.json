@@ -50,6 +50,13 @@
       "when": 1778099339857,
       "tag": "0006_workable_paper_doll",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1778102279944,
+      "tag": "0007_perpetual_morlun",
+      "breakpoints": true
     }
   ]
 }

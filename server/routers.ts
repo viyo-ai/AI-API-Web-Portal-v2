@@ -16,6 +16,8 @@ import {
   createTask,
   createTaskFile,
   createTurn,
+  enqueueTaskMessage,
+  formatQueuedMessagesForGeneration,
   type CredentialProvider,
   type CredentialStatus,
   failTurn,
@@ -38,6 +40,10 @@ import {
   listTaskFiles,
   listTasksForOwner,
   listTurnsForTask,
+  markQueuedMessagesProcessing,
+  markQueuedMessagesSent,
+  cancelQueuedTaskMessage,
+  updateQueuedTaskMessage,
   type MemoryCategory,
   recordCredentialStatus,
   renameTask,
@@ -64,6 +70,7 @@ import { cleanupWorkspace, cloneOrSyncBranch, getBuildBranchGitStatus, getBuildB
 import { storagePut } from "./storage";
 import { getUserWorkspaceRoot } from "./terminal";
 import { CLAUDE_DEFAULT_MODEL, CLAUDE_OWNER_MODEL_LABEL, orchestrateWithOpenAI, executeWrapperTurn, getWrapperRuntimeCredentialStates, KIMI_K26_CLOUDFLARE_MODEL, KIMI_OWNER_MODEL_LABEL, resolveEffectiveRoute } from "./wrapperLLM";
+import { requestTurnStop } from "./wrapperLLM/stop-registry";
 
 const agentEnvVarMapSchema = z.record(z.string().trim().regex(/^[A-Z_][A-Z0-9_]*$/, "Use uppercase environment variable names."), z.string().trim().regex(/^[A-Z_][A-Z0-9_]*$/, "Use uppercase source environment variable names.")).default({});
 
@@ -227,6 +234,117 @@ async function recordRuntimeCredentialSnapshots(ownerUserId: number, states: Cre
   );
 }
 
+type OwnedTask = Awaited<ReturnType<typeof getTaskForOwner>> extends infer T ? NonNullable<T> : never;
+
+async function runGenerationTurn(input: { task: OwnedTask; ownerUserId: number; userContent: string; selectedRoute: RouteMode }) {
+  const decision = await resolveWrapperRoute(input.userContent, input.selectedRoute);
+  await recordRuntimeCredentialSnapshots(input.ownerUserId, decision.credentialStates);
+
+  if (isModelIdentityQuestion(input.userContent)) {
+    await appendTaskEvent({
+      taskId: input.task.id,
+      ownerUserId: input.ownerUserId,
+      actor: "system",
+      eventType: "message",
+      status: "succeeded",
+      content: modelIdentityAnswer(decision.requestedRoute === "dual" ? "auto" : input.selectedRoute),
+      metadataJson: serializeJson({ requestedRoute: decision.requestedRoute, effectiveRoute: decision.effectiveRoute, claudeModel: CLAUDE_DEFAULT_MODEL, kimiModel: KIMI_K26_CLOUDFLARE_MODEL }),
+    });
+    return null;
+  }
+
+  const turn = await createTurn({
+    taskId: input.task.id,
+    ownerUserId: input.ownerUserId,
+    route: decision.effectiveRoute,
+    state: decision.isRunnable ? "context_assembly" : "blocked",
+    credentialStateJson: serializeJson(decision.credentialStates),
+    completedAt: decision.isRunnable ? null : Date.now(),
+    errorCode: decision.isRunnable ? null : "CREDENTIALS_UNAVAILABLE",
+    errorMessage: decision.isRunnable ? null : decision.reason,
+  });
+
+  await appendTaskEvent({
+    taskId: input.task.id,
+    ownerUserId: input.ownerUserId,
+    actor: "wrapper",
+    eventType: "route_decision",
+    status: decision.isRunnable ? "succeeded" : "blocked",
+    content: decision.reason,
+    metadataJson: serializeJson(decision),
+  });
+
+  if (!decision.isRunnable) {
+    await updateTaskStatus(input.task.id, input.ownerUserId, "blocked");
+    await appendTaskEvent({
+      taskId: input.task.id,
+      ownerUserId: input.ownerUserId,
+      actor: "system",
+      eventType: "credential_status",
+      status: "blocked",
+      content: "The AI coordinator did not fall back silently. AUTO first-message initialization requires both Claude Opus 4.7 and Kimi K2.6 credentials; configure the missing server credentials, then retry the task.",
+      metadataJson: serializeJson({ turnId: turn.id, credentialStates: decision.credentialStates }),
+    });
+    return turn;
+  }
+
+  const effectiveRoute = decision.effectiveRoute;
+  if (effectiveRoute === "blocked" || effectiveRoute === "auto") {
+    throw new Error("Wrapper route resolution produced an invalid runnable route.");
+  }
+
+  const [priorEvents, memory, files] = await Promise.all([
+    listTaskEvents(input.task.id, input.ownerUserId, 80),
+    listMemoryByCategory(input.ownerUserId, undefined, 20),
+    listTaskFiles(input.task.id, input.ownerUserId, 200),
+  ]);
+
+  try {
+    await executeWrapperTurn({
+      task: input.task,
+      ownerUserId: input.ownerUserId,
+      turnId: turn.id,
+      userMessage: input.userContent,
+      route: effectiveRoute,
+      credentialStates: decision.credentialStates,
+      priorEvents,
+      memory,
+      files,
+    });
+  } catch {
+    // executeWrapperTurn already persists the failed turn, task status, and timeline error.
+  }
+  return turn;
+}
+
+async function processQueuedMessagesAfterGeneration(task: OwnedTask, ownerUserId: number, selectedRoute: RouteMode) {
+  for (let batch = 0; batch < 5; batch += 1) {
+    const queued = await markQueuedMessagesProcessing(task.id, ownerUserId);
+    if (queued.length === 0) return;
+    await appendTaskEvent({
+      taskId: task.id,
+      ownerUserId,
+      actor: "system",
+      eventType: "status",
+      status: "informational",
+      content: `Queue processed: ${queued.length} message${queued.length === 1 ? "" : "s"} flushed to agent.`,
+      metadataJson: serializeJson({ queueItemIds: queued.map((item) => item.id) }),
+    });
+    const queuedContent = formatQueuedMessagesForGeneration(queued);
+    await appendTaskEvent({
+      taskId: task.id,
+      ownerUserId,
+      actor: "user",
+      eventType: "message",
+      status: "succeeded",
+      content: queuedContent,
+      metadataJson: serializeJson({ queued: true, queueItemIds: queued.map((item) => item.id) }),
+    });
+    await runGenerationTurn({ task, ownerUserId, userContent: queuedContent, selectedRoute });
+    await markQueuedMessagesSent(task.id, ownerUserId, queued.map((item) => item.id));
+  }
+}
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -323,8 +441,20 @@ export const appRouter = router({
         const override = detectRouteOverride(input.message);
         const userContent = override.cleanedMessage || input.message.trim();
         const selectedRoute = input.routeMode ?? (task.routeMode as RouteMode);
-        const decision = await resolveWrapperRoute(input.message, selectedRoute);
-        await recordRuntimeCredentialSnapshots(ctx.user.id, decision.credentialStates);
+        const existingThread = await getTaskThread(task.id, ctx.user.id);
+        if (existingThread?.activeTurn) {
+          const queued = await enqueueTaskMessage({ taskId: task.id, ownerUserId: ctx.user.id, content: input.message.trim() });
+          await appendTaskEvent({
+            taskId: task.id,
+            ownerUserId: ctx.user.id,
+            actor: "system",
+            eventType: "status",
+            status: "informational",
+            content: `Owner queued message #${queued.position}.`,
+            metadataJson: serializeJson({ queueItemId: queued.id, position: queued.position }),
+          });
+          return getTaskThread(task.id, ctx.user.id);
+        }
 
         await appendTaskEvent({
           taskId: task.id,
@@ -333,85 +463,42 @@ export const appRouter = router({
           eventType: "message",
           status: "succeeded",
           content: userContent,
-          metadataJson: serializeJson({ requestedRoute: decision.requestedRoute, forcedByTag: decision.forcedByTag }),
+          metadataJson: serializeJson({ queued: false, routeMode: selectedRoute, forcedByTag: override.forcedByTag }),
         });
 
-        if (isModelIdentityQuestion(userContent)) {
-          await appendTaskEvent({
-            taskId: task.id,
-            ownerUserId: ctx.user.id,
-            actor: "system",
-            eventType: "message",
-            status: "succeeded",
-            content: modelIdentityAnswer(decision.requestedRoute === "dual" ? "auto" : selectedRoute),
-            metadataJson: serializeJson({ requestedRoute: decision.requestedRoute, effectiveRoute: decision.effectiveRoute, claudeModel: CLAUDE_DEFAULT_MODEL, kimiModel: KIMI_K26_CLOUDFLARE_MODEL }),
-          });
-          return getTaskThread(task.id, ctx.user.id);
-        }
-
-        const turn = await createTurn({
-          taskId: task.id,
-          ownerUserId: ctx.user.id,
-          route: decision.effectiveRoute,
-          state: decision.isRunnable ? "context_assembly" : "blocked",
-          credentialStateJson: serializeJson(decision.credentialStates),
-          completedAt: decision.isRunnable ? null : Date.now(),
-          errorCode: decision.isRunnable ? null : "CREDENTIALS_UNAVAILABLE",
-          errorMessage: decision.isRunnable ? null : decision.reason,
-        });
-
-        await appendTaskEvent({
-          taskId: task.id,
-          ownerUserId: ctx.user.id,
-          actor: "wrapper",
-          eventType: "route_decision",
-          status: decision.isRunnable ? "succeeded" : "blocked",
-          content: decision.reason,
-          metadataJson: serializeJson(decision),
-        });
-
-        if (!decision.isRunnable) {
-          await updateTaskStatus(task.id, ctx.user.id, "blocked");
-          await appendTaskEvent({
-            taskId: task.id,
-            ownerUserId: ctx.user.id,
-            actor: "system",
-            eventType: "credential_status",
-            status: "blocked",
-            content: "The AI coordinator did not fall back silently. AUTO first-message initialization requires both Claude Opus 4.7 and Kimi K2.6 credentials; configure the missing server credentials, then retry the task.",
-            metadataJson: serializeJson({ turnId: turn.id, credentialStates: decision.credentialStates }),
-          });
-        } else {
-          const effectiveRoute = decision.effectiveRoute;
-          if (effectiveRoute === "blocked" || effectiveRoute === "auto") {
-            throw new Error("Wrapper route resolution produced an invalid runnable route.");
-          }
-
-          const [priorEvents, memory, files] = await Promise.all([
-            listTaskEvents(task.id, ctx.user.id, 80),
-            listMemoryByCategory(ctx.user.id, undefined, 20),
-            listTaskFiles(task.id, ctx.user.id, 200),
-          ]);
-
-          try {
-            await executeWrapperTurn({
-              task,
-              ownerUserId: ctx.user.id,
-              turnId: turn.id,
-              userMessage: userContent,
-              route: effectiveRoute,
-              credentialStates: decision.credentialStates,
-              priorEvents,
-              memory,
-              files,
-            });
-          } catch {
-            // executeWrapperTurn already persists the failed turn, task status, and timeline error.
-            // Returning the refreshed thread keeps the UI honest and prevents a silent broken state.
-          }
-        }
-
+        await runGenerationTurn({ task, ownerUserId: ctx.user.id, userContent, selectedRoute });
+        await processQueuedMessagesAfterGeneration(task, ctx.user.id, selectedRoute);
         return getTaskThread(task.id, ctx.user.id);
+      }),
+    updateQueuedMessage: protectedProcedure
+      .input(z.object({ taskId: z.number().int().positive(), queueItemId: z.number().int().positive(), content: z.string().trim().min(1).max(20000) }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOwnedTask(input.taskId, ctx.user.id);
+        await updateQueuedTaskMessage({ taskId: input.taskId, ownerUserId: ctx.user.id, queueItemId: input.queueItemId, content: input.content });
+        return getTaskThread(input.taskId, ctx.user.id);
+      }),
+    clearQueuedMessage: protectedProcedure
+      .input(z.object({ taskId: z.number().int().positive(), queueItemId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOwnedTask(input.taskId, ctx.user.id);
+        await cancelQueuedTaskMessage({ taskId: input.taskId, ownerUserId: ctx.user.id, queueItemId: input.queueItemId });
+        return getTaskThread(input.taskId, ctx.user.id);
+      }),
+    stopGeneration: protectedProcedure
+      .input(z.object({ taskId: z.number().int().positive(), turnId: z.number().int().positive(), activeOperation: z.string().trim().max(240).nullable().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        await requireOwnedTask(input.taskId, ctx.user.id);
+        const stop = requestTurnStop({ taskId: input.taskId, ownerUserId: ctx.user.id, turnId: input.turnId, activeOperation: input.activeOperation ?? null });
+        await appendTaskEvent({
+          taskId: input.taskId,
+          ownerUserId: ctx.user.id,
+          actor: "system",
+          eventType: "status",
+          status: "informational",
+          content: stop.destructiveOperation ? `Stop requested. Waiting for ${stop.activeOperation} to finish before halting.` : "Stop requested. Generation will halt at the next safe boundary.",
+          metadataJson: serializeJson(stop),
+        });
+        return { success: true, stop } as const;
       }),
     turns: protectedProcedure
       .input(z.object({ taskId: z.number().int().positive(), limit: z.number().int().min(1).max(100).default(20) }))
