@@ -54,10 +54,10 @@ const actorTone: Record<string, string> = {
 };
 
 const starterPrompts = [
-  "Architect a production-safe implementation plan for the next UI slice before coding.",
-  "Review the current task context and identify any missing wiring before implementation.",
-  "Use #kimi to produce a precise execution draft for a narrowly scoped code change.",
-  "Use #claude to review risk, acceptance criteria, and user-facing behavior before build.",
+  "Plan the next safe product step before changing anything.",
+  "Review this task and explain the missing pieces in plain English.",
+  "Use #kimi only if you want an execution draft for a narrowly scoped code change.",
+  "Use #claude only if you want a planning or review pass before build work.",
 ];
 
 function compactDate(value: number | Date | string | null | undefined) {
@@ -65,13 +65,22 @@ function compactDate(value: number | Date | string | null | undefined) {
   return new Date(value).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function ownerFacingText(value: string | null | undefined) {
+  return (value ?? "")
+    .replaceAll("Wrapper LLM", "AI coordinator")
+    .replaceAll("Wrapper", "AI coordinator")
+    .replaceAll("production three-pane shell", "plain-English AI coding workshop")
+    .replaceAll("task-first production shell", "task-first production workspace");
+}
+
 function eventTitle(actor: string, eventType: string) {
-  if (eventType === "route_decision") return "Wrapper route decision";
+  if (eventType === "route_decision") return "AI routing decision";
   if (eventType === "credential_status") return "Credential gate";
   if (eventType === "file_event") return "Task file event";
   if (eventType === "message") return actor === "user" ? "You" : actor.toUpperCase();
-  if (actor === "claude") return "Claude planning/review";
+  if (actor === "claude") return "Claude planning or review";
   if (actor === "kimi") return "Kimi execution draft";
+  if (actor === "wrapper") return "AI coordinator";
   return `${actor} · ${eventType.replaceAll("_", " ")}`;
 }
 
@@ -81,11 +90,12 @@ export default function Home() {
   const utils = trpc.useUtils();
 
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
-  const [taskTitle, setTaskTitle] = useState("Production v2 rebuild task");
+  const [taskTitle, setTaskTitle] = useState("AI coding workshop task");
   const [composerText, setComposerText] = useState("Architect the next production-safe step, verify wiring, then proceed only if it matches the approved v2 plan.");
   const [searchTerm, setSearchTerm] = useState("");
   const [filePath, setFilePath] = useState("");
   const [fileUrl, setFileUrl] = useState("");
+  const [showAdvancedTools, setShowAdvancedTools] = useState(false);
 
   const taskListInput = useMemo(() => ({ includeArchived: false, limit: 50 }), []);
   const tasksQuery = trpc.tasks.list.useQuery(taskListInput, { enabled: isAuthenticated });
@@ -148,7 +158,7 @@ export default function Home() {
     const cleanMessage = composerText.trim();
     const created = await createTask.mutateAsync({
       title: cleanTitle,
-      summary: "Task-first v2 workspace item created from the production three-pane shell.",
+      summary: "Task-first v2 workspace item created from the plain-English AI coding workshop.",
       routeMode: "auto",
     });
     if (!created) return;
@@ -201,11 +211,11 @@ export default function Home() {
               <LockKeyhole className="h-4 w-4 text-sky-500" /> Manus OAuth protected production workspace
             </div>
             <div className="space-y-5">
-              <h1 className="max-w-4xl text-5xl font-semibold tracking-[-0.045em] text-[#1f1f1f] md:text-7xl">
-                A task-first Wrapper LLM workspace for Claude and Kimi.
+                <h1 className="max-w-4xl text-5xl font-semibold tracking-[-0.045em] text-[#1f1f1f] md:text-7xl">
+                A plain-English AI coding workshop for Claude and Kimi.
               </h1>
               <p className="max-w-2xl text-lg leading-8 text-[#66665f]">
-                Log in to run the approved v2 workflow: live tasks and global memory on the left, a task thread in the center, and task files on the right. The system routes Claude and Kimi server-side with explicit credential gates and no silent provider fallback.
+                Log in to run the approved v2 workflow: live tasks and global memory on the left, a task thread in the center, and task files on the right. Claude and Kimi are coordinated behind the scenes with explicit credential gates and no silent provider fallback.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -223,12 +233,12 @@ export default function Home() {
                   <Workflow className="h-6 w-6 text-sky-500" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#76766e]">Wrapper LLM v2</p>
-                  <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#1f1f1f]">Production routing before execution</h2>
+                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#76766e]">AI coding workshop v2</p>
+                  <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#1f1f1f]">Plain-English planning before execution</h2>
                 </div>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                {["Claude plans and reviews", "Kimi drafts execution", "AUTO resolves internally", "Credentials block explicitly"].map((step) => (
+                {["Claude plans and reviews", "Kimi drafts execution", "AUTO coordinates internally", "Credentials block explicitly"].map((step) => (
                   <div key={step} className="rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-4 text-sm font-medium text-[#45453e]">
                     <CheckCircle2 className="mb-3 h-5 w-5 text-emerald-600" /> {step}
                   </div>
@@ -242,7 +252,7 @@ export default function Home() {
   }
 
   return (
-    <main className="grid min-h-screen bg-[#f7f6f2] text-[#242420] lg:grid-cols-[300px_minmax(0,1fr)_360px]">
+    <main className="grid min-h-screen overflow-x-hidden bg-[#f7f6f2] text-[#242420] lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_390px]">
       <aside className="flex min-h-screen flex-col border-r border-[#d9d8d1] bg-[#f0efeb]">
         <div className="border-b border-[#d9d8d1] p-4">
           <div className="flex items-center justify-between gap-3">
@@ -251,7 +261,7 @@ export default function Home() {
             </div>
             <Badge className="rounded-full border-emerald-200 bg-emerald-100 text-emerald-800">v2</Badge>
           </div>
-          <p className="mt-2 text-xs leading-5 text-[#67675f]">Task-first production shell. No provider dropdown, terminal-first workflow, or demo command composer.</p>
+          <p className="mt-2 text-xs leading-5 text-[#67675f]">Task-first production workspace. No provider dropdown, terminal-first workflow, or demo command composer.</p>
         </div>
 
         <div className="space-y-3 border-b border-[#d9d8d1] p-4">
@@ -274,7 +284,7 @@ export default function Home() {
               <div className="rounded-2xl border border-[#d9d8d1] bg-white p-4 text-sm text-[#6d6d65]">Loading tasks...</div>
             ) : filteredTasks.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white/70 p-4 text-sm leading-6 text-[#6d6d65]">
-                No live tasks yet. Create one from the title and composer text to establish Claude/Kimi orchestration context.
+                No live tasks yet. Create one from the title and task message to establish Claude/Kimi coordination context.
               </div>
             ) : (
               filteredTasks.map((task) => (
@@ -288,7 +298,7 @@ export default function Home() {
                     <p className="min-w-0 flex-1 truncate text-sm font-semibold text-[#2c2c28]">{task.title}</p>
                     <Badge variant="outline" className={`shrink-0 rounded-full text-[10px] ${statusTone[task.status] ?? statusTone.active}`}>{task.status}</Badge>
                   </div>
-                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#74746c]">{task.summary || "No summary recorded yet."}</p>
+                  <p className="mt-2 line-clamp-2 text-xs leading-5 text-[#66665f]">{ownerFacingText(task.summary) || "No summary recorded yet."}</p>
                   <p className="mt-2 text-[11px] text-[#9a998f]">Updated {compactDate(task.updatedAt)}</p>
                 </button>
               ))
@@ -350,7 +360,7 @@ export default function Home() {
                 <CardContent className="p-8 text-center">
                   <Sparkles className="mx-auto mb-4 h-10 w-10 text-sky-500" />
                   <h2 className="text-xl font-semibold tracking-[-0.03em]">Start with a production task</h2>
-                  <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[#686861]">Use the composer below to create a task. AUTO routing stays inside the Wrapper LLM and can be overridden only with #claude or #kimi tags in the message.</p>
+                  <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[#686861]">Use the composer below to create a task. AUTO coordination stays behind the scenes and can be overridden only with #claude or #kimi tags in the message.</p>
                 </CardContent>
               </Card>
             ) : threadQuery.isLoading ? (
@@ -370,7 +380,7 @@ export default function Home() {
                       <Badge variant="outline" className="rounded-full text-[10px]">{event.status}</Badge>
                     </div>
                   </div>
-                  <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[#3e3e39]">{event.content}</p>
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[#3e3e39]">{ownerFacingText(event.content)}</p>
                 </article>
               ))
             )}
@@ -397,19 +407,19 @@ export default function Home() {
               </div>
               <Button onClick={selectedTaskId ? handleSendMessage : handleCreateTask} disabled={isMutating || !composerText.trim()} className="rounded-full bg-[#1f1f1f] px-6 text-white hover:bg-black">
                 {isMutating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Workflow className="mr-2 h-4 w-4" />}
-                {selectedTaskId ? "Send to Wrapper" : "Create task"}
+                {selectedTaskId ? "Send to task thread" : "Create task"}
               </Button>
             </div>
           </div>
         </footer>
       </section>
 
-      <aside className="flex min-h-screen min-w-0 flex-col border-l border-[#d9d8d1] bg-[#f0efeb]">
+      <aside className="flex min-h-screen min-w-0 flex-col border-l border-[#d9d8d1] bg-[#f0efeb] lg:col-span-2 xl:col-span-1">
         <div className="border-b border-[#d9d8d1] p-4">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">
             <PanelRight className="h-4 w-4" /> Task files and context
           </div>
-          <h2 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#20201d]">Right sidebar</h2>
+          <h2 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#20201d]">Task files</h2>
         </div>
 
         <ScrollArea className="min-h-0 flex-1 p-4">
@@ -419,8 +429,8 @@ export default function Home() {
                 <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Production safeguards</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-xs leading-5 text-[#686861]">
-                <p>The main UX remains task-first; terminal and filesystem tools are supporting panels, not the orchestration source of truth.</p>
-                <p>No provider dropdown. Tags are explicit overrides; AUTO remains orchestration-owned.</p>
+                <p>The main UX remains task-first; technical tools stay hidden unless you explicitly open advanced mode.</p>
+                <p>No provider dropdown. Tags are explicit overrides; AUTO remains coordinated behind the scenes.</p>
                 <p>No fake seeded files or memories. Empty states stay honest until real records exist.</p>
                 <p>The workspace operates on your task-scoped files and task history; unsupported file actions stay disabled until real file metadata exists.</p>
               </CardContent>
@@ -468,9 +478,24 @@ export default function Home() {
               </CardContent>
             </Card>
 
-            <FilesystemPanel workspaceId={selectedTaskId ?? undefined} />
+            <Card className="border-[#deded8] bg-white text-[#242420]">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base"><PanelRight className="h-4 w-4 text-stone-600" /> Advanced technical tools</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-xs leading-5 text-[#686861]">
+                <p>These tools are hidden during normal task work so the owner view stays focused on plain-English tasks, files, decisions, and results.</p>
+                <Button type="button" variant="outline" onClick={() => setShowAdvancedTools((value) => !value)} className="w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
+                  {showAdvancedTools ? "Hide advanced tools" : "Show advanced tools"}
+                </Button>
+              </CardContent>
+            </Card>
 
-            <TerminalPanel />
+            {showAdvancedTools ? (
+              <>
+                <FilesystemPanel workspaceId={selectedTaskId ?? undefined} />
+                <TerminalPanel />
+              </>
+            ) : null}
 
             <Card className="border-[#deded8] bg-white text-[#242420]">
               <CardHeader className="pb-3">

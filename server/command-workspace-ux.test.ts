@@ -12,7 +12,7 @@ describe("v2 task-first workspace production regressions", () => {
   it("keeps the main page on the approved three-pane task/memory/thread/files shell", () => {
     const source = readProjectFile("client/src/pages/Home.tsx");
 
-    expect(source).toContain("Task-first production shell");
+    expect(source).toContain("Task-first production workspace");
     expect(source).toContain("Live tasks");
     expect(source).toContain("Global memory");
     expect(source).toContain("Center task thread");
@@ -22,14 +22,15 @@ describe("v2 task-first workspace production regressions", () => {
     expect(source).toContain("bg-[#f7f6f2]");
   });
 
-  it("keeps terminal and filesystem as supporting panels inside the task-first workspace", () => {
+  it("keeps terminal and filesystem behind an explicit advanced disclosure inside the task-first workspace", () => {
     const source = readProjectFile("client/src/pages/Home.tsx");
     const terminalSource = readProjectFile("client/src/components/TerminalPanel.tsx");
     const filesystemSource = readProjectFile("client/src/components/FilesystemPanel.tsx");
 
     expect(source).toContain("TerminalPanel");
     expect(source).toContain("FilesystemPanel");
-    expect(source).toContain("terminal and filesystem tools are supporting panels");
+    expect(source).toContain("technical tools stay hidden unless you explicitly open advanced mode");
+    expect(source).toContain("Show advanced tools");
     expect(source).not.toContain("WorkspaceCommandCenter");
     expect(source).not.toMatch(/Draft safe plan|Approve and run|opencode\.ai background CLI/i);
     expect(terminalSource).toContain("@xterm/xterm");
@@ -51,6 +52,19 @@ describe("v2 task-first workspace production regressions", () => {
     expect(source).toContain("tmuxEnabled: false");
     expect(source).toContain("tmux is not installed in this runtime");
     expect(source).toContain("getUserWorkspaceRoot(ownerUserId)");
+  });
+
+  it("keeps the right sidebar readable by making files primary and advanced tools collapsed", () => {
+    const source = readProjectFile("client/src/pages/Home.tsx");
+
+    expect(source).toContain("overflow-x-hidden");
+    expect(source).toContain("xl:grid-cols-[300px_minmax(0,1fr)_390px]");
+    expect(source).toContain("flex min-h-screen min-w-0 flex-col border-l");
+    expect(source).toContain("lg:col-span-2 xl:col-span-1");
+    expect(source).toContain("Task-scoped files");
+    expect(source).toContain("Advanced technical tools");
+    expect(source).toContain("showAdvancedTools ?");
+    expect(source).toContain("Open, AI-change, rollback, download, and library-promotion intentions unlock only after real task file metadata is recorded");
   });
 
   it("keeps provider routing inside the Wrapper LLM instead of exposing a provider dropdown", () => {

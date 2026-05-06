@@ -289,14 +289,18 @@ describe("Home v2 task-first workspace behavior", () => {
     render(<Home />);
 
     expect((await screen.findAllByText("Implement v2 shell")).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Task-first production shell/i)).toBeInTheDocument();
+    expect(screen.getByText(/Task-first production workspace/i)).toBeInTheDocument();
     expect(screen.getByText(/Center task thread/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Task-scoped files/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Wire the task-first AI coordinator workspace/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Wrapper LLM/i)).not.toBeInTheDocument();
     expect(screen.getByText(/No silent fallback/i)).toBeInTheDocument();
     expect(screen.getByText(/claude: missing/i)).toBeInTheDocument();
     expect(screen.getByText(/kimi: configured/i)).toBeInTheDocument();
     expect(screen.getByText(/Missing CLAUDE_API_KEY\./i)).toBeInTheDocument();
     expect(screen.queryByText(/TerminalPanel|WorkspaceCommandCenter|FilesystemPanel/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/PTY shell terminal/i)).not.toBeInTheDocument();
+    expect(FakeWebSocket.instances).toHaveLength(0);
   });
 
   it("shows explicit authenticated missing-credential warnings for both Claude and Kimi", async () => {
@@ -314,17 +318,17 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(screen.getByText(/Missing Cloudflare Workers AI credentials\./i)).toBeInTheDocument();
   });
 
-  it("submits the selected task message through the Wrapper LLM and refreshes v2 task context", async () => {
+  it("submits the selected task message through the task thread and refreshes v2 task context", async () => {
     const user = userEvent.setup();
     render(<Home />);
 
     await screen.findAllByText("Implement v2 shell");
-    await user.click(screen.getByText(/Use #kimi to produce a precise execution draft/i));
-    await user.click(screen.getByRole("button", { name: /send to wrapper/i }));
+    await user.click(screen.getByText(/Use #kimi only if you want an execution draft/i));
+    await user.click(screen.getByRole("button", { name: /send to task thread/i }));
 
     expect(submitMessageMock).toHaveBeenCalledWith({
       taskId: 7,
-      message: "Use #kimi to produce a precise execution draft for a narrowly scoped code change.",
+      message: "Use #kimi only if you want an execution draft for a narrowly scoped code change.",
       routeMode: "auto",
     });
     await waitFor(() => expect(invalidateMock).toHaveBeenCalled());
@@ -337,8 +341,8 @@ describe("Home v2 task-first workspace behavior", () => {
     await user.click(screen.getByRole("button", { name: /new task/i }));
 
     expect(createTaskMock).toHaveBeenCalledWith({
-      title: "Production v2 rebuild task",
-      summary: "Task-first v2 workspace item created from the production three-pane shell.",
+      title: "AI coding workshop task",
+      summary: "Task-first v2 workspace item created from the plain-English AI coding workshop.",
       routeMode: "auto",
     });
     expect(submitMessageMock).toHaveBeenCalledWith(expect.objectContaining({ taskId: 19, routeMode: "auto" }));
@@ -379,6 +383,7 @@ describe("Home v2 task-first workspace behavior", () => {
     render(<Home />);
 
     await screen.findAllByText("Implement v2 shell");
+    await user.click(screen.getByRole("button", { name: /show advanced tools/i }));
     await user.type(screen.getByPlaceholderText("workspace directory, blank for root"), "notes");
     await user.click(screen.getByRole("button", { name: /mkdir/i }));
 
@@ -396,10 +401,13 @@ describe("Home v2 task-first workspace behavior", () => {
     });
   });
 
-  it("opens the terminal WebSocket, reflects tmux readiness, and reports the authenticated endpoint", async () => {
+  it("opens the terminal WebSocket only after advanced tools are explicitly shown, reflects tmux readiness, and reports the authenticated endpoint", async () => {
+    const user = userEvent.setup();
     render(<Home />);
 
     await screen.findAllByText("Implement v2 shell");
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: /show advanced tools/i }));
     await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
     const socket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
 
@@ -433,9 +441,12 @@ describe("Home v2 task-first workspace behavior", () => {
     });
     const cancelAnimationFrameMock = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
 
+    const user = userEvent.setup();
     render(<Home />);
 
     await screen.findAllByText("Implement v2 shell");
+    expect(resizeObserverCallbacks.length).toBe(0);
+    await user.click(screen.getByRole("button", { name: /show advanced tools/i }));
     expect(resizeObserverCallbacks.length).toBeGreaterThan(0);
     const scheduledBeforeResize = requestAnimationFrameMock.mock.calls.length;
 
@@ -444,7 +455,7 @@ describe("Home v2 task-first workspace behavior", () => {
       resizeObserverCallbacks[0]([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
     });
 
-    expect(requestAnimationFrameMock.mock.calls.length).toBeLessThanOrEqual(scheduledBeforeResize + 1);
+    expect(requestAnimationFrameMock.mock.calls.length).toBeLessThanOrEqual(scheduledBeforeResize + 2);
 
     await act(async () => {
       rafCallbacks.shift()?.(0);
@@ -457,9 +468,12 @@ describe("Home v2 task-first workspace behavior", () => {
   });
 
   it("pauses terminal reconnects after fatal native-module initialization errors", async () => {
+    const user = userEvent.setup();
     render(<Home />);
 
     await screen.findAllByText("Implement v2 shell");
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: /show advanced tools/i }));
     await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
     const socket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
 

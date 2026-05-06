@@ -45,3 +45,14 @@
 - [x] Fix authenticated workspace database query failures for `tasks`, `global_memory`, and `task_files` after OAuth login by ensuring required tables exist and are migrated.
 - [x] Fix authenticated workspace filesystem startup failure when `/tmp/ai-coding-workshop-workspaces/user-1/README.md` is missing by seeding or recreating required workspace files safely.
 - [x] Confirm ResizeObserver warning does not represent an application failure or suppress only if it is caused by our terminal/layout code.
+- [x] Audit current app against `OroginalProductVision.txt` and `WEBpORTAL.docx`, producing a capability-by-capability coverage map.
+- [x] Fix any confirmed implementation gaps from the vision/decision audit with regression coverage where feasible.
+- [x] Re-run validation after the audit/fixes, save a checkpoint, and report exactly what is implemented, partially implemented, or still pending.
+- [x] Perform a full non-skim section-by-section ingestion of both uploaded documents before making any implementation judgment.
+- [x] Preserve traceability from each extracted requirement or decision back to the source document and line/section evidence.
+- [x] Remove the visible Basic Shell Terminal from the normal right-side owner view; keep any execution details hidden behind an explicit advanced/developer disclosure only if needed.
+- [x] Rename and clarify the confusing "Chat Wrapper" concept into the owner-facing task thread/orchestration language from the approved vision.
+- [x] Fix the right sidebar/navigation clipping so task files, context, and file controls remain readable and accessible at the current viewport width.
+- [x] Add regression coverage for the corrected no-terminal-default layout, owner-facing orchestration copy, and non-clipped right sidebar behavior where feasible.
+- [x] Pause additional fixes until both uploaded source documents have been read in full without skimming.
+- [x] Complete full source-file ingestion before making any further implementation-completeness claims.
