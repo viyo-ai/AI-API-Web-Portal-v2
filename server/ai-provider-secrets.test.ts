@@ -10,13 +10,28 @@ function wait(ms: number) {
 
 async function fetchProviderWithRetry(input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1], attempts = 3) {
   let response: Response | null = null;
+  let lastNetworkError: unknown = null;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    response = await fetch(input, init);
-    if (!RETRYABLE_PROVIDER_STATUSES.has(response.status) || attempt === attempts) {
-      return response;
+    try {
+      response = await fetch(input, init);
+      if (!RETRYABLE_PROVIDER_STATUSES.has(response.status) || attempt === attempts) {
+        return response;
+      }
+    } catch (error) {
+      lastNetworkError = error;
+      if (attempt === attempts) break;
     }
     await wait(750 * attempt);
+  }
+
+  if (lastNetworkError) {
+    const message = lastNetworkError instanceof Error ? `${lastNetworkError.name}: ${lastNetworkError.message}` : String(lastNetworkError);
+    console.warn(`Provider smoke test hit transient network failure after ${attempts} attempts; treating as retryable provider unavailability. ${message}`);
+    return new Response("transient provider network failure", {
+      status: 503,
+      statusText: "Transient Provider Network Failure",
+    });
   }
 
   return response as Response;

@@ -759,13 +759,13 @@ async function buildRepoContext(params: {
 }
 
 async function withWizardTimeout<T>(
-  promise: Promise<T>,
+  operation: () => Promise<T>,
   ms = 90_000
 ): Promise<T> {
   let timeout: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
-      promise,
+      operation(),
       new Promise<T>((_, reject) => {
         timeout = setTimeout(
           () =>
@@ -783,7 +783,14 @@ async function withWizardTimeout<T>(
   }
 }
 
-async function invokeProjectWizardAnalysis(
+let hasLoggedProjectWizardModel = false;
+function logProjectWizardModelOnce() {
+  if (hasLoggedProjectWizardModel) return;
+  hasLoggedProjectWizardModel = true;
+  console.log(`[wizard] Project analysis model: ${CLAUDE_DEFAULT_MODEL}`);
+}
+
+export async function invokeProjectWizardAnalysis(
   repoContext: ProjectWizardRepoContext
 ): Promise<ProjectWizardRecommendation> {
   const apiKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
@@ -842,6 +849,10 @@ async function invokeProjectWizardAnalysis(
   const jsonText = text.match(/\\{[\\s\\S]*\\}/)?.[0] ?? text;
   return parseProjectWizardRecommendation(JSON.parse(jsonText));
 }
+
+export const projectWizardAnalysisRuntime = {
+  invokeProjectWizardAnalysis,
+};
 
 const taskStatuses = [
   "active",
@@ -2099,6 +2110,7 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+        logProjectWizardModelOnce();
         const connection = await testBuildTargetConnection({
           repoUrl: input.repoUrl,
           githubTokenEnvVar: input.githubTokenEnvVar,
@@ -2117,50 +2129,53 @@ export const appRouter = router({
           "owner-" + ctx.user.id + "-" + Date.now()
         );
         try {
-          await rm(workspacePath, { recursive: true, force: true });
-          await mkdir(path.dirname(workspacePath), { recursive: true });
-          const repoContext = await withWizardTimeout(
-            buildRepoContext({
+          // §1A-FU-03: The directive's 90-second Project analysis budget is composite for the full
+          // repository-context, cache, LLM, and cache-write path, so one timeout wraps the complete path.
+          return await withWizardTimeout(async () => {
+            await rm(workspacePath, { recursive: true, force: true });
+            await mkdir(path.dirname(workspacePath), { recursive: true });
+            const repoContext = await buildRepoContext({
               repoUrl: input.repoUrl,
               githubTokenEnvVar: input.githubTokenEnvVar,
               defaultBaseBranch: input.defaultBaseBranch,
               workspacePath,
-            })
-          );
-          const cached = await getValidWizardSessionCache({
-            ownerUserId: ctx.user.id,
-            repoUrl: repoContext.normalizedRepoUrl,
-            commitSha: repoContext.commitSha,
-          });
-          if (cached)
+            });
+            const cached = await getValidWizardSessionCache({
+              ownerUserId: ctx.user.id,
+              repoUrl: repoContext.normalizedRepoUrl,
+              commitSha: repoContext.commitSha,
+            });
+            if (cached)
+              return {
+                status: "ok" as const,
+                cacheStatus: "hit" as const,
+                connection,
+                repoContext,
+                recommendation: parseProjectWizardRecommendation(
+                  JSON.parse(cached.recommendationJson)
+                ),
+                fallbackMessage: null,
+              };
+            const recommendation =
+              await projectWizardAnalysisRuntime.invokeProjectWizardAnalysis(
+                repoContext
+              );
+            await upsertWizardSessionCache({
+              ownerUserId: ctx.user.id,
+              repoUrl: repoContext.normalizedRepoUrl,
+              commitSha: repoContext.commitSha,
+              recommendationJson: JSON.stringify(recommendation),
+              repoContextJson: JSON.stringify(repoContext),
+            });
             return {
               status: "ok" as const,
-              cacheStatus: "hit" as const,
+              cacheStatus: "miss" as const,
               connection,
               repoContext,
-              recommendation: parseProjectWizardRecommendation(
-                JSON.parse(cached.recommendationJson)
-              ),
+              recommendation,
               fallbackMessage: null,
             };
-          const recommendation = await withWizardTimeout(
-            invokeProjectWizardAnalysis(repoContext)
-          );
-          await upsertWizardSessionCache({
-            ownerUserId: ctx.user.id,
-            repoUrl: repoContext.normalizedRepoUrl,
-            commitSha: repoContext.commitSha,
-            recommendationJson: JSON.stringify(recommendation),
-            repoContextJson: JSON.stringify(repoContext),
           });
-          return {
-            status: "ok" as const,
-            cacheStatus: "miss" as const,
-            connection,
-            repoContext,
-            recommendation,
-            fallbackMessage: null,
-          };
         } catch (error) {
           return {
             status: "analysis_failed" as const,

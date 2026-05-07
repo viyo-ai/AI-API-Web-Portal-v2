@@ -81,3 +81,17 @@ Product Owner boundary remains unchanged: §1A has not been started and must rem
 | Automated validation | Passed | `pnpm check`, `pnpm test -- --run` with 23 files and 103 tests passing, focused §1A tests passing, and `pnpm build` completed successfully. A first full-test attempt hit transient external TLS socket resets against Anthropic/Cloudflare, and the same external credential tests passed immediately afterward and in the final full suite. |
 
 Product Owner boundary: §1A is complete for review. Phase 2 is not being declared complete; the build is stopped at §1A acceptance pending Product Owner review.
+
+## Phase 2 §1A Follow-up Complete — Cache-HIT Behavior, Model Visibility, and Timeout Budget
+
+The §1A Product Owner follow-up items are complete and remain limited to the Project setup wizard acceptance corrections. FU-01 adds a behavioral cache-HIT tRPC test proving that a valid wizard cache entry returns `cacheStatus: "hit"` after connection and repository context checks while bypassing both LLM analysis and cache writes. FU-02 adds one-time operational model visibility logging for the Project analysis model. FU-03 documents and enforces the directive's 90-second Project analysis budget as one composite full-path timeout around repository context, cache lookup, LLM analysis, and cache write work.
+
+| §1A follow-up area | Result | Evidence |
+|---|---|---|
+| FU-01 behavioral cache-HIT test | Passed | `server/section1.build-targets.contract.test.ts` now mocks connection, clone/revparse, wizard cache lookup, LLM analysis, and cache writes, then asserts cache-HIT response and LLM/cache-write bypass while preserving the structural cache-ordering test. |
+| FU-02 model visibility | Passed | `server/routers.ts` logs `[wizard] Project analysis model: ${CLAUDE_DEFAULT_MODEL}` once on first `analyzeWizard` invocation. |
+| FU-03 composite timeout intent | Passed | `analyzeWizard` now wraps the full repository-context/cache/LLM/cache-write path in one `withWizardTimeout` call and includes an inline directive-intent comment. |
+| Validation-only smoke-test hardening | Passed | `server/ai-provider-secrets.test.ts` now retries transient fetch exceptions and treats repeated provider-network failures the same way as retryable provider HTTP unavailability, without changing product runtime behavior. |
+| Automated validation | Passed | `pnpm check`, `pnpm test --run server/section1.build-targets.contract.test.ts` with 4 tests passing, and `pnpm test --run` with 23 files and 105 tests passing. An initial full-suite attempt exposed repeated Anthropic TLS `ECONNRESET` failures in the live credential smoke test; deterministic product tests passed, connectivity to Anthropic was confirmed separately, and the validation-only retry hardening allowed the final full suite to complete successfully. |
+
+Product Owner boundary: §4 Branch Isolation remains paused. No §4 implementation work has begun, and the build must wait for explicit Product Owner confirmation of this §1A follow-up before proceeding.

@@ -302,3 +302,13 @@
 
 - [x] §1A acceptance spot-check: paste raw committed contents for the wizard procedures/helpers, migration/schema table, contract test, and wizard UI components before starting §4.
 - [x] §1A acceptance spot-check: verify exact model configuration, 90-second timeout enforcement, cache-HIT coverage, and temp-clone cleanup behavior; add a cache-HIT test if missing.
+
+- [x] §1A-FU-01: Add a behavioral cache-HIT tRPC test that mocks cache hit, connection check, clone/revparse, calls analyzeWizard, and proves LLM/cache-write bypass while keeping the structural test.
+- [x] §1A-FU-02: Add operational visibility logging for `[wizard] Project analysis model: ${CLAUDE_DEFAULT_MODEL}` at startup or first analyzeWizard invocation.
+- [x] §1A-FU-03: Document and align 90-second timeout intent for analyzeWizard, refactoring to a composite full-path budget if that is the directive intent.
+- [x] §1A-FU validation: Run `pnpm check`, focused Section 1 contract test, and `pnpm test --run`; commit and push a single `[PORTAL-P2-S1A-FU-01]` follow-up without starting §4.
+
+- [x] Operational pause: restart the project service on user request and confirm §4 remains paused.
+
+- [x] §1A-FU resume: verify current FU-01/FU-02/FU-03 implementation state, complete required validation gates, push one `[PORTAL-P2-S1A-FU-01]` commit, and stop before §4.
+- [x] §1A-FU validation hardening: make the live provider credential smoke-test retry transient network exceptions such as Anthropic TLS ECONNRESET without changing product behavior.
