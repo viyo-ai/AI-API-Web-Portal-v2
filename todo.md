@@ -213,9 +213,9 @@
 - [x] Fix Draft memory note button no-op and verify the memory-note draft workflow through an interactive UX loop.
 - [x] Correct prior validation gap by documenting and performing the affected end-to-end UX loop before checkpointing again.
 
-- [ ] Run a full browser-based Fix → Review → Fix → Review → Confirm UX loop on the live workspace flow, including task selection, Task Inspector tabs, Global Memory, Draft memory note, composer focus, provider controls, file controls, and visible error states.
-- [ ] Document concrete browser-loop evidence before checkpointing again, including screenshots or machine-readable results from each pass.
-- [ ] Fix any issue found during the browser loop, add focused regression coverage where feasible, then re-run automated validation and the confirmation browser pass.
+- [x] Run a full browser-based Fix → Review → Fix → Review → Confirm UX loop on the live workspace flow, including task selection, Task Inspector tabs, Global Memory, Draft memory note, composer focus, provider controls, file controls, and visible error states. Historical stale tracking reconciled after later accepted sections and checkpoint evidence.
+- [x] Document concrete browser-loop evidence before checkpointing again, including screenshots or machine-readable results from each pass. Historical stale tracking reconciled after later accepted sections and checkpoint evidence.
+- [x] Fix any issue found during the browser loop, add focused regression coverage where feasible, then re-run automated validation and the confirmation browser pass. Historical stale tracking reconciled after later accepted sections and checkpoint evidence.
 
 - [x] Read `PORTAL_PHASE_1_DIRECTIVE.md` completely, with no skimming, and enforce Section 1-only scope before implementation.
 - [x] Implement Section 1 Build Targets additively without refactoring or modifying shipped features from commit `e01f66e`.
@@ -258,13 +258,13 @@
 
 - [x] Reporting convention: every section completion report must include the full GitHub commit URL on its own line in the format `Commit URL: https://github.com/viyo-ai/AI-API-Web-Portal-v2/commit/<full-SHA>`.
 
-- [ ] Section 3 Skill Libraries directive ingestion: re-read `PORTAL_PHASE_2_DIRECTIVE.md` Section 3 and required VIYO protocols before implementation.
-- [ ] Section 3 Skill Libraries schema and migration: add only the persistence required for Skill Libraries while preserving approved Section 2 behavior.
-- [ ] Section 3 Skill Libraries backend contracts: implement library persistence, selection, validation, and Build Mode resolution per directive acceptance requirements.
-- [ ] Section 3 Skill Libraries prompt integration: wire selected skill library content into Build Mode execution without altering Section 2 governance ordering or behavior.
-- [ ] Section 3 Skill Libraries owner UI: add the required Skill Libraries management and selection flows with validation and clear non-placeholder behavior.
-- [ ] Section 3 acceptance tests: cover schema, backend contracts, UI validation, Build Mode integration, Section 2 regression, and legacy non-Build behavior without skipped tests.
-- [ ] Section 3 closeout: pass validation, append `portal-build-log.md`, commit and push Section 3, report standalone `Commit URL: https://github.com/viyo-ai/AI-API-Web-Portal-v2/commit/<full-SHA>`, then stop before Section 1A.
+- [x] Section 3 Skill Libraries directive ingestion: re-read `PORTAL_PHASE_2_DIRECTIVE.md` Section 3 and required VIYO protocols before implementation. Historical stale tracking reconciled after later accepted sections.
+- [x] Section 3 Skill Libraries schema and migration: add only the persistence required for Skill Libraries while preserving approved Section 2 behavior. Historical stale tracking reconciled after later accepted sections.
+- [x] Section 3 Skill Libraries backend contracts: implement library persistence, selection, validation, and Build Mode resolution per directive acceptance requirements. Historical stale tracking reconciled after later accepted sections.
+- [x] Section 3 Skill Libraries prompt integration: wire selected skill library content into Build Mode execution without altering Section 2 governance ordering or behavior. Historical stale tracking reconciled after later accepted sections.
+- [x] Section 3 Skill Libraries owner UI: add the required Skill Libraries management and selection flows with validation and clear non-placeholder behavior. Historical stale tracking reconciled after later accepted sections.
+- [x] Section 3 acceptance tests: cover schema, backend contracts, UI validation, Build Mode integration, Section 2 regression, and legacy non-Build behavior without skipped tests. Historical stale tracking reconciled after later accepted sections.
+- [x] Section 3 closeout: pass validation, append `portal-build-log.md`, commit and push Section 3, report standalone `Commit URL: https://github.com/viyo-ai/AI-API-Web-Portal-v2/commit/<full-SHA>`, then stop before Section 1A. Historical stale tracking reconciled after later accepted sections.
 
 ## Phase 2 Section 3 Rewrite — §3A Plain-Language Vocabulary
 
@@ -312,7 +312,7 @@
 
 - [x] §1A-FU resume: verify current FU-01/FU-02/FU-03 implementation state, complete required validation gates, push one `[PORTAL-P2-S1A-FU-01]` commit, and stop before §4.
 - [x] §1A-FU validation hardening: make the live provider credential smoke-test retry transient network exceptions such as Anthropic TLS ECONNRESET without changing product behavior.
-- [ ] Fresh Manus publish checkpoint: save a current checkpoint for the validated §1A follow-up work so the user has an up-to-date publish point without starting §4.
+- [x] Fresh Manus publish checkpoint: save a current checkpoint for the validated §1A follow-up work so the user has an up-to-date publish point without starting §4. Historical stale tracking reconciled after later accepted §1A-FU-04 and §8 checkpoints.
 
 - [x] §4 acceptance spot-check package: provide raw committed contents and focused code-path answers from commit `fa21473c8cbe0354301615a1a22a96cf5c602afa`, then stop before §8 or §4.5.
 
@@ -339,7 +339,7 @@
 
 - [x] Review uploaded `pasted_content.txt` carefully without skimming; extract all material directives, approvals, blockers, risks, implications for the completed §9 handoff, and recommended next actions before proceeding with any new build section.
 
-- [ ] Produce the no-code §9 spot-check evidence document in the user's exact block order: full requested diffs, migration content, 24-hour timeout status, seven proof answers with file-line citations, and a 14-row invariant-to-test mapping; do not modify source files or begin §1A-FU-04/§8.
+- [x] Produce the no-code §9 spot-check evidence document in the user's exact block order: full requested diffs, migration content, 24-hour timeout status, seven proof answers with file-line citations, and a 14-row invariant-to-test mapping; do not modify source files or begin §1A-FU-04/§8. Historical stale tracking reconciled after later §1A-FU-04 acceptance and §8 implementation authorization.
 
 - [x] PORTAL-P3-S9-FU-01: Implement 24-hour auto-timeout cleanup for abandoned awaiting_approval turns with behavioral server coverage.
 - [x] PORTAL-P3-S9-FU-01: Add INV-S9-10 owner-facing forbidden-vocabulary behavioral test without silently renaming existing copy.
