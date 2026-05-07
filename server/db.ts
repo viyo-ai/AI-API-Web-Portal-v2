@@ -18,11 +18,17 @@ import {
   InsertTaskFile,
   InsertTaskMessageQueueItem,
   InsertUser,
+  InsertSkill,
+  Skill,
+  Task,
+  TaskSkillSelection,
   orchestrationTurns,
+  skills,
   taskEvents,
   taskFiles,
   taskGlobalFileLinks,
   taskMessageQueue,
+  taskSkillSelections,
   tasks,
   users,
 } from "../drizzle/schema";
@@ -650,6 +656,299 @@ export async function recordCredentialStatus(values: Omit<InsertCredentialStatus
 
   if (!result[0]) throw new Error("Failed to record credential status");
   return result[0];
+}
+
+
+async function getRequiredDb(operation: string) {
+  const db = await getDb();
+  if (!db) {
+    throw new Error(`Database not available for ${operation}.`);
+  }
+  return db;
+}
+
+export type SkillScope = "global" | "task-type" | "file-pattern" | "manual-only";
+export type SkillSource = "created" | "uploaded" | "official" | "github_imported" | "ai_built";
+export type TaskType = "code-write" | "refactor" | "test-write" | "planning" | "review" | "other";
+export type ResolvedSkillLoadReason =
+  | { kind: "always" }
+  | { kind: "task-type"; taskType: TaskType }
+  | { kind: "file-pattern"; pattern: string }
+  | { kind: "picked" };
+export type ResolvedSkill = Skill & { loadReason: ResolvedSkillLoadReason; displayTag: string };
+
+export function parseSkillJsonArray(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function parseSkillMetadata(value: string | null | undefined): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function slugifySkillName(name: string) {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 160) || "skill";
+}
+
+function nextPatchVersion(version: string) {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  if (!match) return "1.0.1";
+  return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`;
+}
+
+export function normalizeSkillInput(values: {
+  slug?: string;
+  name: string;
+  scope?: SkillScope;
+  content: string;
+  taskTypes?: string[];
+  filePatterns?: string[];
+  enabled?: boolean;
+  version?: string;
+  description?: string | null;
+  source?: SkillSource;
+  sourceMetadata?: Record<string, unknown> | null;
+  isOfficial?: boolean;
+}) {
+  const slug = slugifySkillName(values.slug || values.name);
+  const scope = values.scope ?? "manual-only";
+  const taskTypes = scope === "task-type" ? (values.taskTypes ?? []) : [];
+  const filePatterns = scope === "file-pattern" ? (values.filePatterns ?? []) : [];
+  return {
+    slug,
+    name: values.name.trim(),
+    scope,
+    content: values.content.trim(),
+    taskTypesJson: taskTypes.length ? JSON.stringify(taskTypes) : null,
+    filePatternsJson: filePatterns.length ? JSON.stringify(filePatterns) : null,
+    enabled: values.enabled ?? true,
+    version: values.version?.trim() || "1.0.0",
+    description: values.description?.trim() || null,
+    source: values.source ?? "created",
+    sourceMetadataJson: values.sourceMetadata ? JSON.stringify(values.sourceMetadata) : null,
+    isOfficial: values.isOfficial ?? false,
+  } satisfies Partial<InsertSkill>;
+}
+
+export async function createSkill(values: {
+  ownerUserId: number;
+  slug?: string;
+  name: string;
+  scope?: SkillScope;
+  content: string;
+  taskTypes?: string[];
+  filePatterns?: string[];
+  enabled?: boolean;
+  version?: string;
+  description?: string | null;
+  source?: SkillSource;
+  sourceMetadata?: Record<string, unknown> | null;
+  isOfficial?: boolean;
+}) {
+  const db = await getRequiredDb("creating Skill Library");
+  const now = Date.now();
+  const normalized = normalizeSkillInput(values);
+  const [result] = await db.insert(skills).values({ ...normalized, ownerUserId: values.ownerUserId, createdAt: now, updatedAt: now });
+  const id = Number(result.insertId);
+  const [skill] = await db.select().from(skills).where(eq(skills.id, id)).limit(1);
+  return skill;
+}
+
+export async function listSkillsForOwner(ownerUserId: number, includeDisabled = true, limit = 200) {
+  const db = await getRequiredDb("listing Skill Libraries");
+  const filters = [eq(skills.ownerUserId, ownerUserId)];
+  if (!includeDisabled) filters.push(eq(skills.enabled, true));
+  return db.select().from(skills).where(and(...filters)).orderBy(desc(skills.updatedAt)).limit(limit);
+}
+
+export async function listOfficialSkills(_ownerUserId: number, limit = 200) {
+  const db = await getRequiredDb("listing official Skill Libraries");
+  return db.select().from(skills).where(and(eq(skills.isOfficial, true), eq(skills.enabled, true))).orderBy(desc(skills.updatedAt)).limit(limit);
+}
+
+export async function getSkillForOwner(skillId: number, ownerUserId: number) {
+  const db = await getRequiredDb("loading Skill Library");
+  const [skill] = await db.select().from(skills).where(and(eq(skills.id, skillId), or(eq(skills.ownerUserId, ownerUserId), eq(skills.isOfficial, true)))).limit(1);
+  return skill;
+}
+
+export async function getSkillBySlugForOwner(slug: string, ownerUserId: number) {
+  const db = await getRequiredDb("loading Skill Library by slug");
+  const [skill] = await db.select().from(skills).where(and(eq(skills.ownerUserId, ownerUserId), eq(skills.slug, slug))).limit(1);
+  return skill;
+}
+
+export async function updateSkill(values: {
+  skillId: number;
+  ownerUserId: number;
+  name?: string;
+  version?: string;
+  description?: string | null;
+  content?: string;
+  enabled?: boolean;
+  scope?: SkillScope;
+  taskTypes?: string[];
+  filePatterns?: string[];
+  isOfficial?: boolean;
+}) {
+  const existing = await getSkillForOwner(values.skillId, values.ownerUserId);
+  if (!existing || existing.ownerUserId !== values.ownerUserId) return undefined;
+  const db = await getRequiredDb("updating Skill Library");
+  const contentChanged = typeof values.content === "string" && values.content !== existing.content;
+  const updateValues: Partial<InsertSkill> = { updatedAt: Date.now() };
+  if (typeof values.name === "string") updateValues.name = values.name.trim();
+  if ("description" in values) updateValues.description = values.description?.trim() || null;
+  if (typeof values.content === "string") updateValues.content = values.content.trim();
+  if (typeof values.enabled === "boolean") updateValues.enabled = values.enabled;
+  if (typeof values.isOfficial === "boolean") updateValues.isOfficial = values.isOfficial;
+  const nextScope = values.scope ?? existing.scope;
+  if (values.scope) updateValues.scope = values.scope;
+  if (values.taskTypes || values.scope) updateValues.taskTypesJson = nextScope === "task-type" ? JSON.stringify(values.taskTypes ?? parseSkillJsonArray(existing.taskTypesJson)) : null;
+  if (values.filePatterns || values.scope) updateValues.filePatternsJson = nextScope === "file-pattern" ? JSON.stringify(values.filePatterns ?? parseSkillJsonArray(existing.filePatternsJson)) : null;
+  if (typeof values.version === "string") updateValues.version = values.version.trim();
+  else if (contentChanged) updateValues.version = nextPatchVersion(existing.version);
+  await db.update(skills).set(updateValues).where(and(eq(skills.id, values.skillId), eq(skills.ownerUserId, values.ownerUserId)));
+  return getSkillForOwner(values.skillId, values.ownerUserId);
+}
+
+export async function deleteSkill(skillId: number, ownerUserId: number) {
+  const db = await getRequiredDb("deleting Skill Library");
+  await db.delete(taskSkillSelections).where(and(eq(taskSkillSelections.ownerUserId, ownerUserId), eq(taskSkillSelections.skillId, skillId)));
+  await db.delete(skills).where(and(eq(skills.id, skillId), eq(skills.ownerUserId, ownerUserId)));
+  return { success: true } as const;
+}
+
+export async function duplicateSkill(skillId: number, ownerUserId: number, overrides?: { source?: SkillSource; sourceMetadata?: Record<string, unknown> | null }) {
+  const original = await getSkillForOwner(skillId, ownerUserId);
+  if (!original) return undefined;
+  const baseSlug = `${original.slug}-copy`;
+  let slug = baseSlug;
+  let suffix = 2;
+  while (await getSkillBySlugForOwner(slug, ownerUserId)) {
+    slug = `${baseSlug}-${suffix++}`;
+  }
+  return createSkill({
+    ownerUserId,
+    slug,
+    name: `${original.name} copy`,
+    scope: original.scope,
+    content: original.content,
+    taskTypes: parseSkillJsonArray(original.taskTypesJson),
+    filePatterns: parseSkillJsonArray(original.filePatternsJson),
+    enabled: true,
+    version: original.version,
+    description: original.description,
+    source: overrides?.source ?? (original.isOfficial ? "official" : original.source),
+    sourceMetadata: overrides?.sourceMetadata ?? parseSkillMetadata(original.sourceMetadataJson),
+    isOfficial: false,
+  });
+}
+
+export async function upsertTaskSkillSelection(values: { taskId: number; ownerUserId: number; skillId: number; state: "picked" | "removed"; reason?: string | null }) {
+  const db = await getRequiredDb("saving task Skill Library selection");
+  const now = Date.now();
+  const [existing] = await db.select().from(taskSkillSelections).where(and(eq(taskSkillSelections.taskId, values.taskId), eq(taskSkillSelections.skillId, values.skillId), eq(taskSkillSelections.ownerUserId, values.ownerUserId))).limit(1);
+  if (existing) {
+    await db.update(taskSkillSelections).set({ state: values.state, reason: values.reason ?? null, updatedAt: now }).where(eq(taskSkillSelections.id, existing.id));
+    return { ...existing, state: values.state, reason: values.reason ?? null, updatedAt: now } as TaskSkillSelection;
+  }
+  const [result] = await db.insert(taskSkillSelections).values({ taskId: values.taskId, ownerUserId: values.ownerUserId, skillId: values.skillId, state: values.state, reason: values.reason ?? null, createdAt: now, updatedAt: now });
+  const [selection] = await db.select().from(taskSkillSelections).where(eq(taskSkillSelections.id, Number(result.insertId))).limit(1);
+  return selection;
+}
+
+export async function listTaskSkillSelections(taskId: number, ownerUserId: number) {
+  const db = await getRequiredDb("listing task Skill Library selections");
+  return db.select().from(taskSkillSelections).where(and(eq(taskSkillSelections.taskId, taskId), eq(taskSkillSelections.ownerUserId, ownerUserId)));
+}
+
+function inferTaskType(task: Task): TaskType {
+  const text = `${task.title} ${task.summary ?? ""}`.toLowerCase();
+  if (/\b(test|spec|coverage|vitest|jest)\b/.test(text)) return "test-write";
+  if (/\b(refactor|cleanup|clean up|rename|simplify)\b/.test(text)) return "refactor";
+  if (/\b(review|audit|qa|inspect)\b/.test(text)) return "review";
+  if (/\b(plan|design|architect|scope|prd)\b/.test(text)) return "planning";
+  if (/\b(code|build|implement|fix|feature|bug)\b/.test(text)) return "code-write";
+  return "other";
+}
+
+function wildcardToRegExp(pattern: string) {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, "__DOUBLE_STAR__")
+    .replace(/\*/g, "[^/]*")
+    .replace(/__DOUBLE_STAR__/g, ".*");
+  return new RegExp(`^${escaped}$`);
+}
+
+function matchesAnyFile(pattern: string, files: { relativePath: string }[]) {
+  try {
+    const regex = wildcardToRegExp(pattern);
+    return files.some((file) => regex.test(file.relativePath));
+  } catch {
+    return false;
+  }
+}
+
+export function renderResolvedSkillsPromptBlock(skillList: Array<Pick<ResolvedSkill, "slug" | "name" | "version" | "scope" | "content" | "displayTag">>) {
+  if (!skillList.length) return "";
+  const lines = skillList.map((skill, index) => {
+    const body = skill.content.slice(0, 6000);
+    return `Skill ${index + 1}: ${skill.name} v${skill.version} [${skill.displayTag}]\nSlug: ${skill.slug}\nScope: ${skill.scope}\nInstructions:\n${body}`;
+  });
+  return `AI Skill instructions loaded for this task. Follow these reusable owner-approved instructions after the project rule books and before the user's turn-specific request.\n\n${lines.join("\n\n---\n\n")}`;
+}
+
+export async function resolveSkillsForTask(values: { task: Task; ownerUserId: number; files: { relativePath: string }[] }) {
+  const [allSkills, selections] = await Promise.all([listSkillsForOwner(values.ownerUserId, false, 200), listTaskSkillSelections(values.task.id, values.ownerUserId)]);
+  const selectedBySkill = new Map(selections.map((selection) => [selection.skillId, selection]));
+  const inferredType = inferTaskType(values.task);
+  const resolved: ResolvedSkill[] = [];
+  for (const skill of allSkills) {
+    const selection = selectedBySkill.get(skill.id);
+    if (selection?.state === "removed") continue;
+    if (selection?.state === "picked") {
+      resolved.push({ ...skill, loadReason: { kind: "picked" }, displayTag: "Picked" });
+      continue;
+    }
+    if (skill.scope === "global") {
+      resolved.push({ ...skill, loadReason: { kind: "always" }, displayTag: "Always" });
+    } else if (skill.scope === "task-type") {
+      const taskTypes = parseSkillJsonArray(skill.taskTypesJson);
+      if (taskTypes.includes(inferredType)) resolved.push({ ...skill, loadReason: { kind: "task-type", taskType: inferredType }, displayTag: `Auto: ${taskTypeLabel(inferredType)}` });
+    } else if (skill.scope === "file-pattern") {
+      const pattern = parseSkillJsonArray(skill.filePatternsJson).find((candidate) => matchesAnyFile(candidate, values.files));
+      if (pattern) resolved.push({ ...skill, loadReason: { kind: "file-pattern", pattern }, displayTag: `Auto: matched ${pattern}` });
+    }
+  }
+  return { taskType: inferredType, skills: resolved };
+}
+
+export function taskTypeLabel(taskType: string) {
+  const labels: Record<string, string> = {
+    "code-write": "Writing code",
+    refactor: "Cleaning up code",
+    "test-write": "Writing tests",
+    planning: "Planning",
+    review: "Reviewing",
+    other: "Other",
+  };
+  return labels[taskType] ?? "Other";
 }
 
 export async function getLatestCredentialStatuses(ownerUserId: number) {

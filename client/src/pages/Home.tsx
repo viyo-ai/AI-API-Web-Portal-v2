@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import FilesystemPanel from "@/components/FilesystemPanel";
 import TerminalPanel from "@/components/TerminalPanel";
+import SkillLibrariesPanel from "./SkillLibraries";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import {
@@ -292,6 +293,7 @@ export default function Home() {
   const loginUrl = useMemo(() => getLoginUrl(), []);
   const utils = trpc.useUtils();
 
+  const [activeWorkspacePanel, setActiveWorkspacePanel] = useState<"tasks" | "skills">("tasks");
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [taskTitle, setTaskTitle] = useState("AI coding workshop task");
   const [composerText, setComposerText] = useState("");
@@ -924,6 +926,10 @@ export default function Home() {
             <Badge className="rounded-full border-emerald-200 bg-emerald-100 text-emerald-800">v2</Badge>
           </div>
           <p className="mt-2 text-xs leading-5 text-[#67675f]">Task-first production workspace with an explicit Auto, Kimi, or Claude route selector in the center composer.</p>
+          <div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl border border-[#deded8] bg-white p-1">
+            <Button type="button" variant="ghost" onClick={() => setActiveWorkspacePanel("tasks")} className={`h-9 rounded-xl text-xs ${activeWorkspacePanel === "tasks" ? "bg-[#1f1f1f] text-white hover:bg-black hover:text-white" : "text-[#66665f]"}`}>Tasks</Button>
+            <Button type="button" variant="ghost" onClick={() => setActiveWorkspacePanel("skills")} className={`h-9 rounded-xl text-xs ${activeWorkspacePanel === "skills" ? "bg-[#1f1f1f] text-white hover:bg-black hover:text-white" : "text-[#66665f]"}`}>Skills</Button>
+          </div>
         </div>
 
         <div className="space-y-3 border-b border-[#d9d8d1] p-4">
@@ -1102,12 +1108,12 @@ export default function Home() {
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#deded8] bg-white/80 px-5 py-4 backdrop-blur">
           <div>
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">
-              <MessageSquareText className="h-4 w-4" /> Center task thread
+              {activeWorkspacePanel === "skills" ? <Sparkles className="h-4 w-4" /> : <MessageSquareText className="h-4 w-4" />} {activeWorkspacePanel === "skills" ? "Skill Libraries" : "Center task thread"}
             </div>
-            <h1 className="mt-1 text-2xl font-semibold tracking-[-0.035em] text-[#20201d]">{selectedThread?.task.title ?? "Create or select a task"}</h1>
+            <h1 className="mt-1 text-2xl font-semibold tracking-[-0.035em] text-[#20201d]">{activeWorkspacePanel === "skills" ? "Reusable AI instructions" : selectedThread?.task.title ?? "Create or select a task"}</h1>
           </div>
 
-          {selectedBuildTarget ? (
+          {activeWorkspacePanel === "tasks" && selectedBuildTarget ? (
             <div className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -1155,6 +1161,10 @@ export default function Home() {
           </div>
         </header>
 
+        {activeWorkspacePanel === "skills" ? (
+          <SkillLibrariesPanel />
+        ) : (
+          <>
         <div className="min-h-0 flex-1 overflow-y-auto p-5" data-testid="center-task-thread-scroll">
           <div className="mx-auto max-w-4xl space-y-4">
             {selectedTaskId ? (
@@ -1345,6 +1355,8 @@ export default function Home() {
             {workspaceNotice ? <p className="mt-2 text-xs leading-5 text-[#66665f]" role="status" aria-live="polite">{workspaceNotice}</p> : null}
           </div>
         </footer>
+          </>
+        )}
       </section>
 
       <aside className="flex h-screen min-h-0 min-w-0 flex-col overflow-hidden border-l border-[#d9d8d1] bg-[#f0efeb] lg:col-span-2 xl:col-span-1">

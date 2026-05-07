@@ -1,8 +1,9 @@
 import { COOKIE_NAME } from "@shared/const";
+import { Buffer } from "node:buffer";
 import { z } from "zod";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
   appendTaskEvent,
   assertSafeRelativePath,
@@ -56,6 +57,22 @@ import {
   updateBuildTargetEnvMap,
   updateBuildTargetGovernanceSettings,
   updateTaskStatus,
+  createSkill,
+  deleteSkill,
+  duplicateSkill,
+  getSkillForOwner,
+  getSkillBySlugForOwner,
+  listOfficialSkills,
+  listSkillsForOwner,
+  listTaskSkillSelections,
+  parseSkillJsonArray,
+  parseSkillMetadata,
+  resolveSkillsForTask,
+  type SkillScope,
+  type SkillSource,
+  taskTypeLabel,
+  updateSkill,
+  upsertTaskSkillSelection,
 } from "./db";
 import {
   createWorkspaceDirectory,
@@ -70,7 +87,7 @@ import {
 import { cleanupWorkspace, cloneOrSyncBranch, getBuildBranchGitStatus, getBuildBranchWorkspacePath, testBuildTargetConnection, assertSafeBranchName, pushBranch } from "./buildRunner";
 import { storagePut } from "./storage";
 import { getUserWorkspaceRoot } from "./terminal";
-import { CLAUDE_DEFAULT_MODEL, CLAUDE_OWNER_MODEL_LABEL, orchestrateWithOpenAI, executeWrapperTurn, getWrapperRuntimeCredentialStates, KIMI_K26_CLOUDFLARE_MODEL, KIMI_OWNER_MODEL_LABEL, resolveEffectiveRoute } from "./wrapperLLM";
+import { CLAUDE_DEFAULT_MODEL, CLAUDE_OWNER_MODEL_LABEL, buildClaudeMessagesRequestBody, orchestrateWithOpenAI, executeWrapperTurn, getWrapperRuntimeCredentialStates, KIMI_K26_CLOUDFLARE_MODEL, KIMI_OWNER_MODEL_LABEL, resolveEffectiveRoute } from "./wrapperLLM";
 import { requestTurnStop } from "./wrapperLLM/stop-registry";
 import { loadGovernanceForTask, validateGovernanceFiles, type GovernanceLoadResult } from "./buildRunner/loadGovernance";
 
@@ -123,6 +140,179 @@ async function pushOwnedBuildBranch(branchId: number, ownerUserId: number) {
 }
 
 const routeModes = ["auto", "claude", "kimi", "dual"] as const;
+
+const skillScopes = ["global", "task-type", "file-pattern", "manual-only"] as const;
+const skillSources = ["created", "uploaded", "official", "github_imported", "ai_built"] as const;
+const skillTaskTypes = ["code-write", "refactor", "test-write", "planning", "review", "other"] as const;
+const semverPattern = /^\d+\.\d+\.\d+$/;
+const sourceMetadataSchema = z.record(z.string(), z.unknown()).nullable().optional();
+const skillCreateSchema = z.object({
+  slug: z.string().trim().min(1).max(160).optional(),
+  name: z.string().trim().min(1).max(220),
+  scope: z.enum(skillScopes).default("manual-only"),
+  content: z.string().trim().min(1).max(50000),
+  taskTypes: z.array(z.enum(skillTaskTypes)).default([]),
+  filePatterns: z.array(z.string().trim().min(1).max(300)).default([]),
+  enabled: z.boolean().default(true),
+  version: z.string().trim().regex(semverPattern, "Use semantic version format such as 1.0.0").default("1.0.0"),
+  description: z.string().trim().max(1000).nullable().optional(),
+  source: z.enum(skillSources).default("created"),
+  sourceMetadata: sourceMetadataSchema,
+});
+const skillUpdateSchema = skillCreateSchema.partial().extend({
+  skillId: z.number().int().positive(),
+  isOfficial: z.boolean().optional(),
+});
+const skillBuilderSystemPrompt = `You are helping a non-technical owner create a Skill for their AI build
+runner. Skills are short instruction packages that augment AI behavior on
+tasks.
+
+Ask the owner three to six short questions in plain English to understand:
+1. What behavior they want the AI to follow (described in their own words)
+2. When the skill should apply: every task / certain kinds of tasks /
+   certain files / only when manually picked
+3. What the skill should be called
+
+Use friendly tone. Avoid jargon. After gathering enough info, draft the
+skill and show the owner the final markdown content. Ask "Save this
+skill?" — if yes, return the structured JSON below. If they want changes,
+revise and re-show.
+
+Final return format (JSON only):
+{
+  "slug": "kebab-case-slug",
+  "name": "Friendly Name",
+  "description": "One paragraph",
+  "scope": "global" | "task-type" | "file-pattern" | "manual-only",
+  "taskTypes": [...],   // only if scope = task-type
+  "filePatterns": [...], // only if scope = file-pattern
+  "content": "<skill body in markdown>"
+}`;
+const githubPreviewSkillSchema = z.object({
+  id: z.string().min(1),
+  filePath: z.string().min(1),
+  commitSha: z.string().nullable().optional(),
+  skill: skillCreateSchema,
+});
+function serializeSkill(skill: any) {
+  return {
+    ...skill,
+    taskTypes: parseSkillJsonArray(skill.taskTypesJson),
+    filePatterns: parseSkillJsonArray(skill.filePatternsJson),
+    sourceMetadata: parseSkillMetadata(skill.sourceMetadataJson),
+  };
+}
+function slugifySkillImport(value: string) {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "skill";
+}
+function parseYamlScalar(raw: string): unknown {
+  const trimmed = raw.trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) return trimmed.slice(1, -1);
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) return trimmed.slice(1, -1).split(",").map((item) => parseYamlScalar(item)).filter(Boolean);
+  return trimmed;
+}
+function parseSkillFrontmatter(text: string, filename: string, source: SkillSource): z.infer<typeof skillCreateSchema> {
+  const match = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
+  if (!match) throw new Error(`upload-error: missing YAML frontmatter in '${filename}'`);
+  const [, yaml, body] = match;
+  const data: Record<string, unknown> = {};
+  let currentListKey: string | null = null;
+  for (const rawLine of yaml.split(/\r?\n/)) {
+    const line = rawLine.trimEnd();
+    if (!line.trim() || line.trim().startsWith("#")) continue;
+    const listItem = line.match(/^\s*-\s*(.+)$/);
+    if (listItem && currentListKey) {
+      const existing = Array.isArray(data[currentListKey]) ? data[currentListKey] as unknown[] : [];
+      data[currentListKey] = [...existing, parseYamlScalar(listItem[1])];
+      continue;
+    }
+    const keyValue = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!keyValue) continue;
+    const [, key, value] = keyValue;
+    if (value === "") {
+      data[key] = [];
+      currentListKey = key;
+    } else {
+      data[key] = parseYamlScalar(value);
+      currentListKey = null;
+    }
+  }
+  const name = typeof data.name === "string" ? data.name.trim() : "";
+  if (!name) throw new Error(`upload-error: missing required field 'name' in '${filename}'`);
+  const parsed = skillCreateSchema.parse({
+    slug: typeof data.slug === "string" && data.slug.trim() ? slugifySkillImport(data.slug) : slugifySkillImport(name),
+    name,
+    description: typeof data.description === "string" ? data.description : null,
+    scope: typeof data.scope === "string" ? data.scope : "manual-only",
+    taskTypes: Array.isArray(data.taskTypes) ? data.taskTypes : [],
+    filePatterns: Array.isArray(data.filePatterns) ? data.filePatterns : [],
+    content: body.trim(),
+    enabled: typeof data.enabled === "boolean" ? data.enabled : true,
+    version: typeof data.version === "string" ? data.version : "1.0.0",
+    source,
+  });
+  if (!parsed.content) throw new Error(`upload-error: missing skill body in '${filename}'`);
+  return parsed;
+}
+function parseGitHubRepoUrl(repoUrl: string) {
+  const match = repoUrl.trim().match(/^https?:\/\/github\.com\/([^/\s]+)\/([^/\s#?]+?)(?:\.git)?(?:[/?#].*)?$/i);
+  if (!match) throw new Error("Enter a GitHub repo URL such as https://github.com/org/repo");
+  return { owner: match[1], repo: match[2] };
+}
+async function githubJson(url: string, token?: string) {
+  const response = await fetch(url, { headers: { accept: "application/vnd.github+json", ...(token ? { authorization: `Bearer ${token}` } : {}) } });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(body?.message ?? `GitHub request failed: ${response.status}`);
+  return body;
+}
+async function previewGithubSkills(input: { repoUrl: string; path?: string; branch?: string; githubToken?: string }) {
+  const { owner, repo } = parseGitHubRepoUrl(input.repoUrl);
+  const repoInfo = await githubJson(`https://api.github.com/repos/${owner}/${repo}`, input.githubToken) as { default_branch?: string };
+  const branch = input.branch?.trim() || repoInfo.default_branch || "main";
+  const tree = await githubJson(`https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`, input.githubToken) as { tree?: Array<{ path?: string; type?: string; sha?: string }> };
+  const normalizedPath = input.path?.replace(/^\/+|\/+$/g, "");
+  const files = (tree.tree ?? []).filter((entry) => entry.type === "blob" && entry.path && /\.(md|skill)$/i.test(entry.path) && (!normalizedPath || entry.path === normalizedPath || entry.path.startsWith(`${normalizedPath}/`)));
+  const found: Array<{ id: string; filePath: string; commitSha: string | null; skill: z.infer<typeof skillCreateSchema> }> = [];
+  for (const file of files.slice(0, 50)) {
+    if (!file.path || !file.sha) continue;
+    try {
+      const blob = await githubJson(`https://api.github.com/repos/${owner}/${repo}/git/blobs/${file.sha}`, input.githubToken) as { content?: string; encoding?: string };
+      if (blob.encoding !== "base64" || !blob.content) continue;
+      const text = Buffer.from(blob.content.replace(/\s/g, ""), "base64").toString("utf8");
+      const skill = parseSkillFrontmatter(text, file.path, "github_imported");
+      found.push({ id: file.sha, filePath: file.path, commitSha: file.sha, skill });
+    } catch {
+      // Invalid skill frontmatter is skipped for GitHub preview; upload surfaces file-level errors.
+    }
+  }
+  return found;
+}
+async function invokeClaudeSkillBuilder(messages: Array<{ role: "user" | "assistant"; content: string }>) {
+  const apiKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+  if (!apiKey) throw new Error("Claude requires CLAUDE_API_KEY on the server.");
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify(buildClaudeMessagesRequestBody({ system: skillBuilderSystemPrompt, messages, model: CLAUDE_DEFAULT_MODEL, maxTokens: 4096 })),
+  });
+  const body = await response.json().catch(() => null) as { content?: Array<{ text?: string }>; error?: { message?: string } } | null;
+  if (!response.ok) throw new Error(body?.error?.message ?? `Claude request failed: ${response.status}`);
+  return (body?.content ?? []).map((part) => part.text ?? "").join("\n").trim();
+}
+function extractSkillDraftJson(text: string) {
+  const fenced = text.match(/```json\s*([\s\S]*?)```/i)?.[1];
+  const candidates = [fenced, text.match(/\{[\s\S]*\}/)?.[0]].filter(Boolean) as string[];
+  for (const candidate of candidates) {
+    try {
+      return skillCreateSchema.partial().parse(JSON.parse(candidate));
+    } catch {
+      // Ignore non-final conversational drafts.
+    }
+  }
+  return null;
+}
 const taskStatuses = ["active", "waiting", "blocked", "completed", "archived", "error"] as const;
 const memoryCategories = ["decision", "feature", "research", "past_task"] as const;
 const memoryConfidences = ["low", "medium", "high", "verified"] as const;
@@ -673,6 +863,116 @@ export const appRouter = router({
         const branches = await listBuildBranchesForTarget(input.targetId, ctx.user.id, 100);
         return { target, branches };
       }),
+  }),
+
+  skills: router({
+    aiDraft: protectedProcedure.input(z.object({ messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().trim().min(1).max(8000) })).min(1).max(20) })).mutation(async ({ input }) => {
+      const content = await invokeClaudeSkillBuilder(input.messages);
+      return { content, draft: extractSkillDraftJson(content) };
+    }),
+    previewGithubImport: protectedProcedure.input(z.object({ repoUrl: z.string().trim().url().max(1024), path: z.string().trim().max(1024).optional(), branch: z.string().trim().max(160).optional(), githubToken: z.string().trim().max(500).optional() })).mutation(async ({ input }) => ({ skills: await previewGithubSkills(input) })),
+    importGithubSelected: protectedProcedure.input(z.object({ repoUrl: z.string().trim().url().max(1024), path: z.string().trim().max(1024).optional(), branch: z.string().trim().max(160).optional(), selected: z.array(githubPreviewSkillSchema).min(1).max(50) })).mutation(async ({ ctx, input }) => {
+      const created = [];
+      for (const item of input.selected) {
+        let payload = {
+          ...item.skill,
+          source: "github_imported" as const,
+          sourceMetadata: {
+            repoUrl: input.repoUrl,
+            sourcePath: item.filePath,
+            importedAt: new Date().toISOString(),
+            importCommitSha: item.commitSha ?? null,
+          },
+        };
+        const existing = payload.slug ? await getSkillBySlugForOwner(payload.slug, ctx.user.id) : null;
+        if (existing) payload = { ...payload, slug: payload.slug + "-" + Date.now() };
+        const skill = await createSkill({ ...payload, ownerUserId: ctx.user.id, scope: payload.scope as SkillScope, source: payload.source as SkillSource });
+        created.push(serializeSkill(skill));
+      }
+      return { created };
+    }),
+    list: protectedProcedure.input(z.object({ includeDisabled: z.boolean().default(true), includeOfficial: z.boolean().default(true), limit: z.number().int().min(1).max(200).default(200) }).optional()).query(async ({ ctx, input }) => {
+      const rows = await listSkillsForOwner(ctx.user.id, input?.includeDisabled ?? true, input?.limit ?? 200);
+      return rows.map(serializeSkill);
+    }),
+    officialCatalog: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(200).default(200) }).optional()).query(async ({ ctx, input }) => {
+      const rows = await listOfficialSkills(ctx.user.id, input?.limit ?? 200);
+      return rows.map(serializeSkill);
+    }),
+    get: protectedProcedure.input(z.object({ skillId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      const skill = await getSkillForOwner(input.skillId, ctx.user.id);
+      if (!skill) throw new Error("Skill not found or not available to this owner");
+      return serializeSkill(skill);
+    }),
+    create: protectedProcedure.input(skillCreateSchema).mutation(async ({ ctx, input }) => {
+      const existing = input.slug ? await getSkillBySlugForOwner(input.slug, ctx.user.id) : undefined;
+      if (existing) throw new Error(`A skill with the slug '${input.slug}' already exists. Choose replace or create as new copy.`);
+      const skill = await createSkill({ ...input, ownerUserId: ctx.user.id, scope: input.scope as SkillScope, source: input.source as SkillSource });
+      return serializeSkill(skill);
+    }),
+    replaceBySlug: protectedProcedure.input(skillCreateSchema.extend({ slug: z.string().trim().min(1).max(160) })).mutation(async ({ ctx, input }) => {
+      const existing = await getSkillBySlugForOwner(input.slug, ctx.user.id);
+      if (!existing) {
+        const skill = await createSkill({ ...input, ownerUserId: ctx.user.id, scope: input.scope as SkillScope, source: input.source as SkillSource });
+        return serializeSkill(skill);
+      }
+      const skill = await updateSkill({ skillId: existing.id, ownerUserId: ctx.user.id, name: input.name, version: input.version, description: input.description, content: input.content, enabled: input.enabled, scope: input.scope as SkillScope, taskTypes: input.taskTypes, filePatterns: input.filePatterns });
+      if (!skill) throw new Error("Skill could not be replaced");
+      return serializeSkill(skill);
+    }),
+    update: protectedProcedure.input(skillUpdateSchema).mutation(async ({ ctx, input }) => {
+      const skill = await updateSkill({ ...input, ownerUserId: ctx.user.id, scope: input.scope as SkillScope | undefined });
+      if (!skill) throw new Error("Skill not found or not editable by this owner");
+      return serializeSkill(skill);
+    }),
+    setEnabled: protectedProcedure.input(z.object({ skillId: z.number().int().positive(), enabled: z.boolean() })).mutation(async ({ ctx, input }) => {
+      const skill = await updateSkill({ skillId: input.skillId, ownerUserId: ctx.user.id, enabled: input.enabled });
+      if (!skill) throw new Error("Skill not found or not editable by this owner");
+      return serializeSkill(skill);
+    }),
+    duplicate: protectedProcedure.input(z.object({ skillId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      const skill = await duplicateSkill(input.skillId, ctx.user.id);
+      if (!skill) throw new Error("Skill not found or not available to duplicate");
+      return serializeSkill(skill);
+    }),
+    forkOfficial: protectedProcedure.input(z.object({ skillId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      const original = await getSkillForOwner(input.skillId, ctx.user.id);
+      if (!original || !original.isOfficial) throw new Error("Official skill not found");
+      const skill = await duplicateSkill(input.skillId, ctx.user.id, { source: "official", sourceMetadata: { officialCatalogId: input.skillId, catalogVersion: original.version } });
+      if (!skill) throw new Error("Official skill could not be added to your library");
+      return serializeSkill(skill);
+    }),
+    delete: protectedProcedure.input(z.object({ skillId: z.number().int().positive() })).mutation(async ({ ctx, input }) => deleteSkill(input.skillId, ctx.user.id)),
+    markOfficial: adminProcedure.input(z.object({ skillId: z.number().int().positive(), isOfficial: z.boolean() })).mutation(async ({ ctx, input }) => {
+      const skill = await updateSkill({ skillId: input.skillId, ownerUserId: ctx.user.id, isOfficial: input.isOfficial });
+      if (!skill) throw new Error("Skill not found or not editable by this admin owner");
+      return serializeSkill(skill);
+    }),
+    listForTask: protectedProcedure.input(z.object({ taskId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      const task = await getTaskForOwner(input.taskId, ctx.user.id);
+      if (!task) throw new Error("Task not found or not owned by the authenticated user");
+      const files = await listTaskFiles(task.id, ctx.user.id, 200);
+      const resolved = await resolveSkillsForTask({ task, ownerUserId: ctx.user.id, files });
+      const selections = await listTaskSkillSelections(task.id, ctx.user.id);
+      return {
+        taskType: resolved.taskType,
+        taskTypeLabel: taskTypeLabel(resolved.taskType),
+        skills: resolved.skills.map(serializeSkill),
+        selections,
+      };
+    }),
+    pickForTask: protectedProcedure.input(z.object({ taskId: z.number().int().positive(), skillId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      const task = await getTaskForOwner(input.taskId, ctx.user.id);
+      const skill = await getSkillForOwner(input.skillId, ctx.user.id);
+      if (!task || !skill) throw new Error("Task or skill not found for this owner");
+      return upsertTaskSkillSelection({ taskId: input.taskId, ownerUserId: ctx.user.id, skillId: input.skillId, state: "picked", reason: "Owner picked" });
+    }),
+    removeForTask: protectedProcedure.input(z.object({ taskId: z.number().int().positive(), skillId: z.number().int().positive(), reason: z.string().trim().max(160).optional() })).mutation(async ({ ctx, input }) => {
+      const task = await getTaskForOwner(input.taskId, ctx.user.id);
+      const skill = await getSkillForOwner(input.skillId, ctx.user.id);
+      if (!task || !skill) throw new Error("Task or skill not found for this owner");
+      return upsertTaskSkillSelection({ taskId: input.taskId, ownerUserId: ctx.user.id, skillId: input.skillId, state: "removed", reason: input.reason ?? "Owner removed" });
+    }),
   }),
   buildTargets: router({
     list: protectedProcedure.input(z.object({ includeArchived: z.boolean().default(false), limit: z.number().int().min(1).max(100).default(50) }).optional()).query(async ({ ctx, input }) => listBuildTargetsForOwner(ctx.user.id, input?.includeArchived ?? false, input?.limit ?? 50)),

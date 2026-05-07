@@ -274,3 +274,15 @@
 - [x] Run §3A validation gate: pnpm check, pnpm test with no skipped tests, and pnpm build.
 - [x] Append §3A closeout evidence to portal-build-log.md.
 - [x] Commit and push §3A only, then stop for PO review before starting rewritten §3 Skills or §1A wizard.
+
+## Phase 2 Rewritten §3 — Skill Libraries
+
+- [x] Re-ingest `PHASE_2_SECTION_3_REWRITE.md` §3 and required VIYO protocols after §3A approval, with §1A explicitly deferred.
+- [x] Discard or avoid any paused Section 3 work that does not fit the revised Manus-style Skills design.
+- [x] Implement Skill Library persistence and server contracts needed for official skills, uploaded skills, AI-built skills, GitHub-imported skills, and project selection.
+- [x] Build a Manus-style Skill Libraries card-grid UI with exactly four creation paths: Build with AI, Upload, Add from official, and Import from GitHub.
+- [x] Wire selected Skill Libraries into project-mode execution without altering accepted §3A vocabulary or Section 2 Project rule book ordering.
+- [x] Add focused §3 acceptance and regression tests for persistence, server contracts, four creation paths, UI validation, prompt integration, and §3A/Section 2 non-regression.
+- [x] Run rewritten §3 validation gate: `pnpm check`, `pnpm test` with no skipped tests, and `pnpm build`.
+- [x] Append rewritten §3 closeout evidence to `portal-build-log.md`.
+- [x] Commit and push rewritten §3 only, report standalone `Commit URL: https://github.com/viyo-ai/AI-API-Web-Portal-v2/commit/<full-SHA>`, then stop before §1A.

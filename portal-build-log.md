@@ -41,3 +41,17 @@ Product Owner boundary: Section 2 is complete for review. Section 3 has not been
 | Automated validation | Passed | `pnpm check`, `pnpm test` with 22 files and 95 tests passing, and `pnpm build` completed successfully. |
 
 Product Owner boundary: §3A is complete for review. Rewritten §3 Skill Libraries and original §1A wizard work have not been started and must remain paused until Product Owner approval is received.
+
+## Phase 2 Rewritten §3 Complete — Skill Libraries
+Rewritten §3 from `PHASE_2_SECTION_3_REWRITE.md` is complete as the approved Skill Libraries section after §3A acceptance. The implementation adds an owner-facing Skill Libraries workspace with a Manus-style card grid, four approved creation paths, and server-backed persistence/import flows while preserving accepted §3A vocabulary and Section 2 Project rule book ordering.
+
+| Rewritten §3 acceptance area | Result | Evidence |
+|---|---|---|
+| Four creation paths | Passed | Skill Libraries supports Build with AI, Upload a skill, Add from official, and Import from GitHub from the owner-facing workspace. |
+| Skill persistence and contracts | Passed | Added additive Skill Library persistence, task selection records, official/catalog duplication, uploaded/AI/GitHub source metadata, and tRPC procedures for list/create/update/delete/selection/import flows. |
+| Manus-style Skill Libraries UI | Passed | Added `client/src/pages/SkillLibraries.tsx` with rounded card-grid browsing, source/scope/status badges, filters, detail tabs, and creation dialogs. |
+| Prompt integration | Passed | Selected and auto-resolved Skill Libraries are rendered after Project rule books and before the user turn-specific request, preserving accepted Section 2 ordering. |
+| Regression coverage | Passed | Added `server/section3.skills.contract.test.ts` covering schema, backend procedure surface, creation sources, prompt integration, card-grid creation paths, and §3A/Section 2 non-regression. |
+| Automated validation | Passed | `pnpm check`, `pnpm test` with 23 files and 101 tests passing, and `pnpm build` completed successfully. Browser smoke loaded the OAuth-protected app shell; authenticated workspace UI remains covered by automated tests because the browser session was not logged into Manus OAuth. |
+
+Product Owner boundary: rewritten §3 is complete for review. §1A has not been started and must remain paused until Product Owner approval is received.

@@ -242,6 +242,51 @@ export const taskFiles = mysqlTable(
   }),
 );
 
+export const skills = mysqlTable(
+  "skills",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerUserId: int("ownerUserId").notNull(),
+    slug: varchar("slug", { length: 160 }).notNull(),
+    name: varchar("name", { length: 220 }).notNull(),
+    scope: mysqlEnum("scope", ["global", "task-type", "file-pattern", "manual-only"]).default("manual-only").notNull(),
+    content: longtext("content").notNull(),
+    taskTypesJson: longtext("taskTypesJson"),
+    filePatternsJson: longtext("filePatternsJson"),
+    enabled: boolean("enabled").default(true).notNull(),
+    version: varchar("version", { length: 40 }).default("1.0.0").notNull(),
+    description: text("description"),
+    source: mysqlEnum("source", ["created", "uploaded", "official", "github_imported", "ai_built"]).default("created").notNull(),
+    sourceMetadataJson: longtext("sourceMetadataJson"),
+    isOfficial: boolean("isOfficial").default(false).notNull(),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+    updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
+  },
+  (table) => ({
+    ownerSlugUnique: uniqueIndex("skills_owner_slug_unique").on(table.ownerUserId, table.slug),
+    ownerEnabledIdx: index("skills_owner_enabled_idx").on(table.ownerUserId, table.enabled),
+    officialIdx: index("skills_official_idx").on(table.isOfficial, table.enabled),
+  }),
+);
+
+export const taskSkillSelections = mysqlTable(
+  "task_skill_selections",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    taskId: int("taskId").notNull(),
+    ownerUserId: int("ownerUserId").notNull(),
+    skillId: int("skillId").notNull(),
+    state: mysqlEnum("state", ["picked", "removed"]).default("picked").notNull(),
+    reason: varchar("reason", { length: 160 }),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+    updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
+  },
+  (table) => ({
+    taskSkillUnique: uniqueIndex("task_skill_selections_task_skill_unique").on(table.taskId, table.skillId),
+    ownerTaskIdx: index("task_skill_selections_owner_task_idx").on(table.ownerUserId, table.taskId),
+  }),
+);
+
 export const taskMessageQueue = mysqlTable(
   "task_message_queue",
   {
@@ -298,5 +343,9 @@ export type TaskFile = typeof taskFiles.$inferSelect;
 export type InsertTaskFile = typeof taskFiles.$inferInsert;
 export type CredentialStatusSnapshot = typeof credentialStatusSnapshots.$inferSelect;
 export type InsertCredentialStatusSnapshot = typeof credentialStatusSnapshots.$inferInsert;
+export type Skill = typeof skills.$inferSelect;
+export type InsertSkill = typeof skills.$inferInsert;
+export type TaskSkillSelection = typeof taskSkillSelections.$inferSelect;
+export type InsertTaskSkillSelection = typeof taskSkillSelections.$inferInsert;
 export type TaskMessageQueueItem = typeof taskMessageQueue.$inferSelect;
 export type InsertTaskMessageQueueItem = typeof taskMessageQueue.$inferInsert;
