@@ -134,7 +134,7 @@ let mockGlobalFiles: Array<{ id: number; taskId: null; scope: "global"; displayN
     createdAt: 1777999300000,
   },
 ];
-let mockAttachedGlobalFiles: Array<{ id: number; taskId: number; globalFileId: number; attachedLabel: string; file: (typeof mockGlobalFiles)[number] }> = [];
+let mockAttachedGlobalFiles: Array<{ id: number; taskId: number; globalFileId: number; attachedLabel: string; source: "root_default" | "project" | "manual"; file: (typeof mockGlobalFiles)[number] }> = [];
 let mockMemory: Array<{ id: number; title: string; category: string; content: string }> = [
   { id: 88, title: "No silent fallback", category: "decision", content: "Missing Claude or Kimi credentials must block explicitly." },
 ];

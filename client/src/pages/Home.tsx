@@ -114,8 +114,15 @@ type AttachedGlobalFileRecord = {
   globalFileId: number;
   taskId: number;
   attachedLabel?: string | null;
+  source: "root_default" | "project" | "manual";
   file: TaskFileRecord;
 };
+
+function attachedGlobalFileSourceLabel(source: AttachedGlobalFileRecord["source"]) {
+  if (source === "root_default") return "Root default";
+  if (source === "project") return "Project";
+  return "Manual";
+}
 
 function fileNameFromPath(relativePath: string) {
   return relativePath.split("/").filter(Boolean).pop() || relativePath || "Untitled file";
@@ -855,6 +862,7 @@ export default function Home() {
       title: cleanTitle,
       summary: "Task-first v2 workspace item created from the plain-English AI coding workshop.",
       routeMode,
+      buildTargetId: selectedBuildTargetId ?? undefined,
     });
     if (!created) return null;
     setSelectedTaskId(created.task.id);
@@ -872,7 +880,12 @@ export default function Home() {
     const taskId = selectedTaskId ?? (await createTaskRecordOnly());
     if (!taskId) return;
     const queued = hasActiveGeneration;
-    await submitMessage.mutateAsync({ taskId, message: cleanMessage, routeMode });
+    await submitMessage.mutateAsync({
+      taskId,
+      message: cleanMessage,
+      routeMode,
+      buildTargetId: selectedBuildTargetId ?? selectedTask?.buildTargetId ?? undefined,
+    });
     setComposerText("");
     setWorkspaceNotice(queued ? "Message queued. It will be sent automatically after the active generation finishes." : "Message sent to the task.");
     await refreshWorkspace();
@@ -1767,6 +1780,7 @@ export default function Home() {
                             <a key={link.id} href={link.file.storageUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-lg bg-white/80 px-2 py-2 text-[#345343] hover:bg-white" aria-label={`Open attached Global File ${link.file.relativePath}`}>
                               <File className="h-3.5 w-3.5 text-emerald-600" />
                               <span className="min-w-0 flex-1 truncate">{link.attachedLabel ?? link.file.displayName ?? fileNameFromPath(link.file.relativePath)}</span>
+                              <span className="hidden text-[10px] text-[#687568] sm:inline">Source: {attachedGlobalFileSourceLabel(link.source)}</span>
                               <Badge variant="outline" className="rounded-full border-emerald-200 text-[10px]">Global</Badge>
                             </a>
                         ))}

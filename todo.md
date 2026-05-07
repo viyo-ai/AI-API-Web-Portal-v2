@@ -321,3 +321,6 @@
 - [x] §4.5 prep cleanup: on `agent-work/s4-5-prep-inputs`, delete `PORTAL_CLAUDE.md` and `PORTAL_OPERATING_PRINCIPLES.md`, add `CLAUDE.md`, `FOUNDATION_LOCK.md`, `BULLET_1_DIRECTIVE.md`, and `CURRENT_BULLET.txt` from attachments, verify copy integrity, commit and push without beginning §4.5 implementation.
 
 - [x] Confirmed `PORTAL-P2-S4-5-PREP-02` cleanup: delete `PORTAL_CLAUDE.md` and `PORTAL_OPERATING_PRINCIPLES.md`, add only `CLAUDE.md`, `FOUNDATION_LOCK.md`, `BULLET_1_DIRECTIVE.md`, and `CURRENT_BULLET.txt`, push to `agent-work/s4-5-prep-inputs`, and hold §4.5 implementation until Product Owner acceptance.
+
+- [x] §4.5 implementation: produce `.taskmaster/docs/ingestion-evidence/PORTAL_PHASE_2_DIRECTIVE-S4-5-ingestion.md` before code changes, implement the nine `INV-S4-5-XX` invariants, include four root Global Files as Portal-wide defaults that load before Project files, run all required validation gates, push with `[PORTAL-P2-S4-5-XX]`, and hold for Product Owner sign-off without starting §1A-FU-04 or §8.
+- [x] §4.5 Project-to-task wiring backend, UI, migration, and regression contracts

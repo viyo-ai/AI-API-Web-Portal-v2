@@ -33,12 +33,24 @@ const dbMocks = vi.hoisted(() => ({
   renameTask: vi.fn(),
   searchMemory: vi.fn(),
   updateTaskStatus: vi.fn(),
+  autoAttachRootGlobalFiles: vi.fn(),
   assertSafeRelativePath: vi.fn((relativePath: string) => {
     const normalized = relativePath.trim().replace(/\\/g, "/");
     if (!normalized) throw new Error("File path is required");
     if (normalized.startsWith("/") || normalized.includes("..") || normalized.includes("//")) throw new Error("Unsafe file path");
     return normalized;
   }),
+}));
+
+const governanceMocks = vi.hoisted(() => ({
+  loadGovernanceForTask: vi.fn(async () => ({
+    documents: [],
+    missingRequired: [],
+    skippedOptional: [],
+    loadDurationMs: 0,
+    budgetEnforcementEnabled: false,
+  })),
+  validateGovernanceFiles: vi.fn((files: unknown) => ({ files, errors: [] })),
 }));
 
 const wrapperMocks = vi.hoisted(() => ({
@@ -73,6 +85,7 @@ const wrapperMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./db", () => dbMocks);
+vi.mock("./buildRunner/loadGovernance", () => governanceMocks);
 vi.mock("./wrapperLLM", () => wrapperMocks);
 
 import { appRouter } from "./routers";
@@ -115,6 +128,13 @@ const ownedTask = {
 describe("v2 task ownership and credential-gate security", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    governanceMocks.loadGovernanceForTask.mockResolvedValue({
+      documents: [],
+      missingRequired: [],
+      skippedOptional: [],
+      loadDurationMs: 0,
+      budgetEnforcementEnabled: false,
+    });
     wrapperMocks.getWrapperRuntimeCredentialStates.mockReturnValue([
       { provider: "claude", status: "missing", configured: false, reason: "Missing ANTHROPIC_API_KEY or CLAUDE_API_KEY." },
       { provider: "kimi", status: "missing", configured: false, reason: "Missing Cloudflare Workers AI credentials." },
@@ -128,6 +148,7 @@ describe("v2 task ownership and credential-gate security", () => {
     dbMocks.listTaskFiles.mockResolvedValue([]);
     dbMocks.listGlobalFilesForOwner.mockResolvedValue([]);
     dbMocks.listQueuedMessages.mockResolvedValue([]);
+    dbMocks.autoAttachRootGlobalFiles.mockResolvedValue({ attached: [], missing: [] });
     dbMocks.markQueuedMessagesProcessing.mockResolvedValue([]);
     dbMocks.markQueuedMessagesSent.mockResolvedValue(undefined);
     dbMocks.findActiveTurnForTask.mockResolvedValue(null);

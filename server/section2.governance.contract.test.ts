@@ -52,12 +52,12 @@ describe("Section 2 per-task governance auto-load contracts", () => {
     const requiredHuge = "r".repeat(260_000);
     const optionalHuge = "o".repeat(140_000);
     const documents: LoadedGovernanceDocument[] = [
-      { path: "docs/required.md", resolvedPath: "docs/required.md", content: requiredHuge, required: true },
-      { path: "docs/optional.md", resolvedPath: "docs/optional.md", content: optionalHuge, required: false },
+      { path: "docs/required.md", resolvedPath: "docs/required.md", content: requiredHuge, required: true, source: "project", sourceLabel: "Project" },
+      { path: "docs/optional.md", resolvedPath: "docs/optional.md", content: optionalHuge, required: false, source: "project", sourceLabel: "Project" },
     ];
     const result = enforceGovernanceBudget({ documents, provider: "kimi", enforcementEnabled: true, budgetTokens: 1_000 });
-    expect(result.droppedOptional).toContain("docs/optional.md");
-    expect(result.truncated).toContain("docs/required.md");
+    expect(result.droppedOptional).toContain("Project: docs/optional.md");
+    expect(result.truncated).toContain("Project: docs/required.md");
     expect(result.estimatedTokens).toBeLessThanOrEqual(1_000);
     expect(result.documents.some((document) => document.content.includes("truncated by portal"))).toBe(true);
   });
@@ -65,10 +65,19 @@ describe("Section 2 per-task governance auto-load contracts", () => {
   it("renders loaded rule book documents into an authoritative provider prompt block", () => {
     const block = renderGovernanceBlock({
       targetName: "VIYO",
-      documents: [{ path: "docs/governance.md", resolvedPath: "docs/governance.md", content: "Use the approved architecture.", required: true }],
+      documents: [
+        {
+          path: "docs/governance.md",
+          resolvedPath: "docs/governance.md",
+          content: "Use the approved architecture.",
+          required: true,
+          source: "project",
+          sourceLabel: "Project",
+        },
+      ],
     });
     expect(block).toContain("VIYO build pipeline");
-    expect(block).toContain("=== docs/governance.md ===");
+    expect(block).toContain("=== docs/governance.md [source: Project] ===");
     expect(block).toContain("The following rule book documents are authoritative");
     expect(block).toContain("Do not modify any of the rule book documents");
   });

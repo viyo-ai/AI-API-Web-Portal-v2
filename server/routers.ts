@@ -17,6 +17,7 @@ import {
   appendTaskEvent,
   assertSafeRelativePath,
   attachGlobalFileToTask,
+  autoAttachRootGlobalFiles,
   createBuildBranch,
   createBuildTarget,
   updateBuildTarget,
@@ -47,6 +48,7 @@ import {
   listGlobalFileLinksForTask,
   listGlobalFilesForOwner,
   listMemoryByCategory,
+  linkTaskToBuildTarget,
   listTaskEvents,
   listTaskFiles,
   listTasksForOwner,
@@ -979,6 +981,41 @@ function isModelIdentityQuestion(message: string) {
   );
 }
 
+function buildAutoBranchName(taskId: number, taskTitle: string) {
+  const slug =
+    taskTitle
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "task";
+  return assertSafeBranchName(`agent-work/task-${taskId}-${slug}`);
+}
+
+async function autoWireProjectForTask(params: {
+  taskId: number;
+  ownerUserId: number;
+  buildTargetId?: number | null;
+}) {
+  await autoAttachRootGlobalFiles(params.taskId, params.ownerUserId);
+  if (!params.buildTargetId) return getTaskForOwner(params.taskId, params.ownerUserId);
+  const target = await getBuildTargetForOwner(params.buildTargetId, params.ownerUserId);
+  if (!target || target.status !== "active") {
+    throw new Error("Project not found or not owned by the authenticated user");
+  }
+  await linkTaskToBuildTarget(params.taskId, params.ownerUserId, target.id);
+  const task = await getTaskForOwner(params.taskId, params.ownerUserId);
+  if (!task) throw new Error("Task not found after Project auto-wiring");
+  if (task.buildBranchId) return task;
+  const branch = await createBuildBranchWithIsolatedWorkspace({
+    buildTargetId: target.id,
+    ownerUserId: params.ownerUserId,
+    branchName: buildAutoBranchName(task.id, task.title),
+    baseBranch: target.defaultBaseBranch,
+    taskId: task.id,
+  });
+  return linkTaskToBuildBranch(task.id, params.ownerUserId, branch.id);
+}
+
 function modelIdentityAnswer(route: RouteMode) {
   if (route === "claude") {
     return `You are using Claude mode: ${CLAUDE_OWNER_MODEL_LABEL} through the Claude API. Internal model id: ${CLAUDE_DEFAULT_MODEL}.`;
@@ -1153,16 +1190,8 @@ async function runGenerationTurn(input: {
     );
   }
 
-  const governance: GovernanceLoadResult = input.task.buildBranchId
-    ? await loadGovernanceForTask(input.task.id)
-    : {
-        documents: [],
-        missingRequired: [],
-        skippedOptional: [],
-        loadDurationMs: 0,
-        budgetEnforcementEnabled: true,
-      };
-  if (input.task.buildBranchId) {
+  const governance: GovernanceLoadResult = await loadGovernanceForTask(input.task.id);
+  if (governance.documents.length > 0 || governance.missingRequired.length > 0 || governance.skippedOptional.length > 0) {
     await appendTaskEvent({
       taskId: input.task.id,
       ownerUserId: input.ownerUserId,
@@ -1279,6 +1308,7 @@ export const appRouter = router({
           title: z.string().trim().min(1).max(220),
           summary: z.string().trim().max(12000).optional(),
           routeMode: z.enum(routeModes).default("auto"),
+          buildTargetId: z.number().int().positive().nullable().optional(),
           initialMessage: z.string().trim().max(20000).optional(),
         })
       )
@@ -1288,6 +1318,12 @@ export const appRouter = router({
           title: input.title,
           summary: input.summary ?? null,
           routeMode: input.routeMode,
+          buildTargetId: input.buildTargetId ?? null,
+        });
+        const wiredTask = await autoWireProjectForTask({
+          taskId: task.id,
+          ownerUserId: ctx.user.id,
+          buildTargetId: input.buildTargetId ?? null,
         });
         await appendTaskEvent({
           taskId: task.id,
@@ -1297,7 +1333,11 @@ export const appRouter = router({
           status: "informational",
           content:
             "Task record created. Claude Opus 4.7 and Kimi K2.6 are initialized only when the first task message is submitted through the AI coordinator.",
-          metadataJson: serializeJson({ routeMode: input.routeMode }),
+          metadataJson: serializeJson({
+            routeMode: input.routeMode,
+            buildTargetId: input.buildTargetId ?? null,
+            buildBranchId: wiredTask?.buildBranchId ?? null,
+          }),
         });
 
         // Per the v2 decision record, creating a task only creates the task record and a status event.
@@ -1384,10 +1424,16 @@ export const appRouter = router({
           message: z.string().trim().min(1).max(20000),
           routeMode: z.enum(routeModes).default("auto"),
           buildBranchId: z.number().int().positive().nullable().optional(),
+          buildTargetId: z.number().int().positive().nullable().optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
-        const task = await requireOwnedTask(input.taskId, ctx.user.id);
+        let task = await requireOwnedTask(input.taskId, ctx.user.id);
+        task = (await autoWireProjectForTask({
+          taskId: task.id,
+          ownerUserId: ctx.user.id,
+          buildTargetId: input.buildTargetId ?? task.buildTargetId ?? null,
+        })) ?? task;
         const override = detectRouteOverride(input.message);
         const userContent = override.cleanedMessage || input.message.trim();
         const selectedRoute = input.routeMode ?? (task.routeMode as RouteMode);

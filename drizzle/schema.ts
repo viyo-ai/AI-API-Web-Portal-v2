@@ -51,6 +51,7 @@ export const tasks = mysqlTable(
     routeMode: mysqlEnum("routeMode", ["auto", "claude", "kimi", "dual"])
       .default("auto")
       .notNull(),
+    buildTargetId: int("buildTargetId"),
     buildBranchId: int("buildBranchId"),
     createdAt: bigint("createdAt", { mode: "number" }).notNull(),
     updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
@@ -65,6 +66,10 @@ export const tasks = mysqlTable(
     ownerActivityIdx: index("tasks_owner_activity_idx").on(
       table.ownerUserId,
       table.lastActivityAt
+    ),
+    ownerBuildTargetIdx: index("tasks_owner_build_target_idx").on(
+      table.ownerUserId,
+      table.buildTargetId
     ),
     ownerBuildBranchIdx: index("tasks_owner_build_branch_idx").on(
       table.ownerUserId,
@@ -242,6 +247,9 @@ export const taskGlobalFileLinks = mysqlTable(
     globalFileId: int("globalFileId").notNull(),
     ownerUserId: int("ownerUserId").notNull(),
     attachedLabel: varchar("attachedLabel", { length: 220 }),
+    source: mysqlEnum("source", ["root_default", "project", "manual"])
+      .default("manual")
+      .notNull(),
     createdAt: bigint("createdAt", { mode: "number" }).notNull(),
     updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
   },

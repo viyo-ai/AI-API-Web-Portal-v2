@@ -85,7 +85,14 @@ export type WizardSessionStatus = "cached" | "failed";
 export type AgentEnvVarMap = Record<string, string>;
 export type { GovernanceFileConfig } from "./buildRunner/loadGovernance";
 export type QueuedMessageState = "queued" | "processing" | "sent" | "cleared";
+export type TaskGlobalFileLinkSource = "root_default" | "project" | "manual";
 export const MAX_QUEUED_MESSAGES_PER_TASK = 5;
+export const ROOT_GOVERNANCE_FILE_PATHS = [
+  "CLAUDE.md",
+  "FOUNDATION_LOCK.md",
+  "BULLET_1_DIRECTIVE.md",
+  "CURRENT_BULLET.txt",
+] as const;
 
 export function nowMs() {
   return Date.now();
@@ -200,6 +207,7 @@ export async function createTask(values: {
   title: string;
   summary?: string | null;
   routeMode?: RouteMode;
+  buildTargetId?: number | null;
   buildBranchId?: number | null;
 }) {
   const db = await getDb();
@@ -211,6 +219,7 @@ export async function createTask(values: {
     title: sanitizeTaskTitle(values.title),
     summary: values.summary ?? null,
     routeMode: values.routeMode ?? "auto",
+    buildTargetId: values.buildTargetId ?? null,
     buildBranchId: values.buildBranchId ?? null,
     status: "active",
     createdAt: timestamp,
@@ -968,8 +977,13 @@ export async function getGlobalFileForOwner(
 export async function attachGlobalFileToTask(
   values: Omit<
     InsertTaskGlobalFileLink,
-    "attachedLabel" | "createdAt" | "updatedAt"
-  > & { attachedLabel?: string | null; createdAt?: number; updatedAt?: number }
+    "attachedLabel" | "source" | "createdAt" | "updatedAt"
+  > & {
+    attachedLabel?: string | null;
+    source?: TaskGlobalFileLinkSource;
+    createdAt?: number;
+    updatedAt?: number;
+  }
 ) {
   const task = await getTaskForOwner(values.taskId, values.ownerUserId);
   if (!task) throw new Error("Task not found");
@@ -988,6 +1002,7 @@ export async function attachGlobalFileToTask(
       ...values,
       attachedLabel:
         values.attachedLabel?.trim().slice(0, 220) || file.displayName,
+      source: values.source ?? "manual",
       createdAt: timestamp,
       updatedAt: values.updatedAt ?? timestamp,
     })
@@ -995,6 +1010,7 @@ export async function attachGlobalFileToTask(
       set: {
         attachedLabel:
           values.attachedLabel?.trim().slice(0, 220) || file.displayName,
+        source: values.source ?? "manual",
         updatedAt: timestamp,
       },
     });
@@ -1014,6 +1030,59 @@ export async function attachGlobalFileToTask(
     .limit(1);
   if (!result[0]) throw new Error("Failed to attach global file to task");
   return { ...result[0], file };
+}
+
+export async function autoAttachRootGlobalFiles(taskId: number, ownerUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for root Global File auto-attachment");
+  const files = await db
+    .select()
+    .from(globalFiles)
+    .where(
+      and(
+        eq(globalFiles.ownerUserId, ownerUserId),
+        or(...ROOT_GOVERNANCE_FILE_PATHS.map(relativePath => eq(globalFiles.relativePath, relativePath)))
+      )
+    );
+
+  const byPath = new Map(files.map(file => [file.relativePath, file]));
+  const attached = [];
+  const missing: string[] = [];
+  for (const relativePath of ROOT_GOVERNANCE_FILE_PATHS) {
+    const file = byPath.get(relativePath);
+    if (!file) {
+      missing.push(relativePath);
+      continue;
+    }
+    attached.push(
+      await attachGlobalFileToTask({
+        taskId,
+        ownerUserId,
+        globalFileId: file.id,
+        attachedLabel: file.displayName,
+        source: "root_default",
+      })
+    );
+  }
+  return { attached, missing };
+}
+
+export async function listRootGovernanceGlobalFilesForOwner(ownerUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for root Global Files");
+  const files = await db
+    .select()
+    .from(globalFiles)
+    .where(
+      and(
+        eq(globalFiles.ownerUserId, ownerUserId),
+        or(...ROOT_GOVERNANCE_FILE_PATHS.map(relativePath => eq(globalFiles.relativePath, relativePath)))
+      )
+    );
+  const byPath = new Map(files.map(file => [file.relativePath, file]));
+  return ROOT_GOVERNANCE_FILE_PATHS.map(relativePath => byPath.get(relativePath)).filter(
+    (file): file is NonNullable<(typeof files)[number]> => Boolean(file)
+  );
 }
 
 export async function listGlobalFileLinksForTask(
@@ -2170,6 +2239,21 @@ export async function deleteBuildBranch(branchId: number, ownerUserId: number) {
         eq(buildBranches.ownerUserId, ownerUserId)
       )
     );
+}
+
+export async function linkTaskToBuildTarget(
+  taskId: number,
+  ownerUserId: number,
+  buildTargetId: number | null
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for Project task links");
+  const timestamp = nowMs();
+  await db
+    .update(tasks)
+    .set({ buildTargetId, updatedAt: timestamp, lastActivityAt: timestamp })
+    .where(and(eq(tasks.id, taskId), eq(tasks.ownerUserId, ownerUserId)));
+  return getTaskForOwner(taskId, ownerUserId);
 }
 
 export async function linkTaskToBuildBranch(
