@@ -1,0 +1,178 @@
+{
+  "query": "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('tasks','build_targets') ORDER BY TABLE_NAME, ORDINAL_POSITION;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3aAiEZGvt2NNVee.ae03d21acc17 --database 5KVWo4UoTpTyEXqmynzSfU --execute SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('tasks','build_targets') ORDER BY TABLE_NAME, ORDINAL_POSITION;",
+  "rows": [
+    {
+      "TABLE_NAME": "build_targets",
+      "COLUMN_NAME": "id",
+      "COLUMN_TYPE": "int",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "build_targets",
+      "COLUMN_NAME": "ownerUserId",
+      "COLUMN_TYPE": "int",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "build_targets",
+      "COLUMN_NAME": "name",
+      "COLUMN_TYPE": "varchar(220)",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "build_targets",
+      "COLUMN_NAME": "repoUrl",
+      "COLUMN_TYPE": "varchar(1024)",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "build_targets",
+      "COLUMN_NAME": "defaultBaseBranch",
+      "COLUMN_TYPE": "varchar(160)",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "main"
+    },
+    {
+      "TABLE_NAME": "build_targets",
+      "COLUMN_NAME": "protectedBranchesJson",
+      "COLUMN_TYPE": "longtext",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "build_targets",
+      "COLUMN_NAME": "validationCommandsJson",
+      "COLUMN_TYPE": "longtext",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "build_targets",
+      "COLUMN_NAME": "serviceChecksJson",
+      "COLUMN_TYPE": "longtext",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "build_targets",
+      "COLUMN_NAME": "githubTokenEnvVar",
+      "COLUMN_TYPE": "varchar(120)",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "build_targets",
+      "COLUMN_NAME": "status",
+      "COLUMN_TYPE": "enum('active','archived')",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "active"
+    },
+    {
+      "TABLE_NAME": "build_targets",
+      "COLUMN_NAME": "createdAt",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "build_targets",
+      "COLUMN_NAME": "updatedAt",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "build_targets",
+      "COLUMN_NAME": "agentEnvVarMapJson",
+      "COLUMN_TYPE": "varchar(4096)",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "{}"
+    },
+    {
+      "TABLE_NAME": "tasks",
+      "COLUMN_NAME": "id",
+      "COLUMN_TYPE": "int",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "tasks",
+      "COLUMN_NAME": "ownerUserId",
+      "COLUMN_TYPE": "int",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "tasks",
+      "COLUMN_NAME": "title",
+      "COLUMN_TYPE": "varchar(220)",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "tasks",
+      "COLUMN_NAME": "summary",
+      "COLUMN_TYPE": "longtext",
+      "IS_NULLABLE": "YES",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "tasks",
+      "COLUMN_NAME": "status",
+      "COLUMN_TYPE": "enum('active','waiting','blocked','completed','archived','error')",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "active"
+    },
+    {
+      "TABLE_NAME": "tasks",
+      "COLUMN_NAME": "routeMode",
+      "COLUMN_TYPE": "enum('auto','claude','kimi','dual')",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "auto"
+    },
+    {
+      "TABLE_NAME": "tasks",
+      "COLUMN_NAME": "createdAt",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "tasks",
+      "COLUMN_NAME": "updatedAt",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "tasks",
+      "COLUMN_NAME": "lastActivityAt",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "tasks",
+      "COLUMN_NAME": "archivedAt",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "YES",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "tasks",
+      "COLUMN_NAME": "buildBranchId",
+      "COLUMN_TYPE": "int",
+      "IS_NULLABLE": "YES",
+      "COLUMN_DEFAULT": "NULL"
+    }
+  ],
+  "messages": [],
+  "stdout": "TABLE_NAME\tCOLUMN_NAME\tCOLUMN_TYPE\tIS_NULLABLE\tCOLUMN_DEFAULT\nbuild_targets\tid\tint\tNO\tNULL\nbuild_targets\townerUserId\tint\tNO\tNULL\nbuild_targets\tname\tvarchar(220)\tNO\tNULL\nbuild_targets\trepoUrl\tvarchar(1024)\tNO\tNULL\nbuild_targets\tdefaultBaseBranch\tvarchar(160)\tNO\tmain\nbuild_targets\tprotectedBranchesJson\tlongtext\tNO\tNULL\nbuild_targets\tvalidationCommandsJson\tlongtext\tNO\tNULL\nbuild_targets\tserviceChecksJson\tlongtext\tNO\tNULL\nbuild_targets\tgithubTokenEnvVar\tvarchar(120)\tNO\tNULL\nbuild_targets\tstatus\tenum('active','archived')\tNO\tactive\nbuild_targets\tcreatedAt\tbigint\tNO\tNULL\nbuild_targets\tupdatedAt\tbigint\tNO\tNULL\nbuild_targets\tagentEnvVarMapJson\tvarchar(4096)\tNO\t{}\ntasks\tid\tint\tNO\tNULL\ntasks\townerUserId\tint\tNO\tNULL\ntasks\ttitle\tvarchar(220)\tNO\tNULL\ntasks\tsummary\tlongtext\tYES\tNULL\ntasks\tstatus\tenum('active','waiting','blocked','completed','archived','error')\tNO\tactive\ntasks\trouteMode\tenum('auto','claude','kimi','dual')\tNO\tauto\ntasks\tcreatedAt\tbigint\tNO\tNULL\ntasks\tupdatedAt\tbigint\tNO\tNULL\ntasks\tlastActivityAt\tbigint\tNO\tNULL\ntasks\tarchivedAt\tbigint\tYES\tNULL\ntasks\tbuildBranchId\tint\tYES\tNULL\n",
+  "stderr": "",
+  "execution_time_ms": 50
+}

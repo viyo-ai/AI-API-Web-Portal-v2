@@ -1,0 +1,9 @@
+{
+  "query": "ALTER TABLE tasks ADD COLUMN buildTargetId INT NULL AFTER routeMode;\nCREATE INDEX tasks_owner_build_target_idx ON tasks (ownerUserId, buildTargetId);\nALTER TABLE build_targets ADD COLUMN governanceFilesJson LONGTEXT NULL AFTER agentEnvVarMapJson;\nALTER TABLE build_targets ADD COLUMN governanceBudgetEnforced BOOLEAN NOT NULL DEFAULT TRUE AFTER governanceFilesJson;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3aAiEZGvt2NNVee.ae03d21acc17 --database 5KVWo4UoTpTyEXqmynzSfU --execute ALTER TABLE tasks ADD COLUMN buildTargetId INT NULL AFTER routeMode;\nCREATE INDEX tasks_owner_build_target_idx ON tasks (ownerUserId, buildTargetId);\nALTER TABLE build_targets ADD COLUMN governanceFilesJson LONGTEXT NULL AFTER agentEnvVarMapJson;\nALTER TABLE build_targets ADD COLUMN governanceBudgetEnforced BOOLEAN NOT NULL DEFAULT TRUE AFTER governanceFilesJson;",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 826
+}

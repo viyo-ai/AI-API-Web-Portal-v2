@@ -1,0 +1,127 @@
+{
+  "query": "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT\nFROM INFORMATION_SCHEMA.COLUMNS\nWHERE TABLE_SCHEMA = DATABASE()\n  AND (\n    (TABLE_NAME = 'tasks' AND COLUMN_NAME IN ('buildTargetId','buildBranchId'))\n    OR (TABLE_NAME = 'task_global_file_links' AND COLUMN_NAME = 'source')\n    OR (TABLE_NAME = 'orchestration_turns' AND COLUMN_NAME IN ('state','approvalStatus','approvalPlanContent','approvalDecisionMessage','approvalRequestedAt','approvalResolvedAt'))\n    OR (TABLE_NAME = 'user_preferences' AND COLUMN_NAME IN ('id','ownerUserId','alwaysRequireKimiApproval','createdAt','updatedAt'))\n    OR (TABLE_NAME = 'build_targets' AND COLUMN_NAME IN ('governanceFilesJson','governanceBudgetEnforced'))\n  )\nORDER BY TABLE_NAME, ORDINAL_POSITION;\nSELECT id, ownerUserId, name, repoUrl, githubTokenEnvVar, defaultBaseBranch, protectedBranchesJson, validationCommandsJson, serviceChecksJson, agentEnvVarMapJson, governanceFilesJson, governanceBudgetEnforced, status, createdAt, updatedAt\nFROM build_targets\nWHERE ownerUserId = 1 AND status = 'active'\nORDER BY updatedAt DESC\nLIMIT 50;\nSELECT id, ownerUserId, title, summary, status, routeMode, buildTargetId, buildBranchId, createdAt, updatedAt, lastActivityAt, archivedAt\nFROM tasks\nWHERE ownerUserId = 1 AND (status = 'active' OR status = 'waiting' OR status = 'blocked' OR status = 'completed' OR status = 'error')\nORDER BY lastActivityAt DESC\nLIMIT 50;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3aAiEZGvt2NNVee.ae03d21acc17 --database 5KVWo4UoTpTyEXqmynzSfU --execute SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT\nFROM INFORMATION_SCHEMA.COLUMNS\nWHERE TABLE_SCHEMA = DATABASE()\n  AND (\n    (TABLE_NAME = 'tasks' AND COLUMN_NAME IN ('buildTargetId','buildBranchId'))\n    OR (TABLE_NAME = 'task_global_file_links' AND COLUMN_NAME = 'source')\n    OR (TABLE_NAME = 'orchestration_turns' AND COLUMN_NAME IN ('state','approvalStatus','approvalPlanContent','approvalDecisionMessage','approvalRequestedAt','approvalResolvedAt'))\n    OR (TABLE_NAME = 'user_preferences' AND COLUMN_NAME IN ('id','ownerUserId','alwaysRequireKimiApproval','createdAt','updatedAt'))\n    OR (TABLE_NAME = 'build_targets' AND COLUMN_NAME IN ('governanceFilesJson','governanceBudgetEnforced'))\n  )\nORDER BY TABLE_NAME, ORDINAL_POSITION;\nSELECT id, ownerUserId, name, repoUrl, githubTokenEnvVar, defaultBaseBranch, protectedBranchesJson, validationCommandsJson, serviceChecksJson, agentEnvVarMapJson, governanceFilesJson, governanceBudgetEnforced, status, createdAt, updatedAt\nFROM build_targets\nWHERE ownerUserId = 1 AND status = 'active'\nORDER BY updatedAt DESC\nLIMIT 50;\nSELECT id, ownerUserId, title, summary, status, routeMode, buildTargetId, buildBranchId, createdAt, updatedAt, lastActivityAt, archivedAt\nFROM tasks\nWHERE ownerUserId = 1 AND (status = 'active' OR status = 'waiting' OR status = 'blocked' OR status = 'completed' OR status = 'error')\nORDER BY lastActivityAt DESC\nLIMIT 50;",
+  "rows": [
+    {
+      "TABLE_NAME": "build_targets",
+      "COLUMN_NAME": "governanceFilesJson",
+      "COLUMN_TYPE": "longtext",
+      "IS_NULLABLE": "YES",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "build_targets",
+      "COLUMN_NAME": "governanceBudgetEnforced",
+      "COLUMN_TYPE": "tinyint(1)",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "1"
+    },
+    {
+      "TABLE_NAME": "orchestration_turns",
+      "COLUMN_NAME": "state",
+      "COLUMN_TYPE": "enum('received','routing','credential_check','context_assembly','model_calling','awaiting_approval','model_review','persisting_output','completed','blocked','failed','stopped')",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "received"
+    },
+    {
+      "TABLE_NAME": "orchestration_turns",
+      "COLUMN_NAME": "approvalStatus",
+      "COLUMN_TYPE": "enum('not_required','awaiting_owner','approved','revision_requested','cancelled')",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "not_required"
+    },
+    {
+      "TABLE_NAME": "orchestration_turns",
+      "COLUMN_NAME": "approvalPlanContent",
+      "COLUMN_TYPE": "longtext",
+      "IS_NULLABLE": "YES",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "orchestration_turns",
+      "COLUMN_NAME": "approvalDecisionMessage",
+      "COLUMN_TYPE": "longtext",
+      "IS_NULLABLE": "YES",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "orchestration_turns",
+      "COLUMN_NAME": "approvalRequestedAt",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "YES",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "orchestration_turns",
+      "COLUMN_NAME": "approvalResolvedAt",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "YES",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "tasks",
+      "COLUMN_NAME": "buildTargetId",
+      "COLUMN_TYPE": "int",
+      "IS_NULLABLE": "YES",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "tasks",
+      "COLUMN_NAME": "buildBranchId",
+      "COLUMN_TYPE": "int",
+      "IS_NULLABLE": "YES",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "user_preferences",
+      "COLUMN_NAME": "id",
+      "COLUMN_TYPE": "int",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "user_preferences",
+      "COLUMN_NAME": "ownerUserId",
+      "COLUMN_TYPE": "int",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "user_preferences",
+      "COLUMN_NAME": "alwaysRequireKimiApproval",
+      "COLUMN_TYPE": "tinyint(1)",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "1"
+    },
+    {
+      "TABLE_NAME": "user_preferences",
+      "COLUMN_NAME": "createdAt",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    },
+    {
+      "TABLE_NAME": "user_preferences",
+      "COLUMN_NAME": "updatedAt",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "NO",
+      "COLUMN_DEFAULT": "NULL"
+    }
+  ],
+  "messages": [
+    "id\townerUserId\tname\trepoUrl\tgithubTokenEnvVar\tdefaultBaseBranch\tprotectedBranchesJson\tvalidationCommandsJson\tserviceChecksJson\tagentEnvVarMapJson\tgovernanceFilesJson\tgovernanceBudgetEnforced\tstatus\tcreatedAt\tupdatedAt",
+    "7\t1\tSection 1 Browser Target 1778103265965\thttps://github.com/viyo-ai/AI-API-Web-Portal-v2.git\tBUILD_TARGET_GITHUB_TOKEN\tmain\t[\"main\",\"staging\"]\t[\"pnpm test -- --pool=forks\"]\t[]\t{}\tNULL\t1\tactive\t1778103266566\t1778103266566",
+    "6\t1\tSection 1 Browser Target 1778096511702\thttps://github.com/viyo-ai/AI-API-Web-Portal-v2.git\tBUILD_TARGET_GITHUB_TOKEN\tmain\t[\"main\",\"staging\"]\t[\"pnpm test -- --pool=forks\"]\t[]\t{}\tNULL\t1\tactive\t1778096512446\t1778096512446",
+    "5\t1\tSection 1 Browser Target 1778096374858\thttps://github.com/viyo-ai/AI-API-Web-Portal-v2.git\tBUILD_TARGET_GITHUB_TOKEN\tmain\t[\"main\",\"staging\"]\t[\"pnpm test -- --pool=forks\"]\t[]\t{}\tNULL\t1\tactive\t1778096375512\t1778096375512",
+    "4\t1\tSection 1 Browser Target 1778096327500\thttps://github.com/viyo-ai/AI-API-Web-Portal-v2.git\tBUILD_TARGET_GITHUB_TOKEN\tmain\t[\"main\",\"staging\"]\t[\"pnpm test -- --pool=forks\"]\t[]\t{}\tNULL\t1\tactive\t1778096328128\t1778096328128",
+    "3\t1\tSection 1 Browser Target 1778096092994\thttps://github.com/viyo-ai/AI-API-Web-Portal-v2.git\tBUILD_TARGET_GITHUB_TOKEN\tmain\t[\"main\",\"staging\"]\t[\"pnpm test -- --pool=forks\"]\t[]\t{}\tNULL\t1\tactive\t1778096093604\t1778096093604",
+    "2\t1\tSection 1 Browser Target 1778096063301\thttps://github.com/viyo-ai/AI-API-Web-Portal-v2.git\tBUILD_TARGET_GITHUB_TOKEN\tmain\t[\"main\",\"staging\"]\t[\"pnpm test -- --pool=forks\"]\t[]\t{}\tNULL\t1\tactive\t1778096063918\t1778096063918",
+    "1\t1\tSection 1 Browser Target 1778095935861\thttps://github.com/viyo-ai/AI-API-Web-Portal-v2.git\tBUILD_TARGET_GITHUB_TOKEN\tmain\t[\"main\",\"staging\"]\t[\"pnpm test -- --pool=forks\"]\t[]\t{}\tNULL\t1\tactive\t1778095936510\t1778095936510",
+    "id\townerUserId\ttitle\tsummary\tstatus\trouteMode\tbuildTargetId\tbuildBranchId\tcreatedAt\tupdatedAt\tlastActivityAt\tarchivedAt",
+    "30003\t1\tAI coding workshop task\tTask-first v2 workspace item created from the plain-English AI coding workshop.\tactive\tauto\tNULL\tNULL\t1778124011057\t1778124011123\t1778124011123\tNULL",
+    "9\t1\tBrowser validation routing 1778048300\tTask-first v2 workspace item created from the plain-English AI coding workshop.\tactive\tauto\tNULL\tNULL\t1778048319940\t1778076559407\t1778076559407\tNULL"
+  ],
+  "stdout": "TABLE_NAME\tCOLUMN_NAME\tCOLUMN_TYPE\tIS_NULLABLE\tCOLUMN_DEFAULT\nbuild_targets\tgovernanceFilesJson\tlongtext\tYES\tNULL\nbuild_targets\tgovernanceBudgetEnforced\ttinyint(1)\tNO\t1\norchestration_turns\tstate\tenum('received','routing','credential_check','context_assembly','model_calling','awaiting_approval','model_review','persisting_output','completed','blocked','failed','stopped')\tNO\treceived\norchestration_turns\tapprovalStatus\tenum('not_required','awaiting_owner','approved','revision_requested','cancelled')\tNO\tnot_required\norchestration_turns\tapprovalPlanContent\tlongtext\tYES\tNULL\norchestration_turns\tapprovalDecisionMessage\tlongtext\tYES\tNULL\norchestration_turns\tapprovalRequestedAt\tbigint\tYES\tNULL\norchestration_turns\tapprovalResolvedAt\tbigint\tYES\tNULL\ntasks\tbuildTargetId\tint\tYES\tNULL\ntasks\tbuildBranchId\tint\tYES\tNULL\nuser_preferences\tid\tint\tNO\tNULL\nuser_preferences\townerUserId\tint\tNO\tNULL\nuser_preferences\talwaysRequireKimiApproval\ttinyint(1)\tNO\t1\nuser_preferences\tcreatedAt\tbigint\tNO\tNULL\nuser_preferences\tupdatedAt\tbigint\tNO\tNULL\nid\townerUserId\tname\trepoUrl\tgithubTokenEnvVar\tdefaultBaseBranch\tprotectedBranchesJson\tvalidationCommandsJson\tserviceChecksJson\tagentEnvVarMapJson\tgovernanceFilesJson\tgovernanceBudgetEnforced\tstatus\tcreatedAt\tupdatedAt\n7\t1\tSection 1 Browser Target 1778103265965\thttps://github.com/viyo-ai/AI-API-Web-Portal-v2.git\tBUILD_TARGET_GITHUB_TOKEN\tmain\t[\"main\",\"staging\"]\t[\"pnpm test -- --pool=forks\"]\t[]\t{}\tNULL\t1\tactive\t1778103266566\t1778103266566\n6\t1\tSection 1 Browser Target 1778096511702\thttps://github.com/viyo-ai/AI-API-Web-Portal-v2.git\tBUILD_TARGET_GITHUB_TOKEN\tmain\t[\"main\",\"staging\"]\t[\"pnpm test -- --pool=forks\"]\t[]\t{}\tNULL\t1\tactive\t1778096512446\t1778096512446\n5\t1\tSection 1 Browser Target 1778096374858\thttps://github.com/viyo-ai/AI-API-Web-Portal-v2.git\tBUILD_TARGET_GITHUB_TOKEN\tmain\t[\"main\",\"staging\"]\t[\"pnpm test -- --pool=forks\"]\t[]\t{}\tNULL\t1\tactive\t1778096375512\t1778096375512\n4\t1\tSection 1 Browser Target 1778096327500\thttps://github.com/viyo-ai/AI-API-Web-Portal-v2.git\tBUILD_TARGET_GITHUB_TOKEN\tmain\t[\"main\",\"staging\"]\t[\"pnpm test -- --pool=forks\"]\t[]\t{}\tNULL\t1\tactive\t1778096328128\t1778096328128\n3\t1\tSection 1 Browser Target 1778096092994\thttps://github.com/viyo-ai/AI-API-Web-Portal-v2.git\tBUILD_TARGET_GITHUB_TOKEN\tmain\t[\"main\",\"staging\"]\t[\"pnpm test -- --pool=forks\"]\t[]\t{}\tNULL\t1\tactive\t1778096093604\t1778096093604\n2\t1\tSection 1 Browser Target 1778096063301\thttps://github.com/viyo-ai/AI-API-Web-Portal-v2.git\tBUILD_TARGET_GITHUB_TOKEN\tmain\t[\"main\",\"staging\"]\t[\"pnpm test -- --pool=forks\"]\t[]\t{}\tNULL\t1\tactive\t1778096063918\t1778096063918\n1\t1\tSection 1 Browser Target 1778095935861\thttps://github.com/viyo-ai/AI-API-Web-Portal-v2.git\tBUILD_TARGET_GITHUB_TOKEN\tmain\t[\"main\",\"staging\"]\t[\"pnpm test -- --pool=forks\"]\t[]\t{}\tNULL\t1\tactive\t1778095936510\t1778095936510\nid\townerUserId\ttitle\tsummary\tstatus\trouteMode\tbuildTargetId\tbuildBranchId\tcreatedAt\tupdatedAt\tlastActivityAt\tarchivedAt\n30003\t1\tAI coding workshop task\tTask-first v2 workspace item created from the plain-English AI coding workshop.\tactive\tauto\tNULL\tNULL\t1778124011057\t1778124011123\t1778124011123\tNULL\n9\t1\tBrowser validation routing 1778048300\tTask-first v2 workspace item created from the plain-English AI coding workshop.\tactive\tauto\tNULL\tNULL\t1778048319940\t1778076559407\t1778076559407\tNULL\n",
+  "stderr": "",
+  "execution_time_ms": 96
+}

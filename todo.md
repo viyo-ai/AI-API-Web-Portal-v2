@@ -321,3 +321,12 @@
 
 - [x] Create a Manus managed project checkpoint to enable the Publish button for the current AI Coding Workshop portal state.
 - [x] Sync validated FU-01 commit `0bccee6a890b029484c4f9573a7a2d87e94b7a11` from `agent-work/s4-5-prep-inputs` into the managed Manus project before checkpointing for publish.
+- [x] Fix live Build Targets query failure caused by runtime schema drift for `build_targets` fields used by `targets.list`.
+- [x] Fix live Tasks query failure caused by runtime schema drift for `tasks.buildTargetId` / `tasks.buildBranchId` fields used by task listing.
+- [x] Validate the database repair with focused schema/API checks, full automated validation, managed health check, and a fresh checkpoint.
+
+- [x] Reconcile local Manus database schema with synced code using the repo’s canonical Drizzle migration workflow without modifying migration SQL files.
+- [x] Verify required runtime schema objects exist for the synced code: `tasks.buildTargetId`, task/build-target query columns, §9 approval columns/enums, and `user_preferences.alwaysRequireKimiApproval`; confirm `task_global_file_links.source` is not referenced by the checked-in Drizzle/application code in this managed project state.
+- [x] Restart the local Manus dev service and confirm the `/ ?from_webdev=1` task/build-target queries load without TRPCClientError failures.
+- [x] Update publish-readiness tracking so future sync gates apply pending Drizzle migrations before declaring publish-ready.
+- [x] Save a fresh local Manus checkpoint after schema reconciliation and validation for publishing.
