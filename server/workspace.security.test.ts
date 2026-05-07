@@ -18,6 +18,7 @@ const dbMocks = vi.hoisted(() => ({
   listAllFilesForOwner: vi.fn(),
   listGlobalFilesForOwner: vi.fn(),
   listMemoryByCategory: vi.fn(),
+  listExpiredAwaitingApprovalTurns: vi.fn(),
   listTaskEvents: vi.fn(),
   listTaskFiles: vi.fn(),
   listTasksForOwner: vi.fn(),
@@ -93,7 +94,11 @@ vi.mock("./db", () => dbMocks);
 vi.mock("./buildRunner/loadGovernance", () => governanceMocks);
 vi.mock("./wrapperLLM", () => wrapperMocks);
 
-import { appRouter } from "./routers";
+import {
+  appRouter,
+  cleanupExpiredKimiApprovalTurns,
+  KIMI_APPROVAL_REVISION_LIMIT_MESSAGE,
+} from "./routers";
 
 type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
 
@@ -156,6 +161,7 @@ describe("v2 task ownership and credential-gate security", () => {
     dbMocks.listMemoryByCategory.mockResolvedValue([]);
     dbMocks.listTaskFiles.mockResolvedValue([]);
     dbMocks.listGlobalFilesForOwner.mockResolvedValue([]);
+    dbMocks.listExpiredAwaitingApprovalTurns.mockResolvedValue([]);
     dbMocks.listQueuedMessages.mockResolvedValue([]);
     dbMocks.autoAttachRootGlobalFiles.mockResolvedValue({ attached: [], missing: [] });
     dbMocks.markQueuedMessagesProcessing.mockResolvedValue([]);
@@ -180,7 +186,7 @@ describe("v2 task ownership and credential-gate security", () => {
     expect(wrapperMocks.executeWrapperTurn).not.toHaveBeenCalled();
   });
 
-  it("creates only the task record and status event even if an initial message is supplied", async () => {
+  it("creates only the task record and emits no task-created boilerplate even if an initial message is supplied", async () => {
     dbMocks.createTask.mockResolvedValueOnce({ ...ownedTask, id: 88, title: "New task" });
     dbMocks.getTaskThread.mockResolvedValueOnce({ task: { ...ownedTask, id: 88, title: "New task" }, events: [], activeTurn: null });
     const caller = appRouter.createCaller(createContext(42));
@@ -188,11 +194,8 @@ describe("v2 task ownership and credential-gate security", () => {
     await caller.tasks.create({ title: "New task", routeMode: "auto", initialMessage: "Do not initialize providers during creation." });
 
     expect(dbMocks.createTask).toHaveBeenCalledWith(expect.objectContaining({ ownerUserId: 42, title: "New task", routeMode: "auto" }));
-    expect(dbMocks.appendTaskEvent).toHaveBeenCalledTimes(1);
-    expect(dbMocks.appendTaskEvent).toHaveBeenCalledWith(expect.objectContaining({
-      actor: "system",
-      eventType: "status",
-      content: expect.stringContaining("Task record created"),
+    expect(dbMocks.appendTaskEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining("Task record created. Claude Opus 4.7 and Kimi K2.6 are initialized only when the first task message is submitted through the AI coordinator."),
     }));
     expect(dbMocks.createTurn).not.toHaveBeenCalled();
     expect(wrapperMocks.executeWrapperTurn).not.toHaveBeenCalled();
@@ -368,6 +371,7 @@ describe("v2 task ownership and credential-gate security", () => {
     };
     dbMocks.getTaskForOwner.mockResolvedValueOnce({ ...ownedTask, status: "active" });
     dbMocks.getTurnForOwner.mockResolvedValueOnce(awaitingTurn);
+    dbMocks.listTurnsForTask.mockResolvedValueOnce([]);
     const caller = appRouter.createCaller(createContext(42));
 
     await caller.orchestration.requestKimiHandoffRevision({ taskId: 77, turnId: 778, revisionMessage: "Add rollback proof before Kimi runs." });
@@ -385,6 +389,71 @@ describe("v2 task ownership and credential-gate security", () => {
       requireApprovalBeforeKimi: true,
       userMessage: expect.stringContaining("Add rollback proof before Kimi runs."),
     }));
+  });
+
+  it("auto-cancels §9 awaiting approval turns after 24 hours without invoking Kimi", async () => {
+    const expiredTurn = {
+      id: 780,
+      taskId: 77,
+      ownerUserId: 42,
+      routeMode: "dual",
+      route: "dual",
+      state: "awaiting_approval",
+      approvalStatus: "awaiting_owner",
+      approvalPlanContent: "Expired Claude plan.",
+      approvalRequestedAt: 1777909400000,
+      startedAt: 1777909000000,
+      completedAt: null,
+      errorMessage: null,
+    };
+    dbMocks.listExpiredAwaitingApprovalTurns.mockResolvedValueOnce([expiredTurn]);
+    dbMocks.getTaskForOwner.mockResolvedValueOnce({ ...ownedTask, status: "active" });
+    dbMocks.getTurnForOwner.mockResolvedValueOnce(expiredTurn);
+
+    const result = await cleanupExpiredKimiApprovalTurns(1777999400000);
+
+    expect(dbMocks.listExpiredAwaitingApprovalTurns).toHaveBeenCalledWith(1777999400000 - 24 * 60 * 60 * 1000);
+    expect(dbMocks.updateTurnApprovalState).toHaveBeenCalledWith(expect.objectContaining({
+      turnId: 780,
+      ownerUserId: 42,
+      state: "stopped",
+      approvalStatus: "cancelled",
+      approvalDecisionMessage: expect.stringContaining("automatically canceled"),
+    }));
+    expect(dbMocks.stopTurn).toHaveBeenCalledWith(
+      780,
+      42,
+      "Automatic timeout after waiting for owner approval for more than 24 hours."
+    );
+    expect(wrapperMocks.executeWrapperTurn).not.toHaveBeenCalled();
+    expect(result).toEqual({ checked: 1, cancelled: 1 });
+  });
+
+  it("rejects the sixth §9 approval revision and does not create a new turn", async () => {
+    const priorRevisions = Array.from({ length: 5 }, (_, index) => ({
+      id: 900 + index,
+      taskId: 77,
+      ownerUserId: 42,
+      routeMode: "dual",
+      route: "dual",
+      state: "stopped",
+      approvalStatus: "revision_requested",
+      approvalPlanContent: `Prior plan ${index + 1}`,
+      startedAt: 1777998000000 + index,
+      completedAt: 1777998100000 + index,
+      errorMessage: null,
+    }));
+    dbMocks.getTaskForOwner.mockResolvedValueOnce({ ...ownedTask, status: "active" });
+    dbMocks.listTurnsForTask.mockResolvedValueOnce(priorRevisions);
+    const caller = appRouter.createCaller(createContext(42));
+
+    await expect(
+      caller.orchestration.requestKimiHandoffRevision({ taskId: 77, turnId: 778, revisionMessage: "Try one more revision." })
+    ).rejects.toThrow(KIMI_APPROVAL_REVISION_LIMIT_MESSAGE);
+
+    expect(dbMocks.createTurn).not.toHaveBeenCalled();
+    expect(dbMocks.updateTurnApprovalState).not.toHaveBeenCalled();
+    expect(wrapperMocks.executeWrapperTurn).not.toHaveBeenCalled();
   });
 
   it("cancels a §9 waiting handoff through stopGeneration without starting Kimi or queue flush", async () => {

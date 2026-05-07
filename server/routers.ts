@@ -52,6 +52,7 @@ import {
   listGlobalFilesForOwner,
   listMemoryByCategory,
   linkTaskToBuildTarget,
+  listExpiredAwaitingApprovalTurns,
   listTaskEvents,
   listTaskFiles,
   listTasksForOwner,
@@ -1110,10 +1111,18 @@ async function recordRuntimeCredentialSnapshots(
   );
 }
 
-type OwnedTask =
-  Awaited<ReturnType<typeof getTaskForOwner>> extends infer T
-    ? NonNullable<T>
-    : never;
+type OwnedTask = Awaited<ReturnType<typeof getTaskForOwner>> extends infer T
+  ? NonNullable<T>
+  : never;
+
+export const KIMI_APPROVAL_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+export const KIMI_APPROVAL_TIMEOUT_DECISION_MESSAGE =
+  "This plan was automatically canceled because it was waiting for approval for more than 24 hours.";
+export const KIMI_APPROVAL_TIMEOUT_STOPPED_MARKER =
+  "Automatic timeout after waiting for owner approval for more than 24 hours.";
+export const KIMI_APPROVAL_REVISION_LIMIT = 5;
+export const KIMI_APPROVAL_REVISION_LIMIT_MESSAGE =
+  "You’ve sent this plan back to Claude five times. Approve the current plan, or cancel and start over with a fresh message.";
 
 async function runGenerationTurn(input: {
   task: OwnedTask;
@@ -1333,6 +1342,54 @@ async function resumeApprovedKimiTurn(input: {
   }
 }
 
+export async function cleanupExpiredKimiApprovalTurns(now = Date.now()) {
+  const expiredTurns = await listExpiredAwaitingApprovalTurns(
+    now - KIMI_APPROVAL_TIMEOUT_MS
+  );
+  let cancelled = 0;
+
+  for (const turn of expiredTurns) {
+    const task = await getTaskForOwner(turn.taskId, turn.ownerUserId);
+    if (!task) continue;
+
+    try {
+      await resolvePausedApprovalTurn({
+        task,
+        ownerUserId: turn.ownerUserId,
+        turnId: turn.id,
+        approvalStatus: "cancelled",
+        decisionMessage: KIMI_APPROVAL_TIMEOUT_DECISION_MESSAGE,
+        stoppedMarker: KIMI_APPROVAL_TIMEOUT_STOPPED_MARKER,
+      });
+      cancelled += 1;
+    } catch (error) {
+      console.warn("[§9] Failed to auto-timeout awaiting approval turn", {
+        turnId: turn.id,
+        taskId: turn.taskId,
+        ownerUserId: turn.ownerUserId,
+        error,
+      });
+    }
+  }
+
+  return { checked: expiredTurns.length, cancelled } as const;
+}
+
+export function startKimiApprovalTimeoutCleanup(intervalMs = 60 * 60 * 1000) {
+  void cleanupExpiredKimiApprovalTurns().catch(error => {
+    console.warn("[§9] Awaiting-approval timeout cleanup failed", error);
+  });
+
+  const timer = setInterval(() => {
+    void cleanupExpiredKimiApprovalTurns().catch(error => {
+      console.warn("[§9] Awaiting-approval timeout cleanup failed", error);
+    });
+  }, intervalMs);
+
+  timer.unref?.();
+  return timer;
+}
+
 async function resolvePausedApprovalTurn(input: {
   task: OwnedTask;
   ownerUserId: number;
@@ -1458,24 +1515,23 @@ export const appRouter = router({
           ownerUserId: ctx.user.id,
           buildTargetId: input.buildTargetId ?? null,
         });
-        await appendTaskEvent({
-          taskId: task.id,
-          ownerUserId: ctx.user.id,
-          actor: "system",
-          eventType: "status",
-          status: "informational",
-          content:
-            "Task record created. Claude Opus 4.7 and Kimi K2.6 are initialized only when the first task message is submitted through the AI coordinator.",
-          metadataJson: serializeJson({
-            routeMode: input.routeMode,
-            buildTargetId: input.buildTargetId ?? null,
-            buildBranchId: wiredTask?.buildBranchId ?? null,
-          }),
-        });
+        if (wiredTask?.buildTargetId && wiredTask?.buildBranchId) {
+          await appendTaskEvent({
+            taskId: task.id,
+            ownerUserId: ctx.user.id,
+            actor: "system",
+            eventType: "status",
+            status: "succeeded",
+            content: "Project build branch initialized for this task.",
+            metadataJson: serializeJson({
+              buildTargetId: wiredTask.buildTargetId,
+              buildBranchId: wiredTask.buildBranchId,
+            }),
+          });
+        }
 
-        // Per the v2 decision record, creating a task only creates the task record and a status event.
+        // Per the v2 decision record, creating a task only creates the task record.
         // Provider initialization begins when the owner submits a task-thread message through orchestration.submitMessage.
-
         return getTaskThread(task.id, ctx.user.id);
       }),
     list: protectedProcedure
@@ -1701,6 +1757,12 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const task = await requireOwnedTask(input.taskId, ctx.user.id);
+        const priorRevisionCount = (await listTurnsForTask(task.id, ctx.user.id, 1000)).filter(
+          turn => turn.approvalStatus === "revision_requested"
+        ).length;
+        if (priorRevisionCount >= KIMI_APPROVAL_REVISION_LIMIT) {
+          throw new Error(KIMI_APPROVAL_REVISION_LIMIT_MESSAGE);
+        }
         const revisionMessage = `Owner requested a revised Claude plan before Kimi runs: ${input.revisionMessage}`;
         await resolvePausedApprovalTurn({
           task,

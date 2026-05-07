@@ -820,6 +820,60 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(cancelKimiHandoffMock).toHaveBeenCalledWith({ taskId: 7, turnId: 46 });
   });
 
+  it("keeps §9 forbidden technical vocabulary out of owner-facing approval text", async () => {
+    mockThread = {
+      task: sampleTask,
+      activeTurn: {
+        id: 46,
+        taskId: 7,
+        ownerUserId: 42,
+        routeMode: "dual",
+        route: "dual",
+        state: "awaiting_approval",
+        approvalStatus: "awaiting_owner",
+        approvalPlanContent: "Claude plan: inspect the repository, then let Kimi implement the safe patch.",
+        approvalRequestedAt: 1777999400000,
+        approvalResolvedAt: null,
+        startedAt: 1777999200000,
+        completedAt: null,
+        errorMessage: null,
+      },
+      queuedMessages: [],
+      events: [
+        { id: 401, taskId: 7, ownerUserId: 42, actor: "user", eventType: "message", status: "completed", content: "Please implement the next portal section.", metadataJson: "{}", createdAt: 1777999100000 },
+      ],
+    };
+
+    render(<Home />);
+    expect(await screen.findByTestId("section9-kimi-approval-card")).toBeInTheDocument();
+
+    const ownerFacingBody = document.body.cloneNode(true) as HTMLElement;
+    ownerFacingBody.querySelectorAll('[role="tabpanel"]').forEach(panel => {
+      const labelledBy = panel.getAttribute("aria-labelledby") ?? "";
+      const panelText = panel.textContent ?? "";
+      if (/diagnostics/i.test(labelledBy) || /Diagnostics are intentionally opt-in/i.test(panelText)) {
+        panel.remove();
+      }
+    });
+    const ownerFacingText = ownerFacingBody.textContent ?? "";
+
+    [
+      "verified handoff",
+      "approval gate",
+      "wrapper turn",
+      "dual-path",
+      "route_decision",
+      "awaiting_approval",
+      "model_calling",
+      "claudePlan",
+      "kimiResult",
+      "claudeReview",
+      "finalAnswer",
+    ].forEach(term => {
+      expect(ownerFacingText).not.toMatch(new RegExp(term, "i"));
+    });
+  });
+
   it("defaults §9 Kimi approval checks on and persists owner preference changes", async () => {
     const user = userEvent.setup();
     render(<Home />);

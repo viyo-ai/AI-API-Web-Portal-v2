@@ -336,3 +336,12 @@
 - [x] Phase 3 §9 validation and handoff: run required validation gates, commit with `[PORTAL-P3-S9-XX]` prefix as practical, push to GitHub, report full commit URL, and stop at §9 acceptance package for Product Owner review.
 
 - [x] Authorized Phase 3 §9 execution: produce `.taskmaster/docs/ingestion-evidence/PORTAL_PHASE_3_DIRECTIVE-S9-ingestion.md` before code changes; implement INV-S9-01 through INV-S9-14 plus bundled chat cleanup; attach/reference the directive file in the ingestion artifact; keep approval preference default ON for new and unset existing users; run `pnpm check`, focused contract tests, `pnpm test --run`, and `pnpm build`; commit with `[PORTAL-P3-S9-XX]` or `[PORTAL-P3-S9-CLEANUP-XX]`; push and hold for Product Owner sign-off without starting §1A-FU-04 or §8.
+
+- [x] Review uploaded `pasted_content.txt` carefully without skimming; extract all material directives, approvals, blockers, risks, implications for the completed §9 handoff, and recommended next actions before proceeding with any new build section.
+
+- [ ] Produce the no-code §9 spot-check evidence document in the user's exact block order: full requested diffs, migration content, 24-hour timeout status, seven proof answers with file-line citations, and a 14-row invariant-to-test mapping; do not modify source files or begin §1A-FU-04/§8.
+
+- [x] PORTAL-P3-S9-FU-01: Implement 24-hour auto-timeout cleanup for abandoned awaiting_approval turns with behavioral server coverage.
+- [x] PORTAL-P3-S9-FU-01: Add INV-S9-10 owner-facing forbidden-vocabulary behavioral test without silently renaming existing copy.
+- [x] PORTAL-P3-S9-FU-01: Enforce five-request revision cap in requestKimiHandoffRevision with behavioral server coverage.
+- [x] PORTAL-P3-S9-FU-01: Remove tasks.create boilerplate system event at source and add regression coverage.

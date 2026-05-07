@@ -1,4 +1,4 @@
-import { and, desc, eq, like, or } from "drizzle-orm";
+import { and, desc, eq, like, lt, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   buildBranches,
@@ -766,6 +766,27 @@ export async function getTurnForOwner(turnId: number, ownerUserId: number) {
     )
     .limit(1);
   return result[0];
+}
+
+export async function listExpiredAwaitingApprovalTurns(
+  approvalRequestedBefore: number,
+  limit = 100
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for orchestration turns");
+
+  return db
+    .select()
+    .from(orchestrationTurns)
+    .where(
+      and(
+        eq(orchestrationTurns.state, "awaiting_approval"),
+        eq(orchestrationTurns.approvalStatus, "awaiting_owner"),
+        lt(orchestrationTurns.approvalRequestedAt, approvalRequestedBefore)
+      )
+    )
+    .orderBy(desc(orchestrationTurns.approvalRequestedAt))
+    .limit(limit);
 }
 
 export async function completeTurn(turnId: number, ownerUserId: number) {
