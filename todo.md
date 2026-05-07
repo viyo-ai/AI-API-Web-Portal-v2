@@ -350,7 +350,7 @@
 - [x] §1A-FU-04: Implement Project Setup Wizard plain-English polish and PAT-only private repository verification against all ten INV-S1A-FU-04 invariants.
 - [x] §1A-FU-04: Run required validation gates (`pnpm check`, focused tests, `pnpm test --run`, `pnpm build`) before any push.
 - [x] §1A-FU-04: Create conventional commits with `[PORTAL-P3-S1A-FU-04-XX]` prefixes and stop for Product Owner approval on any out-of-scope proposal.
-- [ ] §1A-FU-04: Provide a Manus Project local publish gate and hold for Product Owner sign-off without beginning §8.
+- [x] §1A-FU-04: Provide a Manus Project local publish gate and hold for Product Owner sign-off without beginning §8.
 
 - [x] §1A-FU-04 T01: Replace Project Setup Wizard owner-facing copy with directive-approved plain-English vocabulary and remove forbidden wizard vocabulary outside Diagnostics.
 - [x] §1A-FU-04 T02: Reject token-looking pasted values in the GitHub token environment-variable-name field with the exact required correction message.
