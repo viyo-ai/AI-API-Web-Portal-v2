@@ -752,7 +752,14 @@ export default function Home() {
     try {
       const pushed = await pushBuildBranchMutation.mutateAsync({ branchId: openedBuildBranch.id });
       if (pushed.branch) setOpenedBuildBranch(pushed.branch);
-      const commit = pushed.result.pushedCommit ? ` at ${pushed.result.pushedCommit.slice(0, 12)}` : "";
+      if (pushed.pushState !== "pushed") {
+        const message = pushed.errorMessage ?? "The working branch push was blocked by Section 4 policy.";
+        setWorkspaceNotice(message);
+        toast.error(message);
+        await refreshWorkspace();
+        return;
+      }
+      const commit = pushed.pushedCommit ? ` at ${pushed.pushedCommit.slice(0, 12)}` : "";
       const message = `Pushed ${openedBuildBranch.branchName}${commit}.`;
       setWorkspaceNotice(message);
       toast.success(message);
@@ -821,7 +828,7 @@ export default function Home() {
       toast.warning(message);
       return;
     }
-    const cleanBranchName = buildBranchName.trim() || `portal-task-${selectedTaskId ?? Date.now()}`;
+    const cleanBranchName = buildBranchName.trim() || `agent-work/portal-task-${selectedTaskId ?? Date.now()}`;
     try {
       const branch = await createBuildBranchMutation.mutateAsync({ buildTargetId: selectedBuildTarget.id, branchName: cleanBranchName, baseBranch: selectedBuildTarget.defaultBaseBranch, taskId: selectedTaskId });
       setBuildBranchName("");
@@ -1440,7 +1447,7 @@ export default function Home() {
                   <p className="mt-1 text-xs text-emerald-800">Base branch {selectedBuildTarget.defaultBaseBranch}. Protected branches are never direct push targets.</p>
                 </div>
                 <div className="flex min-w-[220px] flex-1 gap-2 sm:flex-none">
-                  <Input value={buildBranchName} onChange={(event) => setBuildBranchName(event.target.value)} placeholder="feature/portal-task" className="h-9 rounded-xl border-emerald-200 bg-white text-xs" />
+                  <Input value={buildBranchName} onChange={(event) => setBuildBranchName(event.target.value)} placeholder="agent-work/portal-task" className="h-9 rounded-xl border-emerald-200 bg-white text-xs" />
                   <Button type="button" onClick={handleCreateBuildBranch} disabled={isMutating} className="h-9 rounded-xl bg-emerald-700 px-3 text-xs text-white hover:bg-emerald-800">
                     {createBuildBranchMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Open"}
                   </Button>
