@@ -213,9 +213,9 @@
 - [x] Fix Draft memory note button no-op and verify the memory-note draft workflow through an interactive UX loop.
 - [x] Correct prior validation gap by documenting and performing the affected end-to-end UX loop before checkpointing again.
 
-- [x] Run a full browser-based Fix → Review → Fix → Review → Confirm UX loop on the live workspace flow, including task selection, Task Inspector tabs, Global Memory, Draft memory note, composer focus, provider controls, file controls, and visible error states.
-- [x] Document concrete browser-loop evidence before checkpointing again, including screenshots or machine-readable results from each pass.
-- [x] Fix any issue found during the browser loop, add focused regression coverage where feasible, then re-run automated validation and the confirmation browser pass.
+- [ ] Run a full browser-based Fix → Review → Fix → Review → Confirm UX loop on the live workspace flow, including task selection, Task Inspector tabs, Global Memory, Draft memory note, composer focus, provider controls, file controls, and visible error states.
+- [ ] Document concrete browser-loop evidence before checkpointing again, including screenshots or machine-readable results from each pass.
+- [ ] Fix any issue found during the browser loop, add focused regression coverage where feasible, then re-run automated validation and the confirmation browser pass.
 
 - [x] Read `PORTAL_PHASE_1_DIRECTIVE.md` completely, with no skimming, and enforce Section 1-only scope before implementation.
 - [x] Implement Section 1 Build Targets additively without refactoring or modifying shipped features from commit `e01f66e`.
@@ -244,3 +244,72 @@
 - [x] Implement Section 8 Stop behavior so users can stop active generation with clear UI state and no accidental duplicate sends.
 - [x] Add focused regression and browser acceptance coverage for Section 8 queue and Stop behavior.
 - [x] Run Section 8 acceptance and full validation gates, repair only Section 8 defects, then checkpoint, commit, push to public `main`, and stop for PO review before declaring Phase 1 complete.
+
+- [x] Append Phase 1 final closeout entry to `portal-build-log.md` per §9.3 with accepted SHAs `e0571f3`, `52bf8376`, and `0649bb0`, then commit and push the closeout change.
+
+- [x] Section 2 governance schema: add Build Target governance files storage and generated migration.
+- [x] Section 2 governance loader: resolve task → Build Branch → Build Target, load static/dynamic governance documents, and report required/optional misses.
+- [x] Section 2 governance blocking: block Build Mode task execution when required governance files are missing and log clear AI Activity evidence.
+- [x] Section 2 governance prompt injection: prepend loaded governance documents on every Build Mode wrapper turn.
+- [x] Section 2 governance budget guard: enforce Claude/Kimi governance token budgets with optional drops, required truncation, and AI Activity logging.
+- [x] Section 2 Governance Files UI: add editable add/remove/reorder settings rows with required/dynamic/role/resolver validation.
+- [x] Section 2 acceptance tests: cover schema, loader, UI validation, blocking, prompt injection, legacy behavior, and token budget behavior without skipped tests.
+- [x] Section 2 closeout: pass validation, append portal build log, commit and push `feat(governance): add per-task governance auto-load [PORTAL-P2-S2-01]`.
+
+- [x] Reporting convention: every section completion report must include the full GitHub commit URL on its own line in the format `Commit URL: https://github.com/viyo-ai/AI-API-Web-Portal-v2/commit/<full-SHA>`.
+
+- [ ] Section 3 Skill Libraries directive ingestion: re-read `PORTAL_PHASE_2_DIRECTIVE.md` Section 3 and required VIYO protocols before implementation.
+- [ ] Section 3 Skill Libraries schema and migration: add only the persistence required for Skill Libraries while preserving approved Section 2 behavior.
+- [ ] Section 3 Skill Libraries backend contracts: implement library persistence, selection, validation, and Build Mode resolution per directive acceptance requirements.
+- [ ] Section 3 Skill Libraries prompt integration: wire selected skill library content into Build Mode execution without altering Section 2 governance ordering or behavior.
+- [ ] Section 3 Skill Libraries owner UI: add the required Skill Libraries management and selection flows with validation and clear non-placeholder behavior.
+- [ ] Section 3 acceptance tests: cover schema, backend contracts, UI validation, Build Mode integration, Section 2 regression, and legacy non-Build behavior without skipped tests.
+- [ ] Section 3 closeout: pass validation, append `portal-build-log.md`, commit and push Section 3, report standalone `Commit URL: https://github.com/viyo-ai/AI-API-Web-Portal-v2/commit/<full-SHA>`, then stop before Section 1A.
+
+## Phase 2 Section 3 Rewrite — §3A Plain-Language Vocabulary
+
+- [x] Re-read VIYO development protocol, VIYO document ingestion protocol, and the frozen PHASE_2_SECTION_3_REWRITE.md before implementing §3A.
+- [x] Implement §3A only: rename user-facing Phase 1 and Section 2 labels to the approved plain-language vocabulary while preserving database/API compatibility.
+- [x] Add or update focused acceptance tests proving §3A labels are present and old owner-facing labels are removed from the UI copy.
+- [x] Run §3A validation gate: pnpm check, pnpm test with no skipped tests, and pnpm build.
+- [x] Append §3A closeout evidence to portal-build-log.md.
+- [x] Commit and push §3A only, then stop for PO review before starting rewritten §3 Skills or §1A wizard.
+
+## Phase 2 Rewritten §3 — Skill Libraries
+
+- [x] Re-ingest `PHASE_2_SECTION_3_REWRITE.md` §3 and required VIYO protocols after §3A approval, with §1A explicitly deferred.
+- [x] Discard or avoid any paused Section 3 work that does not fit the revised Manus-style Skills design.
+- [x] Implement Skill Library persistence and server contracts needed for official skills, uploaded skills, AI-built skills, GitHub-imported skills, and project selection.
+- [x] Build a Manus-style Skill Libraries card-grid UI with exactly four creation paths: Build with AI, Upload, Add from official, and Import from GitHub.
+- [x] Wire selected Skill Libraries into project-mode execution without altering accepted §3A vocabulary or Section 2 Project rule book ordering.
+- [x] Add focused §3 acceptance and regression tests for persistence, server contracts, four creation paths, UI validation, prompt integration, and §3A/Section 2 non-regression.
+- [x] Run rewritten §3 validation gate: `pnpm check`, `pnpm test` with no skipped tests, and `pnpm build`.
+- [x] Append rewritten §3 closeout evidence to `portal-build-log.md`.
+- [x] Commit and push rewritten §3 only, report standalone `Commit URL: https://github.com/viyo-ai/AI-API-Web-Portal-v2/commit/<full-SHA>`, then stop before §1A.
+
+- [x] §3 approval follow-up: append a build-log note documenting that commit 650fbf9 should be associated with task ID [PORTAL-P2-S3-01], then make a prefixed follow-up commit without force-pushing.
+- [x] §3 approval follow-up: restore markdown rendering for assistant messages in `AIChatBox.tsx` or implement an equivalent no-regression markdown renderer that passes tests and build.
+- [x] §3 approval follow-up: re-run `pnpm check`, `pnpm test`, and `pnpm build` before reporting the follow-up commit URL and remaining paused before §1A.
+
+- [x] §1A: Re-ingest `PORTAL_PHASE_2_DIRECTIVE.md` §1A.1–§1A.4 and mandatory VIYO development guidance, with Phase 2 closeout explicitly deferred.
+- [x] §1A: Audit existing Project creation/settings, Repo URL, Project rule book, and AI Activity flows before changing the wizard.
+- [x] §1A: Implement the LLM-driven Project setup wizard server contract using existing secure server-side LLM helpers without exposing credentials in the browser.
+- [x] §1A: Build the owner-facing Project setup wizard UI using accepted §3A vocabulary: Project, Repo URL, Project rule books, AI Activity, and Project setup.
+- [x] §1A: Ensure generated wizard recommendations can populate or update Project setup fields without breaking existing manual Project configuration behavior.
+- [x] §1A: Add focused §1A acceptance and regression tests for directive coverage, §3A vocabulary, LLM contract shape, Project rule book wiring, and non-regression of §3 Skill Libraries.
+- [x] §1A: Run `pnpm check`, `pnpm test`, and `pnpm build`; append §1A closeout evidence to `portal-build-log.md`.
+- [x] §1A: Commit and push with required prefixed format and `[PORTAL-P2-S1A-01]`, then report the standalone commit URL and stop for §1A acceptance.
+
+- [x] §1A acceptance spot-check: paste raw committed contents for the wizard procedures/helpers, migration/schema table, contract test, and wizard UI components before starting §4.
+- [x] §1A acceptance spot-check: verify exact model configuration, 90-second timeout enforcement, cache-HIT coverage, and temp-clone cleanup behavior; add a cache-HIT test if missing.
+
+- [x] §1A-FU-01: Add a behavioral cache-HIT tRPC test that mocks cache hit, connection check, clone/revparse, calls analyzeWizard, and proves LLM/cache-write bypass while keeping the structural test.
+- [x] §1A-FU-02: Add operational visibility logging for `[wizard] Project analysis model: ${CLAUDE_DEFAULT_MODEL}` at startup or first analyzeWizard invocation.
+- [x] §1A-FU-03: Document and align 90-second timeout intent for analyzeWizard, refactoring to a composite full-path budget if that is the directive intent.
+- [x] §1A-FU validation: Run `pnpm check`, focused Section 1 contract test, and `pnpm test --run`; commit and push a single `[PORTAL-P2-S1A-FU-01]` follow-up without starting §4.
+
+- [x] Operational pause: restart the project service on user request and confirm §4 remains paused.
+
+- [x] §1A-FU resume: verify current FU-01/FU-02/FU-03 implementation state, complete required validation gates, push one `[PORTAL-P2-S1A-FU-01]` commit, and stop before §4.
+- [x] §1A-FU validation hardening: make the live provider credential smoke-test retry transient network exceptions such as Anthropic TLS ECONNRESET without changing product behavior.
+- [x] Fresh Manus publish checkpoint: save a current checkpoint for the validated §1A follow-up work so the user has an up-to-date publish point without starting §4.

@@ -64,7 +64,7 @@ export function assertBranchIsNotProtected(branchName: string, protectedBranches
 export function assertConventionalCommitMessage(message: string) {
   const firstLine = message.split("\n")[0]?.trim() ?? "";
   if (!conventionalCommitPattern.test(firstLine)) {
-    throw new Error("Push blocked: latest commit message must use Conventional Commit format, for example feat(scope): concise summary.");
+    throw new Error("Push blocked: latest commit message must use commit message format, for example feat(scope): concise summary.");
   }
   return firstLine;
 }
@@ -96,7 +96,7 @@ export function normalizeAgentEnvVarMap(value: unknown): AgentEnvVarMap {
 export function normalizeGithubRepoUrl(repoUrl: string) {
   const cleanUrl = repoUrl.trim().replace(/\.git$/, "");
   if (!/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(cleanUrl)) {
-    throw new Error("Section 1 Build Targets accept HTTPS GitHub repository URLs only, for example https://github.com/org/repo.");
+    throw new Error("Section 1 Projects accept HTTPS GitHub repository URLs only, for example https://github.com/org/repo.");
   }
   return `${cleanUrl}.git`;
 }
@@ -169,7 +169,7 @@ if git diff --cached --name-only | grep -Fx ".env.agent" >/dev/null 2>&1; then
 fi
 subject="$(git log -1 --pretty=%s)"
 printf '%s' "$subject" | grep -Eq '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._-]+\))?: .{1,200}$' || {
-  echo "Section 4 push blocked: latest commit message must use Conventional Commit format." >&2
+  echo "Section 4 push blocked: latest commit message must use commit message format." >&2
   exit 1
 }
 `;
@@ -266,7 +266,7 @@ export async function pushBranch(params: {
     return { pushState: "pushed", pushedCommit };
   } catch (error) {
     const errorMessage = redactRepoUrl(error instanceof Error ? error.message : String(error));
-    return { pushState: /blocked|protected|Conventional Commit|clean before pushing|never be staged/i.test(errorMessage) ? "blocked" : "error", errorMessage };
+    return { pushState: /blocked|protected|commit message|clean before pushing|never be staged/i.test(errorMessage) ? "blocked" : "error", errorMessage };
   }
 }
 

@@ -22,6 +22,8 @@ const createBuildTargetMock = vi.fn();
 const updateBuildTargetSettingsMock = vi.fn();
 const createBuildBranchMock = vi.fn();
 const pushBuildBranchMock = vi.fn();
+const analyzeWizardMock = vi.fn();
+const completeWizardMock = vi.fn();
 const filesystemTreeRefetchMock = vi.fn(async () => undefined);
 const filesystemWriteMock = vi.fn();
 const filesystemMkdirMock = vi.fn();
@@ -140,6 +142,22 @@ let mockCredentialStates = [
   { provider: "claude", configured: false, status: "missing", reason: "Missing CLAUDE_API_KEY." },
   { provider: "kimi", configured: true, status: "configured", reason: "Cloudflare Workers AI credentials are present." },
 ];
+let mockBuildTargets: Array<{
+  id: number;
+  ownerUserId: number;
+  name: string;
+  repoUrl: string;
+  defaultBaseBranch: string;
+  protectedBranchesJson: string;
+  validationCommandsJson: string;
+  serviceChecksJson: string;
+  agentEnvVarMapJson: string;
+  governanceFilesJson: string;
+  governanceBudgetEnforced: boolean;
+  archivedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}> = [];
 
 vi.mock("@/_core/hooks/useAuth", () => ({
   useAuth: () => ({
@@ -172,7 +190,7 @@ vi.mock("@/lib/trpc", () => ({
       memory: { list: { invalidate: invalidateMock } },
       credentials: { status: { invalidate: invalidateMock } },
       filesystem: { tree: { invalidate: invalidateMock }, read: { invalidate: invalidateMock } },
-      buildTargets: { list: { invalidate: invalidateMock }, get: { invalidate: invalidateMock }, testConnection: { invalidate: invalidateMock }, updateSettings: { invalidate: invalidateMock } },
+      buildTargets: { list: { invalidate: invalidateMock }, get: { invalidate: invalidateMock }, testConnection: { invalidate: invalidateMock }, updateSettings: { invalidate: invalidateMock }, analyzeWizard: { invalidate: invalidateMock }, completeWizard: { invalidate: invalidateMock } },
       buildBranch: { list: { invalidate: invalidateMock }, getStatus: { invalidate: invalidateMock } },
       buildBranches: { list: { invalidate: invalidateMock }, status: { invalidate: invalidateMock }, push: { invalidate: invalidateMock } },
     }),
@@ -238,11 +256,13 @@ vi.mock("@/lib/trpc", () => ({
       upload: { useMutation: () => ({ mutateAsync: uploadWorkspaceFileMock, isPending: false }) },
     },
     buildTargets: {
-      list: { useQuery: () => ({ data: [], isLoading: false }) },
+      list: { useQuery: () => ({ data: mockBuildTargets, isLoading: false }) },
       get: { useQuery: () => ({ data: undefined, isLoading: false }) },
       create: { useMutation: () => ({ mutateAsync: createBuildTargetMock, isPending: false }) },
       updateSettings: { useMutation: () => ({ mutateAsync: updateBuildTargetSettingsMock, isPending: false }) },
       testConnection: { useMutation: () => ({ mutateAsync: vi.fn(async () => ({ ok: false, message: "No token configured.", tokenConfigured: false })), isPending: false }) },
+      analyzeWizard: { useMutation: () => ({ mutateAsync: analyzeWizardMock, isPending: false }) },
+      completeWizard: { useMutation: () => ({ mutateAsync: completeWizardMock, isPending: false }) },
     },
     buildBranch: {
       list: { useQuery: vi.fn(() => ({ data: [], isLoading: false })) },
@@ -324,6 +344,9 @@ beforeEach(() => {
   credentialsRefreshMock.mockReset();
   createBuildTargetMock.mockReset();
   createBuildBranchMock.mockReset();
+  pushBuildBranchMock.mockReset();
+  analyzeWizardMock.mockReset();
+  completeWizardMock.mockReset();
   filesystemTreeRefetchMock.mockReset();
   filesystemWriteMock.mockReset();
   filesystemMkdirMock.mockReset();
@@ -337,6 +360,49 @@ beforeEach(() => {
   stopGenerationMock.mockResolvedValue({ stopped: true, stop: { destructiveOperation: false, boundary: "before_next_generation_step" } });
   createFileMetadataMock.mockResolvedValue(mockTaskFiles[0]);
   attachGlobalToTaskMock.mockResolvedValue({ id: 501, taskId: 7, globalFileId: 56, attachedLabel: "Owner playbook.pdf", file: mockGlobalFiles[0] });
+  createBuildBranchMock.mockResolvedValue({ id: 301, branchName: "feature/plain-language", state: "clean", pushState: "never_pushed", workspacePath: "/tmp/plain-language", taskId: 7 });
+  pushBuildBranchMock.mockResolvedValue({ id: 301, branchName: "feature/plain-language", state: "clean", pushState: "pushed", workspacePath: "/tmp/plain-language", taskId: 7 });
+  analyzeWizardMock.mockResolvedValue({
+    status: "ok",
+    cacheStatus: "miss",
+    connection: { status: "ok", message: "Repository access verified." },
+    repoContext: {
+      normalizedRepoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git",
+      commitSha: "1234567890abcdef",
+      fileCount: 240,
+      scripts: ["check", "test", "build"],
+      detectedFrameworks: ["React", "tRPC"],
+      ruleBookCandidates: [],
+    },
+    recommendation: {
+      defaultBaseBranch: { value: "main", confidence: "high", rationale: "Detected from the GitHub default branch." },
+      branchStrategy: { value: { initialBuildBranch: "portal-wizard-setup", protectedBranches: ["main", "staging"] }, confidence: "medium", rationale: "Keep protected branches read-only and use a separate Build Branch." },
+      validationCommands: { value: ["pnpm check", "pnpm test", "pnpm build"], confidence: "high", rationale: "Detected from package scripts." },
+      serviceChecks: { value: ["pnpm dev"], confidence: "medium", rationale: "Local service command is available." },
+      projectRuleBooks: { value: [], confidence: "low", rationale: "No authoritative Project rule books were detected." },
+      environmentVariables: { value: { PORTAL_GITHUB_TOKEN: "BUILD_TARGET_GITHUB_TOKEN" }, confidence: "medium", rationale: "Maps the agent token alias to the existing GitHub token env var." },
+    },
+    fallbackMessage: null,
+  });
+  completeWizardMock.mockResolvedValue({
+    target: {
+      id: 909,
+      ownerUserId: 42,
+      name: "AI API Portal",
+      repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git",
+      defaultBaseBranch: "main",
+      protectedBranchesJson: JSON.stringify(["main", "staging"]),
+      validationCommandsJson: JSON.stringify(["pnpm check", "pnpm test", "pnpm build"]),
+      serviceChecksJson: JSON.stringify(["pnpm dev"]),
+      agentEnvVarMapJson: JSON.stringify({ PORTAL_GITHUB_TOKEN: "BUILD_TARGET_GITHUB_TOKEN" }),
+      governanceFilesJson: JSON.stringify([]),
+      governanceBudgetEnforced: true,
+      archivedAt: null,
+      createdAt: 1777999500000,
+      updatedAt: 1777999500000,
+    },
+    branch: { id: 910, branchName: "portal-wizard-setup", baseBranch: "main", state: "syncing", pushState: "never_pushed", workspacePath: "/tmp/portal-wizard-setup", taskId: null },
+  });
   uploadWorkspaceFileMock.mockResolvedValue({
     relativePath: "uploads/1777999300000-owner-brief.txt",
     storageKey: "task-7/uploads/owner-brief.txt",
@@ -394,6 +460,7 @@ beforeEach(() => {
     { provider: "claude", configured: false, status: "missing", reason: "Missing CLAUDE_API_KEY." },
     { provider: "kimi", configured: true, status: "configured", reason: "Cloudflare Workers AI credentials are present." },
   ];
+  mockBuildTargets = [];
 } );
 
 afterEach(() => {
@@ -431,6 +498,99 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(screen.queryByText(/TerminalPanel|WorkspaceCommandCenter|FilesystemPanel/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/PTY shell terminal/i)).not.toBeInTheDocument();
     expect(FakeWebSocket.instances).toHaveLength(0);
+  });
+
+  it("runs the §1A LLM-driven Project setup wizard and preserves Advanced setup fallback", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    expect(await screen.findByTestId("project-setup-wizard")).toBeInTheDocument();
+    expect(screen.getByText(/Project setup wizard/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Advanced setup/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Advanced setup/i }));
+    expect(screen.getByTestId("advanced-project-setup")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Test connection/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Add Project/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Use setup wizard/i }));
+
+    await user.clear(screen.getByLabelText(/Project name/i));
+    await user.type(screen.getByLabelText(/Project name/i), "AI API Portal");
+    await user.type(screen.getByLabelText(/Repo URL/i), "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git");
+    await user.click(screen.getByRole("button", { name: /Analyze Project/i }));
+
+    await waitFor(() => expect(analyzeWizardMock).toHaveBeenCalledWith({
+      displayName: "AI API Portal",
+      repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git",
+      githubTokenEnvVar: "BUILD_TARGET_GITHUB_TOKEN",
+      defaultBaseBranch: "main",
+    }));
+    expect(await screen.findByTestId("project-wizard-review")).toBeInTheDocument();
+    expect(screen.getAllByTestId("setup-wizard-review-card")).toHaveLength(6);
+    expect(screen.getByText(/Review AI recommendations/i)).toBeInTheDocument();
+    expect(screen.getByText(/No Project rule books were detected/i)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(/pnpm check/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Confirm and create Project/i }));
+
+    await waitFor(() => expect(completeWizardMock).toHaveBeenCalledWith(expect.objectContaining({
+      displayName: "AI API Portal",
+      repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git",
+      githubTokenEnvVar: "BUILD_TARGET_GITHUB_TOKEN",
+      defaultBaseBranch: "main",
+      initialBuildBranch: "portal-wizard-setup",
+      protectedBranches: ["main", "staging"],
+      validationCommands: ["pnpm check", "pnpm test", "pnpm build"],
+      serviceChecks: ["pnpm dev"],
+      governanceFiles: [],
+      agentEnvVarMap: { PORTAL_GITHUB_TOKEN: "BUILD_TARGET_GITHUB_TOKEN" },
+    })));
+    await waitFor(() => expect(screen.getAllByText(/Project created/i).length).toBeGreaterThan(0));
+  });
+
+  it("renders §3A plain-language project and rule-book vocabulary without legacy owner labels", async () => {
+    const user = userEvent.setup();
+    mockBuildTargets = [
+      {
+        id: 77,
+        ownerUserId: 42,
+        name: "AI API Portal",
+        repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2",
+        defaultBaseBranch: "main",
+        protectedBranchesJson: JSON.stringify(["main", "staging"]),
+        validationCommandsJson: JSON.stringify(["pnpm check", "pnpm test"]),
+        serviceChecksJson: JSON.stringify([]),
+        agentEnvVarMapJson: JSON.stringify({ WORKSHOP_GITHUB_TOKEN: "BUILD_TARGET_GITHUB_TOKEN" }),
+        governanceFilesJson: JSON.stringify([{ path: "docs/rules.md", role: "governance", required: true, dynamic: false }]),
+        governanceBudgetEnforced: true,
+        archivedAt: null,
+        createdAt: 1777999300000,
+        updatedAt: 1777999400000,
+      },
+    ];
+
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    expect(screen.getAllByText(/Projects/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Project: AI API Portal/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Project rule books/i)).toBeInTheDocument();
+    expect(screen.getByText(/Files in your repo that the AI reads on every task/i)).toBeInTheDocument();
+    expect(screen.getByText(/Path includes current focus/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Rule book/i }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /Current focus indicator/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Focus indicator name/i)).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText(/feature\/portal-task/i), "feature/plain-language");
+    await user.click(screen.getByRole("button", { name: /^Open$/i }));
+    expect(await screen.findByText(/Push checks: protected branches blocked/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Push branch$/i })).toBeInTheDocument();
+    expect(screen.getByText(/Push status: Never pushed/i)).toBeInTheDocument();
+
+    const ownerCopy = document.body.textContent ?? "";
+    ["Build Target", "Build Mode", "Governance Files", "Validation Commands", "Service Checks", "Agent Env Var", "Conventional Commit", "Token Budget", "Pre-push Hook"].forEach((legacyLabel) => {
+      expect(ownerCopy).not.toContain(legacyLabel);
+    });
   });
 
   it("drafts an empty-memory note into the focused task composer", async () => {
