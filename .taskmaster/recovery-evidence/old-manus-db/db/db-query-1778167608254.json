@@ -1,0 +1,19 @@
+{
+  "query": "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('__drizzle_migrations','drizzle__migrations');\nSELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE '%migration%';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3aAiEZGvt2NNVee.ae03d21acc17 --database 5KVWo4UoTpTyEXqmynzSfU --execute SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('__drizzle_migrations','drizzle__migrations');\nSELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE '%migration%';",
+  "rows": [
+    {
+      "TABLE_NAME": "__drizzle_migrations"
+    },
+    {
+      "TABLE_NAME": "TABLE_SCHEMA\tTABLE_NAME"
+    },
+    {
+      "TABLE_NAME": "5KVWo4UoTpTyEXqmynzSfU\t__drizzle_migrations"
+    }
+  ],
+  "messages": [],
+  "stdout": "TABLE_NAME\n__drizzle_migrations\nTABLE_SCHEMA\tTABLE_NAME\n5KVWo4UoTpTyEXqmynzSfU\t__drizzle_migrations\n",
+  "stderr": "",
+  "execution_time_ms": 57
+}

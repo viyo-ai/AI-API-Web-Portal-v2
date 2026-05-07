@@ -5,6 +5,7 @@ const dbMocks = vi.hoisted(() => ({
   completeTurn: vi.fn().mockResolvedValue(undefined),
   failTurn: vi.fn().mockResolvedValue(undefined),
   updateTaskStatus: vi.fn().mockResolvedValue(undefined),
+  updateTurnApprovalState: vi.fn().mockResolvedValue(undefined),
   updateTurnState: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -179,5 +180,63 @@ describe("Wrapper LLM v2 provider execution routes", () => {
     expect(call0Body.thinking).not.toHaveProperty("budget_tokens");
     expect(call2Body.thinking).not.toHaveProperty("budget_tokens");
     expect(dbMocks.failTurn).not.toHaveBeenCalled();
+  });
+
+  it("pauses dual Claude-to-Kimi turns after Claude planning when owner approval is required", async () => {
+    const fetchSpy = mockSuccessfulFetch();
+
+    const result = await executeWrapperTurn({
+      ...executionInput("dual"),
+      requireApprovalBeforeKimi: true,
+    });
+
+    expect(result).toMatchObject({
+      route: "dual",
+      claudePlan: "Claude produced a plan.",
+      finalAnswer: "Claude planning is ready for owner approval before Kimi runs.",
+      awaitingApproval: true,
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("api.anthropic.com/v1/messages");
+    expect(fetchSpy.mock.calls.some((call) => String(call[0]).includes("api.cloudflare.com/client/v4/accounts"))).toBe(false);
+    expect(dbMocks.updateTurnApprovalState).toHaveBeenCalledWith(expect.objectContaining({
+      turnId: 104,
+      ownerUserId: 9,
+      state: "awaiting_approval",
+      approvalStatus: "awaiting_owner",
+      approvalPlanContent: "Claude produced a plan.",
+      approvalResolvedAt: null,
+    }));
+    expect(dbMocks.completeTurn).not.toHaveBeenCalledWith(104, 9);
+  });
+
+  it("resumes approved dual handoffs by sending the stored Claude plan to Kimi without invoking Claude planning again", async () => {
+    const fetchSpy = mockSuccessfulFetch();
+
+    const result = await executeWrapperTurn({
+      ...executionInput("dual"),
+      approvedClaudePlan: "Stored approved Claude plan.",
+      requireApprovalBeforeKimi: false,
+    });
+
+    expect(result).toMatchObject({
+      route: "dual",
+      claudePlan: "Stored approved Claude plan.",
+      kimiResult: "Kimi produced execution output.",
+      claudeReview: "Claude reviewed final answer.",
+      finalAnswer: "Claude reviewed final answer.",
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("api.cloudflare.com/client/v4/accounts");
+    expect(String(fetchSpy.mock.calls[1]?.[0])).toContain("api.anthropic.com/v1/messages");
+    const kimiBody = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body ?? "{}"));
+    expect(JSON.stringify(kimiBody)).toContain("Stored approved Claude plan.");
+    expect(dbMocks.updateTurnApprovalState).toHaveBeenCalledWith(expect.objectContaining({
+      turnId: 104,
+      ownerUserId: 9,
+      state: "model_calling",
+      approvalStatus: "approved",
+      approvalPlanContent: "Stored approved Claude plan.",
+    }));
   });
 });

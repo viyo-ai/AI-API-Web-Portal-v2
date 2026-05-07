@@ -2,6 +2,7 @@ import { eq, and } from "drizzle-orm";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { buildBranches, buildTargets, tasks } from "../../drizzle/schema";
+import { storageGetSignedUrl } from "../storage";
 
 export type GovernanceFileRole = "governance" | "placeholder_resolver";
 
@@ -13,11 +14,15 @@ export type GovernanceFileConfig = {
   resolverKey?: string;
 };
 
+export type GovernanceDocumentSource = "root_default" | "project" | "manual";
+
 export type LoadedGovernanceDocument = {
   path: string;
   resolvedPath: string;
   content: string;
   required: boolean;
+  source: GovernanceDocumentSource;
+  sourceLabel: string;
 };
 
 export type GovernanceLoadResult = {
@@ -141,6 +146,38 @@ async function readGovernanceText(workspacePath: string, relativePath: string) {
   return content;
 }
 
+function sourceLabel(source: GovernanceDocumentSource) {
+  if (source === "root_default") return "Root default";
+  if (source === "project") return "Project";
+  return "Manual";
+}
+
+async function fetchStoredText(storageKey: string) {
+  const signedUrl = await storageGetSignedUrl(storageKey);
+  const response = await fetch(signedUrl);
+  if (!response.ok) {
+    throw new Error(`Unable to load root governance Global File (${response.status})`);
+  }
+  return response.text();
+}
+
+async function loadRootGovernanceDocuments(ownerUserId: number): Promise<LoadedGovernanceDocument[]> {
+  const { listRootGovernanceGlobalFilesForOwner } = await import("../db");
+  const files = await listRootGovernanceGlobalFilesForOwner(ownerUserId);
+  const documents: LoadedGovernanceDocument[] = [];
+  for (const file of files) {
+    documents.push({
+      path: file.relativePath,
+      resolvedPath: file.relativePath,
+      content: await fetchStoredText(file.storageKey),
+      required: true,
+      source: "root_default" as const,
+      sourceLabel: sourceLabel("root_default"),
+    });
+  }
+  return documents;
+}
+
 function substituteDynamicPath(entry: GovernanceFileConfig, resolvers: Map<string, string>) {
   let missingResolver = false;
   const resolvedPath = entry.path.replace(/\{([A-Za-z0-9_-]+)\}/g, (_match, key: string) => {
@@ -165,8 +202,13 @@ export async function loadGovernanceForTask(taskId: string | number): Promise<Go
 
   const taskRows = await db.select().from(tasks).where(eq(tasks.id, numericTaskId)).limit(1);
   const task = taskRows[0];
-  if (!task?.buildBranchId) {
-    return { documents: [], missingRequired: [], skippedOptional: [], loadDurationMs: 0, budgetEnforcementEnabled: true };
+  if (!task) {
+    return { documents: [], missingRequired: [`Task ${numericTaskId}`], skippedOptional: [], loadDurationMs: Date.now() - startedAt, budgetEnforcementEnabled: true };
+  }
+
+  const rootDocuments = await loadRootGovernanceDocuments(task.ownerUserId);
+  if (!task.buildBranchId) {
+    return { documents: rootDocuments, missingRequired: [], skippedOptional: [], loadDurationMs: Date.now() - startedAt, budgetEnforcementEnabled: true };
   }
 
   const branchRows = await db
@@ -191,7 +233,7 @@ export async function loadGovernanceForTask(taskId: string | number): Promise<Go
 
   const config = parseGovernanceFiles(target.governanceFilesJson);
   if (config.length === 0) {
-    return { documents: [], missingRequired: [], skippedOptional: [], loadDurationMs: 0, targetName: target.name, budgetEnforcementEnabled: target.governanceBudgetEnforced !== false };
+    return { documents: rootDocuments, missingRequired: [], skippedOptional: [], loadDurationMs: Date.now() - startedAt, targetName: target.name, budgetEnforcementEnabled: target.governanceBudgetEnforced !== false };
   }
 
   const resolvers = new Map<string, string>();
@@ -208,7 +250,7 @@ export async function loadGovernanceForTask(taskId: string | number): Promise<Go
     }
   }
 
-  const documents: LoadedGovernanceDocument[] = [];
+  const documents: LoadedGovernanceDocument[] = [...rootDocuments];
   const missingRequired: string[] = [];
   const skippedOptional: string[] = [];
 
@@ -222,7 +264,14 @@ export async function loadGovernanceForTask(taskId: string | number): Promise<Go
     }
     try {
       const content = await readGovernanceText(branch.workspacePath, resolvedPath);
-      documents.push({ path: entry.path, resolvedPath, content, required: entry.required });
+      documents.push({
+        path: entry.path,
+        resolvedPath,
+        content,
+        required: entry.required,
+        source: "project",
+        sourceLabel: sourceLabel("project"),
+      });
     } catch {
       if (entry.required) missingRequired.push(resolvedPath || entry.path);
       else skippedOptional.push(resolvedPath || entry.path);
@@ -244,7 +293,7 @@ function estimateTokensForDocuments(documents: LoadedGovernanceDocument[]) {
 }
 
 function truncateDocumentToBudget(document: LoadedGovernanceDocument, availableTokens: number): LoadedGovernanceDocument {
-  const footer = `\n\n[truncated by portal — full file at ${document.resolvedPath}]`;
+  const footer = `\n\n[truncated by portal — source: ${document.sourceLabel}; full file at ${document.resolvedPath}]`;
   const availableChars = Math.max(0, availableTokens * 4 - footer.length);
   const eightyPercentChars = Math.floor(document.content.length * 0.8);
   const targetChars = Math.max(0, Math.min(eightyPercentChars, availableChars));
@@ -277,14 +326,14 @@ export function enforceGovernanceBudget(input: {
     const dropIndex = documents.map((document, index) => ({ document, index })).reverse().find((item) => !item.document.required)?.index;
     if (dropIndex === undefined) break;
     const [dropped] = documents.splice(dropIndex, 1);
-    droppedOptional.push(dropped.resolvedPath);
+    droppedOptional.push(`${dropped.sourceLabel}: ${dropped.resolvedPath}`);
   }
 
   while (estimateTokensForDocuments(documents) > budgetTokens && documents.length > 0) {
     const largest = documents.reduce((best, document, index) => (document.content.length > documents[best].content.length ? index : best), 0);
     const otherTokens = estimateTokensForDocuments(documents.filter((_, index) => index !== largest));
     const availableTokens = Math.max(1, budgetTokens - otherTokens);
-    const originalPath = documents[largest].resolvedPath;
+    const originalPath = `${documents[largest].sourceLabel}: ${documents[largest].resolvedPath}`;
     documents[largest] = truncateDocumentToBudget(documents[largest], availableTokens);
     truncated.push(originalPath);
     if (estimateTokensForDocuments(documents) <= budgetTokens) break;
@@ -305,7 +354,7 @@ export function renderGovernanceBlock(input: { targetName?: string; documents: L
   if (input.documents.length === 0) return "";
   const targetLine = input.targetName ? `You are operating inside the ${input.targetName} build pipeline.` : "You are operating inside the configured build pipeline.";
   const documents = input.documents
-    .map((document) => `=== ${document.path} ===\n${document.content}`)
+    .map((document) => `=== ${document.path} [source: ${document.sourceLabel}] ===\n${document.content}`)
     .join("\n\n");
   return `${targetLine}\n\nThe following rule book documents are authoritative for this task. Read them\nin order before responding to the task instruction. Treat any conflict between\nyour prior knowledge and these documents as resolved by the documents.\n\n${documents}\n\nHard rules:\n- Do not modify any of the rule book documents listed above\n- Out-of-scope work is logged, not done; use the file the project's governance designates for gap logging\n- Conventional commits with task ID\n- Run validation before claiming complete`;
 }

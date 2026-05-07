@@ -312,36 +312,51 @@
 
 - [x] §1A-FU resume: verify current FU-01/FU-02/FU-03 implementation state, complete required validation gates, push one `[PORTAL-P2-S1A-FU-01]` commit, and stop before §4.
 - [x] §1A-FU validation hardening: make the live provider credential smoke-test retry transient network exceptions such as Anthropic TLS ECONNRESET without changing product behavior.
-- [ ] Fresh Manus publish checkpoint: save a current checkpoint for the validated §1A follow-up work so the user has an up-to-date publish point without starting §4.
-
-- [x] §4 acceptance spot-check package: provide raw committed contents and focused code-path answers from commit `fa21473c8cbe0354301615a1a22a96cf5c602afa`, then stop before §8 or §4.5.
-
-- [x] §4.5 preparation branch: commit the six attached preparation files in the requested Portal repo layout without starting §4.5 implementation, invariant tests, §8, or §4.5 build work.
-
-- [x] §4.5 prep cleanup: on `agent-work/s4-5-prep-inputs`, delete `PORTAL_CLAUDE.md` and `PORTAL_OPERATING_PRINCIPLES.md`, add `CLAUDE.md`, `FOUNDATION_LOCK.md`, `BULLET_1_DIRECTIVE.md`, and `CURRENT_BULLET.txt` from attachments, verify copy integrity, commit and push without beginning §4.5 implementation.
-
-- [x] Confirmed `PORTAL-P2-S4-5-PREP-02` cleanup: delete `PORTAL_CLAUDE.md` and `PORTAL_OPERATING_PRINCIPLES.md`, add only `CLAUDE.md`, `FOUNDATION_LOCK.md`, `BULLET_1_DIRECTIVE.md`, and `CURRENT_BULLET.txt`, push to `agent-work/s4-5-prep-inputs`, and hold §4.5 implementation until Product Owner acceptance.
-
-- [x] §4.5 implementation: produce `.taskmaster/docs/ingestion-evidence/PORTAL_PHASE_2_DIRECTIVE-S4-5-ingestion.md` before code changes, implement the nine `INV-S4-5-XX` invariants, include four root Global Files as Portal-wide defaults that load before Project files, run all required validation gates, push with `[PORTAL-P2-S4-5-XX]`, and hold for Product Owner sign-off without starting §1A-FU-04 or §8.
-- [x] §4.5 Project-to-task wiring backend, UI, migration, and regression contracts
-- [x] §4.5 acceptance spot-check package: provide raw committed contents/diffs from commit `ed25fb5fdd5effe633092b6c9e9a3c9071aef759`, answer INV-S4-5-02 through INV-S4-5-09 and HR-11, and hold without starting §1A-FU-04 or §8.
-- [x] §4.5 FU-01 follow-up commit `[PORTAL-P2-S4-5-FU-01]`: implement read-only Project/root-default Global File deletion guard with exact structured error; add Diagnostics terminal Personal workspace vs Project Build Branch toggle; add behavioral tests for vocabulary enforcement and Project picker states; replace invalid source-string contract assertions with behavioral coverage; run all required validation gates; push on the same `agent-work/s4-5-prep-inputs` branch; hold without starting §1A-FU-04 or §8.
-
-- [x] §4.5 FU-01 acceptance spot-check package: provide requested committed file contents/diffs, exact terminal cwd guard line citations, deletion-guard rejection text confirmation, vocabulary-test/OOS status, current test count, and boundary statement without starting §1A-FU-04 or §8.
-
-- [x] Phase 3 §9 directive ingestion: fully ingest `PORTAL_PHASE_3_DIRECTIVE_S9_VERIFIED_HANDOFF.md`, required VIYO protocols, and create `.taskmaster/docs/ingestion-evidence/PORTAL_PHASE_3_DIRECTIVE-S9-ingestion.md` with PORTAL-P3-S9-HR constraints, invariant coverage map, and conservative verdict before claiming readiness.
-- [x] Phase 3 §9 implementation: implement Verified Handoff approval pause using existing wrapper handoff model, queue/stop registry, user preferences, chat thread patterns, and plain-English owner UI without starting §1A-FU-04 or §8.
-- [x] Phase 3 §9 chat cleanup: remove owner-facing technical history, setup placeholder, setup details button, AI coordinator boilerplate, and system-noise rendering from the chat thread while preserving AI Activity diagnostics.
-- [x] Phase 3 §9 behavioral coverage: add behavioral tests for INV-S9-01 through INV-S9-14, Plain-English Owner Standard vocabulary, persisted approval state, revision/cancel/queue flows, and preference behavior.
-- [x] Phase 3 §9 validation and handoff: run required validation gates, commit with `[PORTAL-P3-S9-XX]` prefix as practical, push to GitHub, report full commit URL, and stop at §9 acceptance package for Product Owner review.
-
-- [x] Authorized Phase 3 §9 execution: produce `.taskmaster/docs/ingestion-evidence/PORTAL_PHASE_3_DIRECTIVE-S9-ingestion.md` before code changes; implement INV-S9-01 through INV-S9-14 plus bundled chat cleanup; attach/reference the directive file in the ingestion artifact; keep approval preference default ON for new and unset existing users; run `pnpm check`, focused contract tests, `pnpm test --run`, and `pnpm build`; commit with `[PORTAL-P3-S9-XX]` or `[PORTAL-P3-S9-CLEANUP-XX]`; push and hold for Product Owner sign-off without starting §1A-FU-04 or §8.
-
-- [x] Review uploaded `pasted_content.txt` carefully without skimming; extract all material directives, approvals, blockers, risks, implications for the completed §9 handoff, and recommended next actions before proceeding with any new build section.
-
-- [ ] Produce the no-code §9 spot-check evidence document in the user's exact block order: full requested diffs, migration content, 24-hour timeout status, seven proof answers with file-line citations, and a 14-row invariant-to-test mapping; do not modify source files or begin §1A-FU-04/§8.
+- [x] Fresh Manus publish checkpoint: save a current checkpoint for the validated §1A follow-up work so the user has an up-to-date publish point without starting §4.
 
 - [x] PORTAL-P3-S9-FU-01: Implement 24-hour auto-timeout cleanup for abandoned awaiting_approval turns with behavioral server coverage.
 - [x] PORTAL-P3-S9-FU-01: Add INV-S9-10 owner-facing forbidden-vocabulary behavioral test without silently renaming existing copy.
 - [x] PORTAL-P3-S9-FU-01: Enforce five-request revision cap in requestKimiHandoffRevision with behavioral server coverage.
 - [x] PORTAL-P3-S9-FU-01: Remove tasks.create boilerplate system event at source and add regression coverage.
+
+- [x] Create a Manus managed project checkpoint to enable the Publish button for the current AI Coding Workshop portal state.
+- [x] Sync validated FU-01 commit `0bccee6a890b029484c4f9573a7a2d87e94b7a11` from `agent-work/s4-5-prep-inputs` into the managed Manus project before checkpointing for publish.
+- [x] Fix live Build Targets query failure caused by runtime schema drift for `build_targets` fields used by `targets.list`.
+- [x] Fix live Tasks query failure caused by runtime schema drift for `tasks.buildTargetId` / `tasks.buildBranchId` fields used by task listing.
+- [x] Validate the database repair with focused schema/API checks, full automated validation, managed health check, and a fresh checkpoint.
+
+- [x] Reconcile local Manus database schema with synced code using the repo’s canonical Drizzle migration workflow without modifying migration SQL files.
+- [x] Verify required runtime schema objects exist for the synced code: `tasks.buildTargetId`, task/build-target query columns, §9 approval columns/enums, and `user_preferences.alwaysRequireKimiApproval`; confirm `task_global_file_links.source` is not referenced by the checked-in Drizzle/application code in this managed project state.
+- [x] Restart the local Manus dev service and confirm the `/ ?from_webdev=1` task/build-target queries load without TRPCClientError failures.
+- [x] Update publish-readiness tracking so future sync gates apply pending Drizzle migrations before declaring publish-ready.
+- [x] Save a fresh local Manus checkpoint after schema reconciliation and validation for publishing.
+
+- [ ] Reconcile `global_files` runtime schema drift to the checked-in `drizzle/schema.ts` without modifying schema or migration files.
+- [ ] Run the repo’s canonical Drizzle schema drift check for `global_files`, capture the output, and apply an additive database reconciliation if drift is detected.
+- [ ] Verify `SHOW COLUMNS FROM global_files` includes `id`, `ownerUserId`, `displayName`, `relativePath`, `storageKey`, `storageUrl`, `mimeType`, `sizeBytes`, `source`, `tagsJson`, `createdAt`, and `updatedAt`.
+- [ ] Restart the local Manus dev service and confirm the task global files join query and Attached Global Files panel load without TRPCClientError.
+- [ ] Diagnose the local Vitest 123-versus-133 test-count gap with verbose output without modifying test files.
+- [ ] Confirm whether any missing tests are expected credential-gated skips or an unexpected §9/FU-01 regression requiring investigation.
+- [ ] Save a fresh local Manus publish checkpoint only after the global files schema drift and test-count gap are resolved or confirmed non-blocking.
+
+- [ ] Diagnostics only: run canonical `pnpm drizzle-kit migrate --config=drizzle.config.ts` and capture full output without modifying schema or tests.
+- [ ] Diagnostics only: inspect `__drizzle_migrations` tracking table for recorded migration hashes and timestamps without manual SQL reconciliation.
+- [ ] Diagnostics only: report the full `package.json` scripts block and identify any custom migration runner before Product Owner chooses the reconciliation path.
+
+- [ ] Verify local git status, recent commits, and HEAD against expected S9-FU-01 commit `0bccee6a890b029484c4f9573a7a2d87e94b7a11` before any DB modification.
+- [ ] Confirm missing migration files, including `0012_s9_verified_handoff_approval_gate.sql`, are present on disk before running canonical migration workflow.
+- [ ] Run only the repository canonical migration workflow after migration files are confirmed present; no manual SQL, no schema edits, and no test edits.
+- [ ] Verify `global_files`, `orchestration_turns`, `user_preferences`, and `__drizzle_migrations` after canonical reconciliation.
+- [ ] Restart the dev server and validate Tasks, Projects, existing task, and Files tab flows for resolved TRPCClientError instances.
+
+- [ ] Read-only diagnostic pass: report `git remote -v`, canonical FU-01 origin branch state, checkpoint commit stats, FU-01 reachability, and origin branch diff without branch changes, resets, commits, pushes, migrations, or DB modifications.
+
+- [ ] Read-only recovery Step 1: verify GitHub `agent-work/s4-5-prep-inputs` canonical tip at `0bccee6a890b029484c4f9573a7a2d87e94b7a11` and report fetch, ls-remote, and log outputs.
+- [ ] Recovery Step 2, only if Step 1 passes: create sibling clone `/home/ubuntu/ai-coding-workshop-fresh`, check out `agent-work/s4-5-prep-inputs`, verify HEAD and required `drizzle/` migrations, and stop for PO authorization.
+- [ ] Preserve hard boundaries: no DB modifications, no migrations, no service restart, no schema/test edits, no branch switch/reset in the managed workspace, no commits, no pushes, and no deletion of `/home/ubuntu/ai-coding-workshop-permanent`.
+
+- [ ] Step 3 recovery: preserve old workspace forensic evidence into `/home/ubuntu/ai-coding-workshop-fresh/.taskmaster/recovery-evidence/` before destructive repointing.
+- [ ] Step 3 recovery: identify local development database host/name without exposing credentials, drop/recreate only the authorized local preview database, and rebuild it via canonical migrations.
+- [ ] Step 3 recovery: move divergent workspace to timestamped backup, rename the verified fresh clone to `/home/ubuntu/ai-coding-workshop-permanent`, and preserve the backup directory for forensic review.
+- [ ] Step 3 recovery: run `pnpm install --frozen-lockfile`, `pnpm db:push`, database schema verification, `pnpm check`, `pnpm test --run`, and `pnpm build` without code edits.
+- [ ] Step 3 recovery: restart the managed preview, verify no TRPCClientError on required page-load flows, and report final HEAD/status/backup/gate results while making no commits or pushes.
