@@ -1088,39 +1088,229 @@ describe("Home v2 task-first workspace behavior", () => {
     await waitFor(() => expect(invalidateMock).toHaveBeenCalled());
   });
 
-  it("queues composer submissions while generation is active and exposes queued message edit/remove controls", async () => {
+  it("INV-S8-01 queues composer submissions during an active turn and shows the queue indicator plus dropdown content", async () => {
     const user = userEvent.setup();
     mockThread = {
       task: sampleTask,
-      activeTurn: { id: 44, taskId: 7, ownerUserId: 42, routeMode: "auto", state: "running", startedAt: 1777999200000, completedAt: null, errorMessage: null },
+      activeTurn: { id: 44, taskId: 7, ownerUserId: 42, routeMode: "auto", state: "model_calling", startedAt: 1777999200000, completedAt: null, errorMessage: null },
       queuedMessages: [
         { id: 901, taskId: 7, ownerUserId: 42, position: 1, content: "Already queued follow-up", state: "queued", createdAt: 1777999250000, updatedAt: 1777999250000 },
       ],
       events: [],
     };
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValueOnce("Updated queued follow-up");
     render(<Home />);
 
     await screen.findAllByText("Implement v2 shell");
-    expect(screen.getByTestId("section8-generation-queue-panel")).toHaveTextContent(/Generating now/i);
-    expect(screen.getByTestId("section8-queued-messages")).toHaveTextContent(/Queued #1: Already queued follow-up/i);
+    expect(screen.getByTestId("section8-generation-queue-panel")).toHaveTextContent("Queued messages (will send after current turn)");
+    expect(screen.getByTestId("section8-queue-count")).toHaveTextContent("1 of 5 queued");
+    expect(screen.getByTestId("section8-queued-messages")).toHaveTextContent("Already queued follow-up");
     await user.type(screen.getByLabelText(/Task message/i), "Please queue this next{enter}");
 
     expect(submitMessageMock).toHaveBeenCalledWith({ taskId: 7, message: "Please queue this next", routeMode: "auto" });
     expect(screen.getByRole("button", { name: /Queue message/i })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /^Edit$/i }));
-    expect(updateQueuedMessageMock).toHaveBeenCalledWith({ taskId: 7, queueItemId: 901, content: "Updated queued follow-up" });
-    await user.click(screen.getByRole("button", { name: /^Remove$/i }));
-    expect(clearQueuedMessageMock).toHaveBeenCalledWith({ taskId: 7, queueItemId: 901 });
-    promptSpy.mockRestore();
   });
 
-  it("requests Stop for the active generation turn without sending duplicate composer content", async () => {
+  it("INV-S8-02 renders a collapsible queue dropdown with up to five queued messages and Edit/Cancel actions", async () => {
     const user = userEvent.setup();
     mockThread = {
       task: sampleTask,
-      activeTurn: { id: 45, taskId: 7, ownerUserId: 42, routeMode: "auto", state: "running", startedAt: 1777999200000, completedAt: null, errorMessage: null },
+      activeTurn: { id: 46, taskId: 7, ownerUserId: 42, routeMode: "auto", state: "model_calling", startedAt: 1777999200000, completedAt: null, errorMessage: null },
+      queuedMessages: [1, 2, 3].map((position) => ({ id: 900 + position, taskId: 7, ownerUserId: 42, position, content: `Queued follow-up ${position}`, state: "queued", createdAt: 1777999250000 + position, updatedAt: 1777999250000 + position })),
+      events: [],
+    };
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    const toggle = screen.getByTestId("section8-queue-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const queueList = screen.getByTestId("section8-queued-messages");
+    ["Queued follow-up 1", "Queued follow-up 2", "Queued follow-up 3"].forEach((message) => expect(queueList).toHaveTextContent(message));
+    expect(within(queueList).getAllByRole("button", { name: /^Edit$/i })).toHaveLength(3);
+    expect(within(queueList).getAllByRole("button", { name: /^Cancel$/i })).toHaveLength(3);
+
+    await user.click(toggle);
+    expect(screen.queryByTestId("section8-queued-messages")).not.toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+    expect(screen.getByTestId("section8-queued-messages")).toHaveTextContent("Queued follow-up 3");
+  });
+
+  it("INV-S8-03 edits a queued message inline, saves through the update mutation, and collapses to display mode", async () => {
+    const user = userEvent.setup();
+    mockThread = {
+      task: sampleTask,
+      activeTurn: { id: 47, taskId: 7, ownerUserId: 42, routeMode: "auto", state: "model_calling", startedAt: 1777999200000, completedAt: null, errorMessage: null },
+      queuedMessages: [
+        { id: 901, taskId: 7, ownerUserId: 42, position: 1, content: "Already queued follow-up", state: "queued", createdAt: 1777999250000, updatedAt: 1777999250000 },
+      ],
+      events: [],
+    };
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    await user.click(screen.getByRole("button", { name: /^Edit$/i }));
+    const editBox = screen.getByLabelText("Edit queued message 1");
+    expect(editBox).toHaveValue("Already queued follow-up");
+    await user.clear(editBox);
+    await user.type(editBox, "Updated queued follow-up");
+    await user.click(screen.getByRole("button", { name: /Save changes/i }));
+
+    expect(updateQueuedMessageMock).toHaveBeenCalledWith({ taskId: 7, queueItemId: 901, content: "Updated queued follow-up" });
+    expect(screen.queryByLabelText("Edit queued message 1")).not.toBeInTheDocument();
+    expect(screen.getByTestId("section8-queued-messages")).toHaveTextContent("Updated queued follow-up");
+  });
+
+  it("INV-S8-04 cancels a queued message optimistically and shows a Canceled confirmation", async () => {
+    const user = userEvent.setup();
+    mockThread = {
+      task: sampleTask,
+      activeTurn: { id: 48, taskId: 7, ownerUserId: 42, routeMode: "auto", state: "model_calling", startedAt: 1777999200000, completedAt: null, errorMessage: null },
+      queuedMessages: [
+        { id: 901, taskId: 7, ownerUserId: 42, position: 1, content: "Cancel this queued follow-up", state: "queued", createdAt: 1777999250000, updatedAt: 1777999250000 },
+      ],
+      events: [],
+    };
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    await user.click(screen.getByRole("button", { name: /^Cancel$/i }));
+
+    expect(clearQueuedMessageMock).toHaveBeenCalledWith({ taskId: 7, queueItemId: 901 });
+    expect(screen.queryByText("Cancel this queued follow-up")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Canceled"));
+  });
+
+  it("INV-S8-05 blocks new queue submissions when the queue is full and keeps Enter from submitting", async () => {
+    const user = userEvent.setup();
+    mockThread = {
+      task: sampleTask,
+      activeTurn: { id: 49, taskId: 7, ownerUserId: 42, routeMode: "auto", state: "model_calling", startedAt: 1777999200000, completedAt: null, errorMessage: null },
+      queuedMessages: [1, 2, 3, 4, 5].map((position) => ({ id: 900 + position, taskId: 7, ownerUserId: 42, position, content: `Full queue item ${position}`, state: "queued", createdAt: 1777999250000 + position, updatedAt: 1777999250000 + position })),
+      events: [],
+    };
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    expect(screen.getByTestId("section8-queue-count")).toHaveTextContent("5 of 5 queued (full)");
+    expect(screen.getByText("Queue is full. Wait for the current message to finish, or cancel a queued message.")).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/Task message/i), "This should not queue{enter}");
+
+    expect(screen.getByRole("button", { name: /Queue message/i })).toBeDisabled();
+    expect(submitMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("INV-S8-06 shows Stop only for active states and labels awaiting approval as Stop and discard plan", async () => {
+    const activeStates = ["context_assembly", "model_calling", "model_review", "persisting_output"];
+    for (let index = 0; index < activeStates.length; index += 1) {
+      const state = activeStates[index];
+      cleanup();
+      mockThread = { task: sampleTask, activeTurn: { id: 60 + index, taskId: 7, ownerUserId: 42, routeMode: "auto", state, startedAt: 1777999200000, completedAt: null, errorMessage: null }, queuedMessages: [], events: [] };
+      render(<Home />);
+      await screen.findAllByText("Implement v2 shell");
+      expect(screen.getByTestId("section8-stop-generation")).toHaveTextContent("Stop");
+      expect(screen.queryByRole("button", { name: /Stop and discard plan/i })).not.toBeInTheDocument();
+    }
+
+    cleanup();
+    mockThread = { task: sampleTask, activeTurn: { id: 70, taskId: 7, ownerUserId: 42, routeMode: "dual", state: "awaiting_approval", approvalStatus: "awaiting_owner", approvalPlanContent: "Claude plan", approvalRequestedAt: 1777999400000, approvalResolvedAt: null, startedAt: 1777999200000, completedAt: null, errorMessage: null }, queuedMessages: [], events: [] };
+    render(<Home />);
+    await screen.findAllByText("Implement v2 shell");
+    expect(screen.getByRole("button", { name: /Stop and discard plan/i })).toBeInTheDocument();
+
+    cleanup();
+    mockThread = { task: sampleTask, activeTurn: null, queuedMessages: [], events: [] };
+    render(<Home />);
+    await screen.findAllByText("Implement v2 shell");
+    expect(screen.queryByTestId("section8-stop-generation")).not.toBeInTheDocument();
+  });
+
+  it("INV-S8-07 confirms awaiting-approval Stop before calling stopGeneration and reports the stopped state", async () => {
+    const user = userEvent.setup();
+    mockThread = {
+      task: sampleTask,
+      activeTurn: { id: 71, taskId: 7, ownerUserId: 42, routeMode: "dual", state: "awaiting_approval", approvalStatus: "awaiting_owner", approvalPlanContent: "Claude plan", approvalRequestedAt: 1777999400000, approvalResolvedAt: null, startedAt: 1777999200000, completedAt: null, errorMessage: null },
+      queuedMessages: [],
+      events: [],
+    };
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    await user.click(screen.getByRole("button", { name: /Stop and discard plan/i }));
+    expect(screen.getByText("Stop and discard this plan?")).toBeInTheDocument();
+    expect(screen.getByText("Any queued messages will be sent after the next message you submit.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Keep plan/i })).toBeInTheDocument();
+    expect(stopGenerationMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /^Stop and discard$/i }));
+
+    expect(stopGenerationMock).toHaveBeenCalledWith({ taskId: 7, turnId: 71, activeOperation: "awaiting_approval" });
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Stopped. Send a new message when you’re ready."));
+  });
+
+  it("INV-S8-08 reflects FIFO queue flush as normal owner messages and empties the queue UI", async () => {
+    mockThread = {
+      task: sampleTask,
+      activeTurn: null,
+      queuedMessages: [],
+      events: [
+        { id: 501, taskId: 7, ownerUserId: 42, actor: "user", eventType: "message", status: "completed", content: "First flushed queued message", metadataJson: "{}", createdAt: 1777999100000 },
+        { id: 502, taskId: 7, ownerUserId: 42, actor: "user", eventType: "message", status: "completed", content: "Second flushed queued message", metadataJson: "{}", createdAt: 1777999200000 },
+      ],
+    };
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    expect(screen.queryByTestId("section8-queued-messages")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("section8-queue-count")).not.toBeInTheDocument();
+    const messages = screen.getAllByText(/flushed queued message/).map((node) => node.textContent);
+    expect(messages).toEqual(["First flushed queued message", "Second flushed queued message"]);
+  });
+
+  it("INV-S8-09 keeps composer draft text independent from queued message content", async () => {
+    const user = userEvent.setup();
+    mockThread = {
+      task: sampleTask,
+      activeTurn: { id: 72, taskId: 7, ownerUserId: 42, routeMode: "auto", state: "model_calling", startedAt: 1777999200000, completedAt: null, errorMessage: null },
+      queuedMessages: [
+        { id: 901, taskId: 7, ownerUserId: 42, position: 1, content: "Queued content stays unchanged", state: "queued", createdAt: 1777999250000, updatedAt: 1777999250000 },
+        { id: 902, taskId: 7, ownerUserId: 42, position: 2, content: "Second queued content stays unchanged", state: "queued", createdAt: 1777999260000, updatedAt: 1777999260000 },
+      ],
+      events: [],
+    };
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    const composer = screen.getByLabelText(/Task message/i);
+    await user.type(composer, "New independent draft");
+
+    expect(screen.getByTestId("section8-queued-messages")).toHaveTextContent("Queued content stays unchanged");
+    expect(screen.getByTestId("section8-queued-messages")).toHaveTextContent("Second queued content stays unchanged");
+    await user.keyboard("{Enter}");
+    expect(submitMessageMock).toHaveBeenCalledWith({ taskId: 7, message: "New independent draft", routeMode: "auto" });
+  });
+
+  it("INV-S8-10 keeps queue and Stop UI free of forbidden raw implementation vocabulary", async () => {
+    mockThread = {
+      task: sampleTask,
+      activeTurn: { id: 73, taskId: 7, ownerUserId: 42, routeMode: "auto", state: "model_calling", startedAt: 1777999200000, completedAt: null, errorMessage: null },
+      queuedMessages: [
+        { id: 901, taskId: 7, ownerUserId: 42, position: 1, content: "Owner follow-up", state: "queued", createdAt: 1777999250000, updatedAt: 1777999250000 },
+      ],
+      events: [],
+    };
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    const ownerUiText = `${screen.getByTestId("section8-generation-queue-panel").textContent ?? ""} ${screen.getByTestId("section8-stop-generation").textContent ?? ""}`;
+    ["enqueueTaskMessage", "markQueuedMessagesProcessing", "requestTurnStop", "stopRegistry", "taskMessageQueue", "MAX_QUEUED_MESSAGES_PER_TASK", "QueuedMessageState", "Processing", "Sent", "Cleared"].forEach((term) => {
+      expect(ownerUiText).not.toContain(term);
+    });
+  });
+
+  it("requests Stop immediately for a non-approval active generation turn without sending duplicate composer content", async () => {
+    const user = userEvent.setup();
+    mockThread = {
+      task: sampleTask,
+      activeTurn: { id: 45, taskId: 7, ownerUserId: 42, routeMode: "auto", state: "model_calling", startedAt: 1777999200000, completedAt: null, errorMessage: null },
       queuedMessages: [],
       events: [],
     };
@@ -1130,9 +1320,9 @@ describe("Home v2 task-first workspace behavior", () => {
     await user.type(screen.getByLabelText(/Task message/i), "Do not send this draft");
     await user.click(screen.getByTestId("section8-stop-generation"));
 
-    expect(stopGenerationMock).toHaveBeenCalledWith({ taskId: 7, turnId: 45, activeOperation: "running" });
+    expect(stopGenerationMock).toHaveBeenCalledWith({ taskId: 7, turnId: 45, activeOperation: "model_calling" });
     expect(submitMessageMock).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/Stop requested/i));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Stopped. Send a new message when you’re ready."));
   });
 
   it("keeps Shift+Enter inside the composer without submitting the message", async () => {

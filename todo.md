@@ -363,3 +363,12 @@
 - [x] §1A-FU-04 T09: Preserve wizard keyboard accessibility for logical tab order, Enter activation, and Escape disclosure handling.
 - [x] §1A-FU-04 T10: Show the exact plain-English Project-connected success confirmation without internal IDs.
 - [x] §1A-FU-04 validation: Add behavioral tests for all ten invariants and run pnpm check, focused Home behavior tests, focused section1 contract tests, full pnpm test --run, and pnpm build before push.
+
+- [x] §1A-FU-04 closeout: Provide Section 10 artifact package with wizard copy content, enforcement/token diffs, test count delta, directive answers, Advanced setup label confirmation, Review-button behavior, and boundary statement.
+
+- [x] Provide §1A-FU-04 closeout package as a Markdown attachment for Product Owner review
+
+- [x] §8 ingestion: Produce `.taskmaster/docs/ingestion-evidence/PORTAL_PHASE_3_DIRECTIVE-S8-ingestion.md` before code changes.
+- [x] §8 implementation: Implement Composer Queue UI polish and Stop button label adjustment against all ten INV-S8-XX invariants, UI-only unless the directive proves otherwise.
+- [x] §8 validation: Run all four required validation gates, resolve scoped failures, and verify the final Manus publish gate is available after checkpoint.
+- [x] §8 closeout: Commit and push with `[PORTAL-P3-S8-XX]` conventional prefixes, then hold for Product Owner sign-off.

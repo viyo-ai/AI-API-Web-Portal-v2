@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -68,6 +69,9 @@ const actorTone: Record<string, string> = {
   wrapper: "border-slate-300 bg-slate-50",
   system: "border-stone-200 bg-stone-50",
 };
+
+const MAX_QUEUED_MESSAGES_PER_TASK_UI = 5;
+const ACTIVE_TURN_STATES = new Set(["context_assembly", "model_calling", "model_review", "persisting_output", "awaiting_approval"]);
 
 function compactDate(value: number | Date | string | null | undefined) {
   if (!value) return "No timestamp";
@@ -349,6 +353,17 @@ function isAwaitingOwnerApproval(turn: ActiveTurnRecord | null | undefined) {
   return turn?.state === "awaiting_approval" && turn.approvalStatus === "awaiting_owner";
 }
 
+function isActiveTurnState(turn: ActiveTurnRecord | null | undefined) {
+  return Boolean(turn?.state && ACTIVE_TURN_STATES.has(turn.state));
+}
+
+function queuedMessageStateLabel(state: QueuedComposerMessage["state"]) {
+  if (state === "sent") return "Sent";
+  if (state === "cleared") return "Canceled";
+  if (state === "processing") return "Sending";
+  return "Waiting";
+}
+
 function ownerEventTitle(event: ThreadEvent) {
   if (event.eventType === "message" && event.actor === "user") return "You";
   if (event.actor === "claude") return "Claude";
@@ -418,6 +433,12 @@ export default function Home() {
   const [useBuildBranchDiagnosticsWorkspace, setUseBuildBranchDiagnosticsWorkspace] = useState(false);
   const [showThreadDetails, setShowThreadDetails] = useState(false);
   const [workspaceNotice, setWorkspaceNotice] = useState("");
+  const [queuePanelOpen, setQueuePanelOpen] = useState(true);
+  const [editingQueueItemId, setEditingQueueItemId] = useState<number | null>(null);
+  const [editingQueueContent, setEditingQueueContent] = useState("");
+  const [cancelledQueueItemIds, setCancelledQueueItemIds] = useState<number[]>([]);
+  const [editedQueueContentById, setEditedQueueContentById] = useState<Record<number, string>>({});
+  const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
   const [approvalRevisionText, setApprovalRevisionText] = useState("");
   const [isFileDragActive, setIsFileDragActive] = useState(false);
   const [isGlobalFileDragActive, setIsGlobalFileDragActive] = useState(false);
@@ -481,7 +502,12 @@ export default function Home() {
   const activeTurn = selectedThread?.activeTurn as ActiveTurnRecord | null | undefined;
   const queuedMessages = ((selectedThread?.queuedMessages ?? []) as QueuedComposerMessage[]);
   const isWaitingForKimiApproval = isAwaitingOwnerApproval(activeTurn);
-  const hasActiveGeneration = Boolean(activeTurn);
+  const hasActiveGeneration = isActiveTurnState(activeTurn);
+  const visibleQueuedMessages = queuedMessages.filter((queueItem) => !cancelledQueueItemIds.includes(queueItem.id));
+  const queueCount = Math.min(visibleQueuedMessages.length, MAX_QUEUED_MESSAGES_PER_TASK_UI);
+  const isQueueFull = hasActiveGeneration && queueCount >= MAX_QUEUED_MESSAGES_PER_TASK_UI;
+  const queueCountLabel = `${queueCount} of ${MAX_QUEUED_MESSAGES_PER_TASK_UI} queued${isQueueFull ? " (full)" : ""}`;
+  const stopButtonLabel = isWaitingForKimiApproval ? "Stop and discard plan" : "Stop";
   const events = ((selectedThread?.events ?? []) as ThreadEvent[]);
   const ownerVisibleEvents = useMemo(() => events.filter(isOwnerVisibleEvent).sort(oldestFirst), [events]);
   const technicalEvents = useMemo(() => events.filter((event) => !isOwnerVisibleEvent(event)).sort(newestFirst), [events]);
@@ -980,6 +1006,10 @@ export default function Home() {
   async function handleSendMessage() {
     const cleanMessage = composerText.trim();
     if (!cleanMessage) return;
+    if (isQueueFull) {
+      setWorkspaceNotice("Queue is full. Wait for the current message to finish, or cancel a queued message.");
+      return;
+    }
     const taskId = selectedTaskId ?? (await createTaskRecordOnly());
     if (!taskId) return;
     const queued = hasActiveGeneration;
@@ -990,34 +1020,62 @@ export default function Home() {
       buildTargetId: selectedBuildTargetId ?? selectedTask?.buildTargetId ?? undefined,
     });
     setComposerText("");
-    setWorkspaceNotice(queued ? "Message queued. It will be sent automatically after the active generation finishes." : "Message sent to the task.");
+    setWorkspaceNotice(queued ? "Message queued. It will be sent automatically after the current turn finishes." : "Message sent to the task.");
+    setQueuePanelOpen(true);
     await refreshWorkspace();
+  }
+
+  function startEditingQueuedMessage(queueItem: QueuedComposerMessage) {
+    setEditingQueueItemId(queueItem.id);
+    setEditingQueueContent(editedQueueContentById[queueItem.id] ?? queueItem.content);
+    setQueuePanelOpen(true);
+  }
+
+  function discardQueuedMessageEdit() {
+    setEditingQueueItemId(null);
+    setEditingQueueContent("");
   }
 
   async function handleClearQueuedMessage(queueItemId: number) {
     if (!selectedTaskId) return;
-    await clearQueuedMessageMutation.mutateAsync({ taskId: selectedTaskId, queueItemId });
-    setWorkspaceNotice("Queued message removed before generation resumed.");
-    await refreshWorkspace();
+    setCancelledQueueItemIds((ids) => Array.from(new Set([...ids, queueItemId])));
+    try {
+      await clearQueuedMessageMutation.mutateAsync({ taskId: selectedTaskId, queueItemId });
+      setWorkspaceNotice("Canceled");
+      await refreshWorkspace();
+    } catch (error) {
+      setCancelledQueueItemIds((ids) => ids.filter((id) => id !== queueItemId));
+      const message = error instanceof Error ? error.message : "The queued message could not be canceled. Try again.";
+      setWorkspaceNotice(message);
+      toast.error(message);
+    }
   }
 
-  async function handleEditQueuedMessage(queueItem: QueuedComposerMessage) {
-    const nextContent = window.prompt("Edit queued message before it is sent after this generation:", queueItem.content);
-    if (!selectedTaskId || nextContent === null || !nextContent.trim()) return;
-    await updateQueuedMessageMutation.mutateAsync({ taskId: selectedTaskId, queueItemId: queueItem.id, content: nextContent.trim() });
+  async function handleSaveQueuedMessage(queueItem: QueuedComposerMessage) {
+    const nextContent = editingQueueContent.trim();
+    if (!selectedTaskId || !nextContent) return;
+    await updateQueuedMessageMutation.mutateAsync({ taskId: selectedTaskId, queueItemId: queueItem.id, content: nextContent });
+    setEditedQueueContentById((current) => ({ ...current, [queueItem.id]: nextContent }));
+    setEditingQueueItemId(null);
+    setEditingQueueContent("");
     setWorkspaceNotice("Queued message updated.");
     await refreshWorkspace();
   }
 
   async function handleStopGeneration() {
     if (!selectedTaskId || !activeTurn?.id) return;
-    const result = await stopGenerationMutation.mutateAsync({ taskId: selectedTaskId, turnId: activeTurn.id, activeOperation: activeTurn.state ?? null });
-    if (result.stop && "cancelledApproval" in result.stop && result.stop.cancelledApproval) {
-      setWorkspaceNotice("Kimi execution was cancelled before it started.");
-    } else {
-      setWorkspaceNotice(result.stop?.destructiveOperation ? "Stop requested. A safe operation is finishing before the turn halts." : "Stop requested. The current generation will halt at the next safe boundary.");
-    }
+    await stopGenerationMutation.mutateAsync({ taskId: selectedTaskId, turnId: activeTurn.id, activeOperation: activeTurn.state ?? null });
+    setWorkspaceNotice("Stopped. Send a new message when you’re ready.");
+    setStopConfirmOpen(false);
     await refreshWorkspace();
+  }
+
+  function handleStopButtonClick() {
+    if (isWaitingForKimiApproval) {
+      setStopConfirmOpen(true);
+      return;
+    }
+    void handleStopGeneration();
   }
 
   async function handleToggleKimiApprovalPreference() {
@@ -1054,8 +1112,10 @@ export default function Home() {
   function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if (!submitMessage.isPending && composerText.trim()) {
+      if (!submitMessage.isPending && composerText.trim() && !isQueueFull) {
         void handleSendMessage();
+      } else if (isQueueFull) {
+        setWorkspaceNotice("Queue is full. Wait for the current message to finish, or cancel a queued message.");
       }
     }
   }
@@ -1787,27 +1847,59 @@ export default function Home() {
 
         <footer className="shrink-0 border-t border-[#deded8] bg-white/95 px-4 py-3 shadow-[0_-18px_45px_rgba(31,31,31,0.06)] backdrop-blur">
           <div className="mx-auto max-w-4xl">
-            {hasActiveGeneration || queuedMessages.length > 0 ? (
-              <div className="mb-3 rounded-2xl border border-sky-100 bg-sky-50/90 px-3 py-2 text-xs leading-5 text-[#40545f]" data-testid="section8-generation-queue-panel">
+            {hasActiveGeneration || visibleQueuedMessages.length > 0 ? (
+              <div className="mb-3 rounded-2xl border border-sky-100 bg-sky-50/90 px-3 py-2 text-xs leading-5 text-[#40545f]" data-testid="section8-generation-queue-panel" onKeyDown={(event) => { if (event.key === "Escape") setQueuePanelOpen(false); }}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
                     {hasActiveGeneration && !isWaitingForKimiApproval ? <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-700" /> : <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />}
-                    <span className="font-semibold text-[#26333a]">{isWaitingForKimiApproval ? "Waiting for approval" : hasActiveGeneration ? "Generating now" : "Generation queue"}</span>
-                    {isWaitingForKimiApproval ? <span>Messages sent now are queued until you approve, revise, or cancel the Kimi handoff.</span> : hasActiveGeneration ? <span>Messages sent now are queued and auto-run after this generation.</span> : <span>Queued messages can be edited or removed before they are sent.</span>}
+                    <span className="font-semibold text-[#26333a]">Queued messages (will send after current turn)</span>
+                    <Badge variant="outline" className={`rounded-full bg-white text-[10px] ${isQueueFull ? "border-rose-200 text-rose-700" : "border-sky-200 text-sky-800"}`} data-testid="section8-queue-count">{queueCountLabel}</Badge>
+                    {isQueueFull ? <span className="text-rose-700">Queue is full. Wait for the current message to finish, or cancel a queued message.</span> : isWaitingForKimiApproval ? <span>Messages sent now wait until you approve, revise, or stop the plan.</span> : hasActiveGeneration ? <span>Messages sent now wait and run after the current turn.</span> : <span>Queued messages can be edited or canceled before they are sent.</span>}
                   </div>
-                  {activeTurn?.id ? <Badge variant="outline" className="rounded-full border-sky-200 bg-white text-[10px] text-sky-800">Turn #{activeTurn.id}</Badge> : null}
+                  <div className="flex items-center gap-2">
+                    {activeTurn?.id ? <Badge variant="outline" className="rounded-full border-sky-200 bg-white text-[10px] text-sky-800">Turn #{activeTurn.id}</Badge> : null}
+                    <Button type="button" variant="outline" onClick={() => setQueuePanelOpen((open) => !open)} aria-expanded={queuePanelOpen} aria-controls="section8-queued-messages" className="h-7 rounded-full border-sky-200 bg-white px-2.5 text-[11px] text-sky-800" data-testid="section8-queue-toggle">
+                      {queuePanelOpen ? "Hide queue" : "Show queue"}
+                    </Button>
+                  </div>
                 </div>
-                {queuedMessages.length > 0 ? (
-                  <div className="mt-2 flex flex-col gap-2" data-testid="section8-queued-messages">
-                    {queuedMessages.map((queueItem) => (
-                      <div key={queueItem.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-100 bg-white px-3 py-2">
-                        <p className="min-w-0 flex-1 truncate text-[#34434a]">Queued #{queueItem.position}: {queueItem.content}</p>
-                        <div className="flex items-center gap-1">
-                          <Button type="button" variant="outline" onClick={() => void handleEditQueuedMessage(queueItem)} disabled={isMutating} className="h-7 rounded-full border-[#d9d8d1] bg-white px-2 text-[11px]">Edit</Button>
-                          <Button type="button" variant="outline" onClick={() => void handleClearQueuedMessage(queueItem.id)} disabled={isMutating} className="h-7 rounded-full border-[#d9d8d1] bg-white px-2 text-[11px]">Remove</Button>
+                {visibleQueuedMessages.length > 0 && queuePanelOpen ? (
+                  <div id="section8-queued-messages" className="mt-2 flex flex-col gap-2" data-testid="section8-queued-messages">
+                    {visibleQueuedMessages.slice(0, MAX_QUEUED_MESSAGES_PER_TASK_UI).map((queueItem) => {
+                      const displayedContent = editedQueueContentById[queueItem.id] ?? queueItem.content;
+                      const isEditing = editingQueueItemId === queueItem.id;
+                      return (
+                        <div key={queueItem.id} className="rounded-xl border border-sky-100 bg-white px-3 py-2">
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="mb-1 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#77766e]">
+                                <span>Queued #{queueItem.position}</span>
+                                <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-[10px] text-slate-700">{queuedMessageStateLabel(queueItem.state)}</Badge>
+                                <span>{compactDate(queueItem.createdAt)}</span>
+                              </div>
+                              {isEditing ? (
+                                <Textarea value={editingQueueContent} onChange={(event) => setEditingQueueContent(event.target.value)} aria-label={`Edit queued message ${queueItem.position}`} className="min-h-20 resize-none rounded-xl border-sky-100 bg-white text-xs leading-5" />
+                              ) : (
+                                <p className="min-w-0 whitespace-pre-wrap break-words text-[#34434a]">{displayedContent}</p>
+                              )}
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1">
+                              {isEditing ? (
+                                <>
+                                  <Button type="button" variant="outline" onClick={() => void handleSaveQueuedMessage(queueItem)} disabled={isMutating || !editingQueueContent.trim()} className="h-7 rounded-full border-emerald-200 bg-emerald-50 px-2 text-[11px] text-emerald-800">Save changes</Button>
+                                  <Button type="button" variant="outline" onClick={discardQueuedMessageEdit} disabled={isMutating} className="h-7 rounded-full border-[#d9d8d1] bg-white px-2 text-[11px]">Discard</Button>
+                                </>
+                              ) : (
+                                <>
+                                  <Button type="button" variant="outline" onClick={() => startEditingQueuedMessage(queueItem)} disabled={isMutating} className="h-7 rounded-full border-[#d9d8d1] bg-white px-2 text-[11px]">Edit</Button>
+                                  <Button type="button" variant="outline" onClick={() => void handleClearQueuedMessage(queueItem.id)} disabled={isMutating} className="h-7 rounded-full border-rose-200 bg-white px-2 text-[11px] text-rose-700">Cancel</Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : null}
               </div>
@@ -1845,9 +1937,9 @@ export default function Home() {
                 </button>
                 <span className="hidden sm:inline">{hasActiveGeneration ? "Enter queues · Shift+Enter adds a line" : "Enter sends · Shift+Enter adds a line"}</span>
                 {hasActiveGeneration ? (
-                  <Button type="button" variant="outline" onClick={() => void handleStopGeneration()} disabled={!activeTurn?.id || stopGenerationMutation.isPending} className="h-7 rounded-full border-rose-200 bg-white px-2.5 text-[11px] text-rose-700" data-testid="section8-stop-generation">
+                  <Button type="button" variant="outline" onClick={handleStopButtonClick} disabled={!activeTurn?.id || stopGenerationMutation.isPending} className="h-7 rounded-full border-rose-200 bg-white px-2.5 text-[11px] text-rose-700" data-testid="section8-stop-generation">
                     {stopGenerationMutation.isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <CircleAlert className="mr-1.5 h-3 w-3" />}
-                    {isWaitingForKimiApproval ? "Cancel" : "Stop"}
+                    {stopButtonLabel}
                   </Button>
                 ) : null}
                 <Button type="button" variant="outline" onClick={handleRefreshCredentials} disabled={credentialsRefreshMutation.isPending} className="h-7 rounded-full border-[#d9d8d1] bg-white px-2.5 text-[11px]">
@@ -1883,10 +1975,22 @@ export default function Home() {
                 aria-label="Task message"
                 className="max-h-36 min-h-11 flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm leading-6 shadow-none focus-visible:ring-0"
               />
-              <Button type="button" onClick={handleSendMessage} disabled={submitMessage.isPending || !composerText.trim()} className={`mb-1 h-9 shrink-0 rounded-full px-3 text-white hover:bg-black ${hasActiveGeneration ? "w-auto bg-sky-700 hover:bg-sky-800" : "w-9 bg-[#1f1f1f] p-0"}`} aria-label={hasActiveGeneration ? "Queue message" : "Send message"} data-testid="section8-send-or-queue-button">
+              <Button type="button" onClick={handleSendMessage} disabled={submitMessage.isPending || !composerText.trim() || isQueueFull} className={`mb-1 h-9 shrink-0 rounded-full px-3 text-white hover:bg-black ${hasActiveGeneration ? "w-auto bg-sky-700 hover:bg-sky-800" : "w-9 bg-[#1f1f1f] p-0"}`} aria-label={hasActiveGeneration ? "Queue message" : "Send message"} data-testid="section8-send-or-queue-button">
                 {submitMessage.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : hasActiveGeneration ? <span className="text-xs font-semibold">Queue</span> : <SendHorizontal className="h-4 w-4" />}
               </Button>
             </div>
+            <AlertDialog open={stopConfirmOpen} onOpenChange={setStopConfirmOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Stop and discard this plan?</AlertDialogTitle>
+                  <AlertDialogDescription>Any queued messages will be sent after the next message you submit.</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Keep plan</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => void handleStopGeneration()} className="bg-rose-700 text-white hover:bg-rose-800">Stop and discard</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
             {workspaceNotice ? <p className="mt-2 text-xs leading-5 text-[#66665f]" role="status" aria-live="polite">{workspaceNotice}</p> : null}
           </div>
         </footer>
