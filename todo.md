@@ -313,3 +313,11 @@
 - [x] §1A-FU resume: verify current FU-01/FU-02/FU-03 implementation state, complete required validation gates, push one `[PORTAL-P2-S1A-FU-01]` commit, and stop before §4.
 - [x] §1A-FU validation hardening: make the live provider credential smoke-test retry transient network exceptions such as Anthropic TLS ECONNRESET without changing product behavior.
 - [ ] Fresh Manus publish checkpoint: save a current checkpoint for the validated §1A follow-up work so the user has an up-to-date publish point without starting §4.
+
+- [x] §4 acceptance spot-check package: provide raw committed contents and focused code-path answers from commit `fa21473c8cbe0354301615a1a22a96cf5c602afa`, then stop before §8 or §4.5.
+
+- [x] §4.5 preparation branch: commit the six attached preparation files in the requested Portal repo layout without starting §4.5 implementation, invariant tests, §8, or §4.5 build work.
+
+- [x] §4.5 prep cleanup: on `agent-work/s4-5-prep-inputs`, delete `PORTAL_CLAUDE.md` and `PORTAL_OPERATING_PRINCIPLES.md`, add `CLAUDE.md`, `FOUNDATION_LOCK.md`, `BULLET_1_DIRECTIVE.md`, and `CURRENT_BULLET.txt` from attachments, verify copy integrity, commit and push without beginning §4.5 implementation.
+
+- [x] Confirmed `PORTAL-P2-S4-5-PREP-02` cleanup: delete `PORTAL_CLAUDE.md` and `PORTAL_OPERATING_PRINCIPLES.md`, add only `CLAUDE.md`, `FOUNDATION_LOCK.md`, `BULLET_1_DIRECTIVE.md`, and `CURRENT_BULLET.txt`, push to `agent-work/s4-5-prep-inputs`, and hold §4.5 implementation until Product Owner acceptance.
