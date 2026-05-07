@@ -311,6 +311,11 @@ type ActiveTurnRecord = {
   id: number;
   state: string;
   route?: string | null;
+  approvalStatus?: "not_required" | "awaiting_owner" | "approved" | "revision_requested" | "cancelled" | string | null;
+  approvalPlanContent?: string | null;
+  approvalDecisionMessage?: string | null;
+  approvalRequestedAt?: number | Date | string | null;
+  approvalResolvedAt?: number | Date | string | null;
 };
 
 function eventTimestamp(event: ThreadEvent) {
@@ -331,6 +336,10 @@ function isOwnerVisibleEvent(event: ThreadEvent) {
   if (event.eventType === "message") return true;
   if ((event.actor === "claude" || event.actor === "kimi") && ["model_result", "model_review"].includes(event.eventType)) return true;
   return false;
+}
+
+function isAwaitingOwnerApproval(turn: ActiveTurnRecord | null | undefined) {
+  return turn?.state === "awaiting_approval" && turn.approvalStatus === "awaiting_owner";
 }
 
 function ownerEventTitle(event: ThreadEvent) {
@@ -399,6 +408,7 @@ export default function Home() {
   const [useBuildBranchDiagnosticsWorkspace, setUseBuildBranchDiagnosticsWorkspace] = useState(false);
   const [showThreadDetails, setShowThreadDetails] = useState(false);
   const [workspaceNotice, setWorkspaceNotice] = useState("");
+  const [approvalRevisionText, setApprovalRevisionText] = useState("");
   const [isFileDragActive, setIsFileDragActive] = useState(false);
   const [isGlobalFileDragActive, setIsGlobalFileDragActive] = useState(false);
   const [uploadScope, setUploadScope] = useState<"task" | "global">("task");
@@ -428,6 +438,7 @@ export default function Home() {
   const memoryInput = useMemo(() => ({ limit: 40 }), []);
   const memoryQuery = trpc.memory.list.useQuery(memoryInput, { enabled: isAuthenticated });
   const credentialsQuery = trpc.credentials.status.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 15000 });
+  const approvalPreferenceQuery = trpc.orchestration.kimiApprovalPreference.useQuery(undefined, { enabled: isAuthenticated });
   const buildTargetsInput = useMemo(() => ({ includeArchived: false, limit: 50 }), []);
   const buildTargetsQuery = trpc.buildTargets.list.useQuery(buildTargetsInput, { enabled: isAuthenticated });
 
@@ -437,6 +448,10 @@ export default function Home() {
   const updateQueuedMessageMutation = trpc.orchestration.updateQueuedMessage.useMutation();
   const clearQueuedMessageMutation = trpc.orchestration.clearQueuedMessage.useMutation();
   const stopGenerationMutation = trpc.orchestration.stopGeneration.useMutation();
+  const updateApprovalPreferenceMutation = trpc.orchestration.updateKimiApprovalPreference.useMutation();
+  const approveKimiHandoffMutation = trpc.orchestration.approveKimiHandoff.useMutation();
+  const requestKimiHandoffRevisionMutation = trpc.orchestration.requestKimiHandoffRevision.useMutation();
+  const cancelKimiHandoffMutation = trpc.orchestration.cancelKimiHandoff.useMutation();
   const createFileMetadata = trpc.files.createMetadata.useMutation();
   const uploadWorkspaceFileMutation = trpc.filesystem.upload.useMutation();
   const attachGlobalToTaskMutation = trpc.files.attachGlobalToTask.useMutation();
@@ -453,6 +468,7 @@ export default function Home() {
   const selectedTask = selectedThread?.task ?? tasks.find((task) => task.id === selectedTaskId) ?? null;
   const activeTurn = selectedThread?.activeTurn as ActiveTurnRecord | null | undefined;
   const queuedMessages = ((selectedThread?.queuedMessages ?? []) as QueuedComposerMessage[]);
+  const isWaitingForKimiApproval = isAwaitingOwnerApproval(activeTurn);
   const hasActiveGeneration = Boolean(activeTurn);
   const events = ((selectedThread?.events ?? []) as ThreadEvent[]);
   const ownerVisibleEvents = useMemo(() => events.filter(isOwnerVisibleEvent).sort(oldestFirst), [events]);
@@ -466,6 +482,7 @@ export default function Home() {
   const memories = memoryQuery.data ?? [];
   const credentials = credentialsQuery.data?.runtimeStates ?? [];
   const buildTargets = buildTargetsQuery.data ?? [];
+  const alwaysRequireKimiApproval = approvalPreferenceQuery.data?.alwaysRequireKimiApproval !== false;
   const selectedBuildTarget = buildTargets.find((target) => target.id === selectedBuildTargetId) ?? buildTargets[0] ?? null;
   const isBuildModeOpen = Boolean(selectedBuildTarget && openedBuildBranch);
   const diagnosticsBuildBranchPath = useBuildBranchDiagnosticsWorkspace && openedBuildBranch?.workspacePath ? openedBuildBranch.workspacePath : null;
@@ -528,7 +545,7 @@ export default function Home() {
       .map((event) => ({ ...activityStepForEvent(event), id: event.id, status: event.status, createdAt: event.createdAt }));
   }, [events]);
 
-  const isMutating = createTask.isPending || updateTaskStatus.isPending || submitMessage.isPending || updateQueuedMessageMutation.isPending || clearQueuedMessageMutation.isPending || stopGenerationMutation.isPending || createFileMetadata.isPending || uploadWorkspaceFileMutation.isPending || attachGlobalToTaskMutation.isPending || createBuildTargetMutation.isPending || createBuildBranchMutation.isPending || updateBuildTargetSettingsMutation.isPending || pushBuildBranchMutation.isPending || testBuildTargetConnectionMutation.isPending || analyzeWizardMutation.isPending || completeWizardMutation.isPending;
+  const isMutating = createTask.isPending || updateTaskStatus.isPending || submitMessage.isPending || updateQueuedMessageMutation.isPending || clearQueuedMessageMutation.isPending || stopGenerationMutation.isPending || updateApprovalPreferenceMutation.isPending || approveKimiHandoffMutation.isPending || requestKimiHandoffRevisionMutation.isPending || cancelKimiHandoffMutation.isPending || createFileMetadata.isPending || uploadWorkspaceFileMutation.isPending || attachGlobalToTaskMutation.isPending || createBuildTargetMutation.isPending || createBuildBranchMutation.isPending || updateBuildTargetSettingsMutation.isPending || pushBuildBranchMutation.isPending || testBuildTargetConnectionMutation.isPending || analyzeWizardMutation.isPending || completeWizardMutation.isPending;
 
   async function refreshWorkspace() {
     await Promise.all([
@@ -540,6 +557,7 @@ export default function Home() {
       utils.files.listGlobal.invalidate(),
       utils.memory.list.invalidate(),
       utils.credentials.status.invalidate(),
+      utils.orchestration.kimiApprovalPreference.invalidate(),
       utils.filesystem.tree.invalidate(),
       utils.buildTargets.list.invalidate(),
       utils.buildBranches.list.invalidate(),
@@ -916,7 +934,42 @@ export default function Home() {
   async function handleStopGeneration() {
     if (!selectedTaskId || !activeTurn?.id) return;
     const result = await stopGenerationMutation.mutateAsync({ taskId: selectedTaskId, turnId: activeTurn.id, activeOperation: activeTurn.state ?? null });
-    setWorkspaceNotice(result.stop?.destructiveOperation ? "Stop requested. A safe operation is finishing before the turn halts." : "Stop requested. The current generation will halt at the next safe boundary.");
+    if (result.stop && "cancelledApproval" in result.stop && result.stop.cancelledApproval) {
+      setWorkspaceNotice("Kimi execution was cancelled before it started.");
+    } else {
+      setWorkspaceNotice(result.stop?.destructiveOperation ? "Stop requested. A safe operation is finishing before the turn halts." : "Stop requested. The current generation will halt at the next safe boundary.");
+    }
+    await refreshWorkspace();
+  }
+
+  async function handleToggleKimiApprovalPreference() {
+    const nextValue = !alwaysRequireKimiApproval;
+    await updateApprovalPreferenceMutation.mutateAsync({ alwaysRequireKimiApproval: nextValue });
+    setWorkspaceNotice(nextValue ? "Kimi approval checks are on. Claude will show a plan before Kimi runs." : "Kimi approval checks are off. Auto coordination can pass Claude plans into Kimi without stopping for review.");
+    await refreshWorkspace();
+  }
+
+  async function handleApproveKimiHandoff() {
+    if (!selectedTaskId || !activeTurn?.id) return;
+    await approveKimiHandoffMutation.mutateAsync({ taskId: selectedTaskId, turnId: activeTurn.id });
+    setWorkspaceNotice("Approved. Kimi is now running with the Claude plan you reviewed.");
+    setApprovalRevisionText("");
+    await refreshWorkspace();
+  }
+
+  async function handleRequestKimiRevision() {
+    if (!selectedTaskId || !activeTurn?.id || !approvalRevisionText.trim()) return;
+    await requestKimiHandoffRevisionMutation.mutateAsync({ taskId: selectedTaskId, turnId: activeTurn.id, revisionMessage: approvalRevisionText.trim() });
+    setWorkspaceNotice("Revision requested. Claude will produce an updated plan before Kimi can run.");
+    setApprovalRevisionText("");
+    await refreshWorkspace();
+  }
+
+  async function handleCancelKimiHandoff() {
+    if (!selectedTaskId || !activeTurn?.id) return;
+    await cancelKimiHandoffMutation.mutateAsync({ taskId: selectedTaskId, turnId: activeTurn.id });
+    setWorkspaceNotice("Cancelled. Kimi did not run for this Claude plan.");
+    setApprovalRevisionText("");
     await refreshWorkspace();
   }
 
@@ -1516,8 +1569,8 @@ export default function Home() {
             {selectedTaskId ? (
               <div data-testid="handoff-indicator" className="flex flex-wrap items-center gap-2 rounded-2xl border border-sky-100 bg-sky-50/80 px-3 py-2 text-xs leading-5 text-[#4f5f68]">
                 <Sparkles className="h-4 w-4 text-sky-600" />
-                <span className="font-semibold text-[#26333a]">Claude → shared task context → Kimi</span>
-                <span>Claude’s plan can be passed into Kimi automatically during Auto coordination; both workers read the same task thread, saved memory, and task files for the turn.</span>
+                <span className="font-semibold text-[#26333a]">Claude → owner review → Kimi</span>
+                <span>Claude prepares the plan first. When approval checks are on, Kimi waits until you approve, request a revision, or cancel the handoff.</span>
               </div>
             ) : null}
             {!selectedTaskId ? (
@@ -1530,41 +1583,59 @@ export default function Home() {
               <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white p-8 text-center text-sm leading-6 text-[#6d6d65]">This task has no owner messages yet. Creating it only made the task record; send the first message to initialize Claude Opus 4.7 and Kimi K2.6 through the coordinator.<Button type="button" onClick={() => setComposerText((value) => value || "Please plan the first implementation step for this task.")} className="mt-4 rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">Draft first message</Button></div>
             ) : (
               <div className="space-y-4">
-                {ownerVisibleEvents.length === 0 && !providerFailureCopy ? (
+                {ownerVisibleEvents.length === 0 && !providerFailureCopy && !isWaitingForKimiApproval ? (
                   <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white p-8 text-center text-sm leading-6 text-[#6d6d65]">
-                    No owner-facing task message is ready yet. Technical setup records are available below if you need them.
-                    <Button type="button" variant="outline" onClick={() => setShowThreadDetails(true)} disabled={technicalEvents.length === 0} className="mt-3 rounded-xl border-[#d9d8d1] bg-white text-xs">Review setup details</Button>
+                    No owner-facing task message is ready yet. Send a message below to start the AI coordinator.
                   </div>
                 ) : null}
 
-                {technicalEvents.length > 0 ? (
-                  <div className="rounded-3xl border border-[#deded8] bg-white p-4 shadow-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-semibold text-[#2b2b27]">Technical history</h3>
-                        <p className="mt-1 text-xs leading-5 text-[#77766e]">Routing decisions, context snapshots, and model-call records are hidden above the normal owner chat so the newest message stays closest to the type box.</p>
+                {isWaitingForKimiApproval ? (
+                  <article className="rounded-3xl border border-amber-200 bg-amber-50/90 p-4 shadow-sm" data-testid="section9-kimi-approval-card">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <ShieldCheck className="h-4 w-4 text-amber-700" />
+                          <h3 className="text-sm font-semibold text-[#2b2b27]">Review Claude&apos;s plan before Kimi runs</h3>
+                          <Badge variant="outline" className="rounded-full border-amber-300 bg-white text-[10px] text-amber-800">waiting for you</Badge>
+                        </div>
+                        <p className="mt-2 text-sm leading-6 text-[#4b4a43]">Claude has prepared a plan. Review it below, then choose whether Kimi should execute it, Claude should revise it, or the handoff should stop here.</p>
                       </div>
-                      <Button type="button" variant="outline" onClick={() => setShowThreadDetails((value) => !value)} className="rounded-full border-[#d9d8d1] bg-white text-xs">
-                        {showThreadDetails ? "Hide technical details" : `Show technical details (${technicalEvents.length})`}
+                      <Badge variant="outline" className="rounded-full border-amber-200 bg-white text-[10px] text-amber-800">Turn #{activeTurn?.id}</Badge>
+                    </div>
+                    <div className="mt-4 rounded-2xl border border-amber-100 bg-white p-3">
+                      <div className="mb-2 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#77766e]">
+                        <span>Claude plan for review</span>
+                        <span>Kimi has not run</span>
+                      </div>
+                      <p className="max-h-64 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-[#34342f]">{ownerFacingText(activeTurn?.approvalPlanContent || "Claude plan is ready for review.")}</p>
+                    </div>
+                    <div className="mt-3 grid gap-2 rounded-2xl border border-amber-100 bg-white/70 p-3 text-xs leading-5 text-[#5c5749] sm:grid-cols-3" data-testid="section9-approval-diagnostics">
+                      <span><strong>Route:</strong> {activeTurn?.route ?? "dual"}</span>
+                      <span><strong>Status:</strong> waiting for owner approval</span>
+                      <span><strong>Requested:</strong> {compactDate(activeTurn?.approvalRequestedAt)}</span>
+                    </div>
+                    <Textarea
+                      value={approvalRevisionText}
+                      onChange={(event) => setApprovalRevisionText(event.target.value)}
+                      placeholder="Optional: tell Claude what to revise before Kimi runs."
+                      className="mt-3 min-h-20 resize-none rounded-2xl border-amber-100 bg-white text-sm"
+                      data-testid="section9-approval-revision-input"
+                    />
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Button type="button" onClick={() => void handleApproveKimiHandoff()} disabled={isMutating} className="rounded-full bg-[#1f1f1f] px-4 text-xs text-white hover:bg-black" data-testid="section9-approve-kimi">
+                        {approveKimiHandoffMutation.isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3 w-3" />}
+                        Approve Kimi
+                      </Button>
+                      <Button type="button" variant="outline" onClick={() => void handleRequestKimiRevision()} disabled={isMutating || !approvalRevisionText.trim()} className="rounded-full border-amber-200 bg-white px-4 text-xs text-amber-800" data-testid="section9-request-revision">
+                        {requestKimiHandoffRevisionMutation.isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <RotateCcw className="mr-1.5 h-3 w-3" />}
+                        Revise plan
+                      </Button>
+                      <Button type="button" variant="outline" onClick={() => void handleCancelKimiHandoff()} disabled={isMutating} className="rounded-full border-rose-200 bg-white px-4 text-xs text-rose-700" data-testid="section9-cancel-kimi">
+                        {cancelKimiHandoffMutation.isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <CircleAlert className="mr-1.5 h-3 w-3" />}
+                        Cancel handoff
                       </Button>
                     </div>
-                    {showThreadDetails ? (
-                      <div className="mt-4 space-y-3">
-                        {technicalEvents.map((event) => (
-                          <article key={event.id} className={`rounded-2xl border p-3 ${actorTone[event.actor] ?? actorTone.system}`}>
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <h4 className="text-xs font-semibold text-[#2b2b27]">{eventTitle(event.actor, event.eventType)}</h4>
-                              <div className="flex items-center gap-2 text-[11px] text-[#77766e]">
-                                <Clock3 className="h-3 w-3" /> {compactDate(event.createdAt)}
-                                <Badge variant="outline" className="rounded-full text-[10px]">{event.status}</Badge>
-                              </div>
-                            </div>
-                            <p className="mt-2 whitespace-pre-wrap text-xs leading-6 text-[#55554e]">{ownerFacingText(event.content)}</p>
-                          </article>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
+                  </article>
                 ) : null}
 
                 {ownerVisibleEvents.map((event) => {
@@ -1613,9 +1684,9 @@ export default function Home() {
               <div className="mb-3 rounded-2xl border border-sky-100 bg-sky-50/90 px-3 py-2 text-xs leading-5 text-[#40545f]" data-testid="section8-generation-queue-panel">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    {hasActiveGeneration ? <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-700" /> : <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />}
-                    <span className="font-semibold text-[#26333a]">{hasActiveGeneration ? "Generating now" : "Generation queue"}</span>
-                    {hasActiveGeneration ? <span>Messages sent now are queued and auto-run after this generation.</span> : <span>Queued messages can be edited or removed before they are sent.</span>}
+                    {hasActiveGeneration && !isWaitingForKimiApproval ? <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-700" /> : <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />}
+                    <span className="font-semibold text-[#26333a]">{isWaitingForKimiApproval ? "Waiting for approval" : hasActiveGeneration ? "Generating now" : "Generation queue"}</span>
+                    {isWaitingForKimiApproval ? <span>Messages sent now are queued until you approve, revise, or cancel the Kimi handoff.</span> : hasActiveGeneration ? <span>Messages sent now are queued and auto-run after this generation.</span> : <span>Queued messages can be edited or removed before they are sent.</span>}
                   </div>
                   {activeTurn?.id ? <Badge variant="outline" className="rounded-full border-sky-200 bg-white text-[10px] text-sky-800">Turn #{activeTurn.id}</Badge> : null}
                 </div>
@@ -1654,11 +1725,22 @@ export default function Home() {
                 ))}
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={alwaysRequireKimiApproval}
+                  onClick={() => void handleToggleKimiApprovalPreference()}
+                  disabled={updateApprovalPreferenceMutation.isPending}
+                  className={`h-7 rounded-full border px-2.5 text-[11px] font-semibold transition ${alwaysRequireKimiApproval ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-[#d9d8d1] bg-white text-[#66665f]"}`}
+                  data-testid="section9-kimi-approval-preference"
+                >
+                  Always check before Kimi runs: {alwaysRequireKimiApproval ? "On" : "Off"}
+                </button>
                 <span className="hidden sm:inline">{hasActiveGeneration ? "Enter queues · Shift+Enter adds a line" : "Enter sends · Shift+Enter adds a line"}</span>
                 {hasActiveGeneration ? (
                   <Button type="button" variant="outline" onClick={() => void handleStopGeneration()} disabled={!activeTurn?.id || stopGenerationMutation.isPending} className="h-7 rounded-full border-rose-200 bg-white px-2.5 text-[11px] text-rose-700" data-testid="section8-stop-generation">
                     {stopGenerationMutation.isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <CircleAlert className="mr-1.5 h-3 w-3" />}
-                    Stop
+                    {isWaitingForKimiApproval ? "Cancel" : "Stop"}
                   </Button>
                 ) : null}
                 <Button type="button" variant="outline" onClick={handleRefreshCredentials} disabled={credentialsRefreshMutation.isPending} className="h-7 rounded-full border-[#d9d8d1] bg-white px-2.5 text-[11px]">

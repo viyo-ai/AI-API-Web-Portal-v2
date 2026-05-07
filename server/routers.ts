@@ -39,6 +39,8 @@ import {
   getLatestCredentialStatuses,
   getTaskForOwner,
   getTaskThread,
+  getTurnForOwner,
+  getUserPreference,
   getGlobalFileForOwner,
   getTaskFileForOwner,
   linkTaskToBuildBranch,
@@ -65,6 +67,7 @@ import {
   parseJsonStringArray,
   type RouteMode,
   searchMemory,
+  stopTurn,
   updateBuildBranchPushState,
   updateBuildBranchState,
   updateBuildBranchWorkspacePath,
@@ -72,6 +75,8 @@ import {
   updateBuildTargetGovernanceSettings,
   upsertWizardSessionCache,
   updateTaskStatus,
+  updateTurnApprovalState,
+  updateUserPreference,
   createSkill,
   deleteSkill,
   duplicateSkill,
@@ -1115,6 +1120,7 @@ async function runGenerationTurn(input: {
   ownerUserId: number;
   userContent: string;
   selectedRoute: RouteMode;
+  forceKimiApproval?: boolean;
 }) {
   const decision = await resolveWrapperRoute(
     input.userContent,
@@ -1145,15 +1151,32 @@ async function runGenerationTurn(input: {
     return null;
   }
 
+  const preference = await getUserPreference(input.ownerUserId);
+  let effectiveRouteForTurn = decision.effectiveRoute;
+  const requiresKimiApproval =
+    (preference.alwaysRequireKimiApproval || input.forceKimiApproval === true) &&
+    (effectiveRouteForTurn === "kimi" || effectiveRouteForTurn === "dual");
+  if (requiresKimiApproval && effectiveRouteForTurn === "kimi") {
+    effectiveRouteForTurn = "dual";
+  }
+  const hasClaudeCredential = decision.credentialStates.some(
+    state => state.provider === "claude" && state.configured
+  );
+  const missingClaudeForApproval = requiresKimiApproval && !hasClaudeCredential;
+  const runnableWithApproval = decision.isRunnable && !missingClaudeForApproval;
+  const readinessReason = missingClaudeForApproval
+    ? "Kimi approval handoff is enabled, but Claude credentials are required to prepare the owner-reviewable plan before Kimi runs."
+    : decision.reason;
+
   const turn = await createTurn({
     taskId: input.task.id,
     ownerUserId: input.ownerUserId,
-    route: decision.effectiveRoute,
-    state: decision.isRunnable ? "context_assembly" : "blocked",
+    route: effectiveRouteForTurn,
+    state: runnableWithApproval ? "context_assembly" : "blocked",
     credentialStateJson: serializeJson(decision.credentialStates),
-    completedAt: decision.isRunnable ? null : Date.now(),
-    errorCode: decision.isRunnable ? null : "CREDENTIALS_UNAVAILABLE",
-    errorMessage: decision.isRunnable ? null : decision.reason,
+    completedAt: runnableWithApproval ? null : Date.now(),
+    errorCode: runnableWithApproval ? null : "CREDENTIALS_UNAVAILABLE",
+    errorMessage: runnableWithApproval ? null : readinessReason,
   });
 
   await appendTaskEvent({
@@ -1161,12 +1184,17 @@ async function runGenerationTurn(input: {
     ownerUserId: input.ownerUserId,
     actor: "wrapper",
     eventType: "route_decision",
-    status: decision.isRunnable ? "succeeded" : "blocked",
-    content: decision.reason,
-    metadataJson: serializeJson(decision),
+    status: runnableWithApproval ? "succeeded" : "blocked",
+    content: readinessReason,
+    metadataJson: serializeJson({
+      ...decision,
+      effectiveRoute: effectiveRouteForTurn,
+      approvalGateEnabled: requiresKimiApproval,
+      defaultApprovalPreference: preference.alwaysRequireKimiApproval,
+    }),
   });
 
-  if (!decision.isRunnable) {
+  if (!runnableWithApproval) {
     await updateTaskStatus(input.task.id, input.ownerUserId, "blocked");
     await appendTaskEvent({
       taskId: input.task.id,
@@ -1184,7 +1212,7 @@ async function runGenerationTurn(input: {
     return turn;
   }
 
-  const effectiveRoute = decision.effectiveRoute;
+  const effectiveRoute = effectiveRouteForTurn;
   if (effectiveRoute === "blocked" || effectiveRoute === "auto") {
     throw new Error(
       "Wrapper route resolution produced an invalid runnable route."
@@ -1237,11 +1265,113 @@ async function runGenerationTurn(input: {
       memory,
       files,
       governance,
+      requireApprovalBeforeKimi: requiresKimiApproval,
     });
   } catch {
     // executeWrapperTurn already persists the failed turn, task status, and timeline error.
   }
   return turn;
+}
+
+async function resumeApprovedKimiTurn(input: {
+  task: OwnedTask;
+  ownerUserId: number;
+  turnId: number;
+  approvalMessage?: string | null;
+}) {
+  const turn = await getTurnForOwner(input.turnId, input.ownerUserId);
+  if (!turn || turn.taskId !== input.task.id) {
+    throw new Error("Approval turn not found or not owned by the authenticated user");
+  }
+  if (turn.state !== "awaiting_approval" || turn.approvalStatus !== "awaiting_owner") {
+    throw new Error("This turn is not waiting for owner approval");
+  }
+  if (!turn.approvalPlanContent?.trim()) {
+    throw new Error("This turn has no Claude plan available for approval");
+  }
+
+  const decisionMessage = input.approvalMessage?.trim() || "Approved for Kimi execution.";
+  const credentialStates = getRuntimeCredentialStates();
+  await appendTaskEvent({
+    taskId: input.task.id,
+    ownerUserId: input.ownerUserId,
+    actor: "user",
+    eventType: "status",
+    status: "succeeded",
+    content: `Owner approved Kimi handoff: ${decisionMessage}`,
+    metadataJson: serializeJson({
+      turnId: input.turnId,
+      approvalStatus: "approved",
+      kimiInvokedAfterApproval: true,
+    }),
+  });
+
+  const governance: GovernanceLoadResult = await loadGovernanceForTask(input.task.id);
+  const [priorEvents, memory, files] = await Promise.all([
+    listTaskEvents(input.task.id, input.ownerUserId, 80),
+    listMemoryByCategory(input.ownerUserId, undefined, 20),
+    listTaskFiles(input.task.id, input.ownerUserId, 200),
+  ]);
+
+  try {
+    await executeWrapperTurn({
+      task: input.task,
+      ownerUserId: input.ownerUserId,
+      turnId: input.turnId,
+      userMessage: "Owner approved Claude's plan for Kimi execution.",
+      route: "dual",
+      credentialStates,
+      priorEvents,
+      memory,
+      files,
+      governance,
+      approvedClaudePlan: turn.approvalPlanContent,
+      requireApprovalBeforeKimi: false,
+    });
+  } catch {
+    // executeWrapperTurn already persists the failed turn, task status, and timeline error.
+  }
+}
+
+async function resolvePausedApprovalTurn(input: {
+  task: OwnedTask;
+  ownerUserId: number;
+  turnId: number;
+  approvalStatus: "revision_requested" | "cancelled";
+  decisionMessage: string;
+  stoppedMarker: string;
+}) {
+  const turn = await getTurnForOwner(input.turnId, input.ownerUserId);
+  if (!turn || turn.taskId !== input.task.id) {
+    throw new Error("Approval turn not found or not owned by the authenticated user");
+  }
+  if (turn.state !== "awaiting_approval" || turn.approvalStatus !== "awaiting_owner") {
+    throw new Error("This turn is not waiting for owner approval");
+  }
+  await updateTurnApprovalState({
+    turnId: input.turnId,
+    ownerUserId: input.ownerUserId,
+    state: "stopped",
+    approvalStatus: input.approvalStatus,
+    approvalPlanContent: turn.approvalPlanContent,
+    approvalDecisionMessage: input.decisionMessage,
+    approvalResolvedAt: Date.now(),
+  });
+  await stopTurn(input.turnId, input.ownerUserId, input.stoppedMarker);
+  await updateTaskStatus(input.task.id, input.ownerUserId, "active");
+  await appendTaskEvent({
+    taskId: input.task.id,
+    ownerUserId: input.ownerUserId,
+    actor: "user",
+    eventType: "status",
+    status: "succeeded",
+    content: input.decisionMessage,
+    metadataJson: serializeJson({
+      turnId: input.turnId,
+      approvalStatus: input.approvalStatus,
+      kimiInvoked: false,
+    }),
+  });
 }
 
 async function processQueuedMessagesAfterGeneration(
@@ -1250,6 +1380,8 @@ async function processQueuedMessagesAfterGeneration(
   selectedRoute: RouteMode
 ) {
   for (let batch = 0; batch < 5; batch += 1) {
+    const thread = await getTaskThread(task.id, ownerUserId);
+    if (thread?.activeTurn) return;
     const queued = await markQueuedMessagesProcessing(task.id, ownerUserId);
     if (queued.length === 0) return;
     await appendTaskEvent({
@@ -1521,6 +1653,111 @@ export const appRouter = router({
         });
         return getTaskThread(input.taskId, ctx.user.id);
       }),
+    kimiApprovalPreference: protectedProcedure.query(async ({ ctx }) => {
+      return getUserPreference(ctx.user.id);
+    }),
+    updateKimiApprovalPreference: protectedProcedure
+      .input(
+        z.object({
+          alwaysRequireKimiApproval: z.boolean(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        return updateUserPreference({
+          ownerUserId: ctx.user.id,
+          alwaysRequireKimiApproval: input.alwaysRequireKimiApproval,
+        });
+      }),
+    approveKimiHandoff: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.number().int().positive(),
+          turnId: z.number().int().positive(),
+          approvalMessage: z.string().trim().max(4000).optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const task = await requireOwnedTask(input.taskId, ctx.user.id);
+        await resumeApprovedKimiTurn({
+          task,
+          ownerUserId: ctx.user.id,
+          turnId: input.turnId,
+          approvalMessage: input.approvalMessage ?? null,
+        });
+        await processQueuedMessagesAfterGeneration(
+          task,
+          ctx.user.id,
+          task.routeMode as RouteMode
+        );
+        return getTaskThread(input.taskId, ctx.user.id);
+      }),
+    requestKimiHandoffRevision: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.number().int().positive(),
+          turnId: z.number().int().positive(),
+          revisionMessage: z.string().trim().min(1).max(8000),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const task = await requireOwnedTask(input.taskId, ctx.user.id);
+        const revisionMessage = `Owner requested a revised Claude plan before Kimi runs: ${input.revisionMessage}`;
+        await resolvePausedApprovalTurn({
+          task,
+          ownerUserId: ctx.user.id,
+          turnId: input.turnId,
+          approvalStatus: "revision_requested",
+          decisionMessage: revisionMessage,
+          stoppedMarker: "Owner requested a revised approval plan before Kimi execution.",
+        });
+        await appendTaskEvent({
+          taskId: task.id,
+          ownerUserId: ctx.user.id,
+          actor: "user",
+          eventType: "message",
+          status: "succeeded",
+          content: input.revisionMessage,
+          metadataJson: serializeJson({
+            approvalRevisionRequest: true,
+            supersededTurnId: input.turnId,
+          }),
+        });
+        await runGenerationTurn({
+          task,
+          ownerUserId: ctx.user.id,
+          userContent: revisionMessage,
+          selectedRoute: "dual",
+          forceKimiApproval: true,
+        });
+        return getTaskThread(input.taskId, ctx.user.id);
+      }),
+    cancelKimiHandoff: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.number().int().positive(),
+          turnId: z.number().int().positive(),
+          cancelMessage: z.string().trim().max(4000).optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const task = await requireOwnedTask(input.taskId, ctx.user.id);
+        await resolvePausedApprovalTurn({
+          task,
+          ownerUserId: ctx.user.id,
+          turnId: input.turnId,
+          approvalStatus: "cancelled",
+          decisionMessage:
+            input.cancelMessage?.trim() ||
+            "Owner cancelled Kimi execution for this Claude plan.",
+          stoppedMarker: "Owner cancelled the approval handoff before Kimi execution.",
+        });
+        await processQueuedMessagesAfterGeneration(
+          task,
+          ctx.user.id,
+          task.routeMode as RouteMode
+        );
+        return getTaskThread(input.taskId, ctx.user.id);
+      }),
     stopGeneration: protectedProcedure
       .input(
         z.object({
@@ -1530,7 +1767,34 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
-        await requireOwnedTask(input.taskId, ctx.user.id);
+        const task = await requireOwnedTask(input.taskId, ctx.user.id);
+        const turn = await getTurnForOwner(input.turnId, ctx.user.id);
+        if (
+          turn?.taskId === input.taskId &&
+          turn.state === "awaiting_approval" &&
+          turn.approvalStatus === "awaiting_owner"
+        ) {
+          await resolvePausedApprovalTurn({
+            task,
+            ownerUserId: ctx.user.id,
+            turnId: input.turnId,
+            approvalStatus: "cancelled",
+            decisionMessage:
+              "Owner stopped the approval handoff before Kimi execution.",
+            stoppedMarker: "Stop requested while waiting for owner approval.",
+          });
+          return {
+            success: true,
+            stop: {
+              taskId: input.taskId,
+              ownerUserId: ctx.user.id,
+              turnId: input.turnId,
+              activeOperation: input.activeOperation ?? null,
+              destructiveOperation: false,
+              cancelledApproval: true,
+            },
+          } as const;
+        }
         const stop = requestTurnStop({
           taskId: input.taskId,
           ownerUserId: ctx.user.id,

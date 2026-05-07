@@ -4,6 +4,7 @@ import {
   failTurn,
   stopTurn,
   updateTaskStatus,
+  updateTurnApprovalState,
   updateTurnState,
   type CredentialProvider,
   type CredentialStatus,
@@ -40,6 +41,8 @@ export type WrapperExecutionInput = {
   files: TaskFile[];
   governance?: GovernanceLoadResult;
   skills?: Array<Skill & { loadReason: ResolvedSkillLoadReason; displayTag: string }>;
+  requireApprovalBeforeKimi?: boolean;
+  approvedClaudePlan?: string;
 };
 
 export type WrapperExecutionResult = {
@@ -48,6 +51,7 @@ export type WrapperExecutionResult = {
   kimiResult?: string;
   claudeReview?: string;
   finalAnswer: string;
+  awaitingApproval?: boolean;
 };
 
 type ModelMessage = { role: "system" | "user" | "assistant"; content: string };
@@ -586,7 +590,7 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
     const beforeModelStop = await stopIfRequested("before model calls");
     if (beforeModelStop) return { route: input.route, finalAnswer: beforeModelStop };
 
-    if (input.route === "claude" || input.route === "dual") {
+    if ((input.route === "claude" || input.route === "dual") && !input.approvedClaudePlan) {
       claudePlan = await runClaudePlan(input, contextJson, await buildGovernanceBlockForProvider("claude"));
       await appendTaskEvent({
         taskId: input.task.id,
@@ -599,9 +603,56 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
       });
       const afterClaudeStop = await stopIfRequested("after claude planning");
       if (afterClaudeStop) return { route: input.route, claudePlan, finalAnswer: afterClaudeStop };
+
+      if (input.route === "dual" && input.requireApprovalBeforeKimi && !input.approvedClaudePlan) {
+        await updateTurnApprovalState({
+          turnId: input.turnId,
+          ownerUserId: input.ownerUserId,
+          state: "awaiting_approval",
+          approvalStatus: "awaiting_owner",
+          approvalPlanContent: claudePlan,
+          approvalDecisionMessage: null,
+          approvalRequestedAt: Date.now(),
+          approvalResolvedAt: null,
+        });
+        await updateTaskStatus(input.task.id, input.ownerUserId, "active");
+        await appendTaskEvent({
+          taskId: input.task.id,
+          ownerUserId: input.ownerUserId,
+          actor: "wrapper",
+          eventType: "status",
+          status: "blocked",
+          content: "Claude planning is ready. Kimi execution is paused until the owner approves, requests a revision, or cancels this handoff.",
+          metadataJson: serializeJson({
+            turnId: input.turnId,
+            route: input.route,
+            approvalStatus: "awaiting_owner",
+            kimiInvoked: false,
+          }),
+        });
+        return {
+          route: input.route,
+          claudePlan,
+          finalAnswer: "Claude planning is ready for owner approval before Kimi runs.",
+          awaitingApproval: true,
+        };
+      }
+    } else if (input.route === "dual" && input.approvedClaudePlan) {
+      claudePlan = input.approvedClaudePlan;
     }
 
     if (input.route === "kimi" || input.route === "dual") {
+      if (input.route === "dual" && input.approvedClaudePlan) {
+        await updateTurnApprovalState({
+          turnId: input.turnId,
+          ownerUserId: input.ownerUserId,
+          state: "model_calling",
+          approvalStatus: "approved",
+          approvalPlanContent: input.approvedClaudePlan,
+          approvalDecisionMessage: "Owner approved Claude planning for Kimi execution.",
+          approvalResolvedAt: Date.now(),
+        });
+      }
       kimiResult = await runKimiExecution(input, contextJson, claudePlan, await buildGovernanceBlockForProvider("kimi"));
       await appendTaskEvent({
         taskId: input.task.id,

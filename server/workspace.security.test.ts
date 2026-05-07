@@ -13,6 +13,8 @@ const dbMocks = vi.hoisted(() => ({
   getTaskFileForOwner: vi.fn(),
   getTaskForOwner: vi.fn(),
   getTaskThread: vi.fn(),
+  getTurnForOwner: vi.fn(),
+  getUserPreference: vi.fn(),
   listAllFilesForOwner: vi.fn(),
   listGlobalFilesForOwner: vi.fn(),
   listMemoryByCategory: vi.fn(),
@@ -28,6 +30,9 @@ const dbMocks = vi.hoisted(() => ({
   cancelQueuedTaskMessage: vi.fn(),
   findActiveTurnForTask: vi.fn(),
   markTurnStopped: vi.fn(),
+  stopTurn: vi.fn(),
+  updateTurnApprovalState: vi.fn(),
+  updateUserPreference: vi.fn(),
   formatQueuedMessagesForGeneration: vi.fn((queued: Array<{ content: string }>) => queued.map((item) => item.content).join("\n")),
   recordCredentialStatus: vi.fn(),
   renameTask: vi.fn(),
@@ -142,6 +147,10 @@ describe("v2 task ownership and credential-gate security", () => {
     dbMocks.appendTaskEvent.mockResolvedValue({ id: 1 });
     dbMocks.createTurn.mockResolvedValue({ id: 444 });
     dbMocks.getTaskThread.mockResolvedValue({ task: { ...ownedTask, status: "blocked" }, events: [], activeTurn: null });
+    dbMocks.getTurnForOwner.mockResolvedValue(null);
+    dbMocks.getUserPreference.mockResolvedValue({ ownerUserId: 42, alwaysRequireKimiApproval: true, createdAt: 1777998000000, updatedAt: 1777998000000 });
+    dbMocks.updateTurnApprovalState.mockResolvedValue(undefined);
+    dbMocks.updateUserPreference.mockImplementation(async (input: any) => ({ ownerUserId: input.ownerUserId, alwaysRequireKimiApproval: input.alwaysRequireKimiApproval, createdAt: 1777998000000, updatedAt: 1777998100000 }));
     dbMocks.recordCredentialStatus.mockResolvedValue({ id: 1 });
     dbMocks.listTaskEvents.mockResolvedValue([]);
     dbMocks.listMemoryByCategory.mockResolvedValue([]);
@@ -156,6 +165,7 @@ describe("v2 task ownership and credential-gate security", () => {
     dbMocks.updateQueuedTaskMessage.mockResolvedValue([]);
     dbMocks.cancelQueuedTaskMessage.mockResolvedValue([]);
     dbMocks.markTurnStopped.mockResolvedValue(undefined);
+    dbMocks.stopTurn.mockResolvedValue(undefined);
   });
 
   it("rejects orchestration messages for tasks not owned by the authenticated user", async () => {
@@ -277,6 +287,138 @@ describe("v2 task ownership and credential-gate security", () => {
     expect(dbMocks.updateTaskStatus).toHaveBeenCalledWith(77, 42, "blocked");
     expect(wrapperMocks.executeWrapperTurn).not.toHaveBeenCalled();
     expect(result).toMatchObject({ task: { id: 77, status: "blocked" } });
+  });
+
+  it("defaults §9 Kimi approval preference on and converts Kimi-routed submissions into an approval-gated dual handoff", async () => {
+    wrapperMocks.getWrapperRuntimeCredentialStates.mockReturnValue([
+      { provider: "claude", status: "configured", configured: true, reason: null },
+      { provider: "kimi", status: "configured", configured: true, reason: null },
+    ]);
+    dbMocks.getTaskForOwner.mockResolvedValueOnce({ ...ownedTask, status: "active", routeMode: "kimi" });
+    dbMocks.getUserPreference.mockResolvedValueOnce({ ownerUserId: 42, alwaysRequireKimiApproval: true, createdAt: 1777998000000, updatedAt: 1777998000000 });
+    const caller = appRouter.createCaller(createContext(42));
+
+    await caller.orchestration.submitMessage({ taskId: 77, message: "Implement the safe handoff", routeMode: "kimi" });
+
+    expect(dbMocks.createTurn).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 77,
+      ownerUserId: 42,
+      route: "dual",
+      state: "context_assembly",
+    }));
+    expect(wrapperMocks.executeWrapperTurn).toHaveBeenCalledWith(expect.objectContaining({
+      route: "dual",
+      requireApprovalBeforeKimi: true,
+    }));
+  });
+
+  it("resumes an approved §9 Claude-to-Kimi handoff with the stored plan and without requesting a fresh approval pause", async () => {
+    const awaitingTurn = {
+      id: 777,
+      taskId: 77,
+      ownerUserId: 42,
+      routeMode: "dual",
+      route: "dual",
+      state: "awaiting_approval",
+      approvalStatus: "awaiting_owner",
+      approvalPlanContent: "Stored Claude plan for Kimi.",
+      startedAt: 1777999000000,
+      completedAt: null,
+      errorMessage: null,
+    };
+    dbMocks.getTaskForOwner.mockResolvedValueOnce({ ...ownedTask, status: "active" });
+    dbMocks.getTurnForOwner.mockResolvedValueOnce(awaitingTurn);
+    const caller = appRouter.createCaller(createContext(42));
+
+    await caller.orchestration.approveKimiHandoff({ taskId: 77, turnId: 777 });
+
+    expect(dbMocks.appendTaskEvent).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 77,
+      ownerUserId: 42,
+      actor: "user",
+      eventType: "status",
+      status: "succeeded",
+      content: expect.stringContaining("Owner approved Kimi handoff"),
+    }));
+    expect(wrapperMocks.executeWrapperTurn).toHaveBeenCalledWith(expect.objectContaining({
+      turnId: 777,
+      route: "dual",
+      approvedClaudePlan: "Stored Claude plan for Kimi.",
+      requireApprovalBeforeKimi: false,
+    }));
+  });
+
+  it("handles §9 revision requests by cancelling the paused plan and forcing a fresh approval-gated Claude plan", async () => {
+    wrapperMocks.getWrapperRuntimeCredentialStates.mockReturnValue([
+      { provider: "claude", status: "configured", configured: true, reason: null },
+      { provider: "kimi", status: "configured", configured: true, reason: null },
+    ]);
+    const awaitingTurn = {
+      id: 778,
+      taskId: 77,
+      ownerUserId: 42,
+      routeMode: "dual",
+      route: "dual",
+      state: "awaiting_approval",
+      approvalStatus: "awaiting_owner",
+      approvalPlanContent: "Plan needing revision.",
+      startedAt: 1777999000000,
+      completedAt: null,
+      errorMessage: null,
+    };
+    dbMocks.getTaskForOwner.mockResolvedValueOnce({ ...ownedTask, status: "active" });
+    dbMocks.getTurnForOwner.mockResolvedValueOnce(awaitingTurn);
+    const caller = appRouter.createCaller(createContext(42));
+
+    await caller.orchestration.requestKimiHandoffRevision({ taskId: 77, turnId: 778, revisionMessage: "Add rollback proof before Kimi runs." });
+
+    expect(dbMocks.updateTurnApprovalState).toHaveBeenCalledWith(expect.objectContaining({
+      turnId: 778,
+      ownerUserId: 42,
+      state: "stopped",
+      approvalStatus: "revision_requested",
+      approvalDecisionMessage: "Owner requested a revised Claude plan before Kimi runs: Add rollback proof before Kimi runs.",
+    }));
+    expect(dbMocks.createTurn).toHaveBeenCalledWith(expect.objectContaining({ taskId: 77, ownerUserId: 42, route: "dual", state: "context_assembly" }));
+    expect(wrapperMocks.executeWrapperTurn).toHaveBeenCalledWith(expect.objectContaining({
+      route: "dual",
+      requireApprovalBeforeKimi: true,
+      userMessage: expect.stringContaining("Add rollback proof before Kimi runs."),
+    }));
+  });
+
+  it("cancels a §9 waiting handoff through stopGeneration without starting Kimi or queue flush", async () => {
+    const awaitingTurn = {
+      id: 779,
+      taskId: 77,
+      ownerUserId: 42,
+      routeMode: "dual",
+      route: "dual",
+      state: "awaiting_approval",
+      approvalStatus: "awaiting_owner",
+      approvalPlanContent: "Plan to cancel.",
+      startedAt: 1777999000000,
+      completedAt: null,
+      errorMessage: null,
+    };
+    dbMocks.getTaskForOwner.mockResolvedValueOnce({ ...ownedTask, status: "active" });
+    dbMocks.getTurnForOwner.mockResolvedValue(awaitingTurn);
+    const caller = appRouter.createCaller(createContext(42));
+
+    await caller.orchestration.stopGeneration({ taskId: 77, turnId: 779, activeOperation: "awaiting_approval" });
+
+    expect(dbMocks.updateTurnApprovalState).toHaveBeenCalledWith(expect.objectContaining({
+      turnId: 779,
+      ownerUserId: 42,
+      state: "stopped",
+      approvalStatus: "cancelled",
+    }));
+    expect(dbMocks.stopTurn).toHaveBeenCalledWith(
+      779,
+      42,
+      "Stop requested while waiting for owner approval."
+    );
+    expect(wrapperMocks.executeWrapperTurn).not.toHaveBeenCalled();
   });
 
   it("records file metadata only after task ownership and safe relative path validation", async () => {

@@ -31,6 +31,24 @@ export const users = mysqlTable("users", {
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
+export const userPreferences = mysqlTable(
+  "user_preferences",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerUserId: int("ownerUserId").notNull(),
+    alwaysRequireKimiApproval: boolean("alwaysRequireKimiApproval")
+      .default(true)
+      .notNull(),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+    updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
+  },
+  table => ({
+    ownerUniqueIdx: uniqueIndex("user_preferences_owner_unique_idx").on(
+      table.ownerUserId
+    ),
+  })
+);
+
 export const tasks = mysqlTable(
   "tasks",
   {
@@ -150,6 +168,7 @@ export const orchestrationTurns = mysqlTable(
       "credential_check",
       "context_assembly",
       "model_calling",
+      "awaiting_approval",
       "model_review",
       "persisting_output",
       "completed",
@@ -160,6 +179,19 @@ export const orchestrationTurns = mysqlTable(
       .default("received")
       .notNull(),
     credentialStateJson: longtext("credentialStateJson"),
+    approvalStatus: mysqlEnum("approvalStatus", [
+      "not_required",
+      "awaiting_owner",
+      "approved",
+      "revision_requested",
+      "cancelled",
+    ])
+      .default("not_required")
+      .notNull(),
+    approvalPlanContent: longtext("approvalPlanContent"),
+    approvalDecisionMessage: longtext("approvalDecisionMessage"),
+    approvalRequestedAt: bigint("approvalRequestedAt", { mode: "number" }),
+    approvalResolvedAt: bigint("approvalResolvedAt", { mode: "number" }),
     startedAt: bigint("startedAt", { mode: "number" }).notNull(),
     completedAt: bigint("completedAt", { mode: "number" }),
     errorCode: varchar("errorCode", { length: 96 }),
@@ -536,6 +568,8 @@ export const credentialStatusSnapshots = mysqlTable(
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
+export type UserPreference = typeof userPreferences.$inferSelect;
+export type InsertUserPreference = typeof userPreferences.$inferInsert;
 export type Task = typeof tasks.$inferSelect;
 export type InsertTask = typeof tasks.$inferInsert;
 export type TaskEvent = typeof taskEvents.$inferSelect;

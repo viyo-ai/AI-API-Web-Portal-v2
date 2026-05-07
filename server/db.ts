@@ -20,6 +20,7 @@ import {
   InsertTaskFile,
   InsertTaskMessageQueueItem,
   InsertUser,
+  InsertUserPreference,
   InsertSkill,
   Skill,
   Task,
@@ -33,6 +34,7 @@ import {
   taskMessageQueue,
   taskSkillSelections,
   tasks,
+  userPreferences,
   users,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
@@ -59,6 +61,7 @@ export type TurnState =
   | "credential_check"
   | "context_assembly"
   | "model_calling"
+  | "awaiting_approval"
   | "model_review"
   | "persisting_output"
   | "completed"
@@ -84,6 +87,12 @@ export type BuildBranchPushState =
 export type WizardSessionStatus = "cached" | "failed";
 export type AgentEnvVarMap = Record<string, string>;
 export type { GovernanceFileConfig } from "./buildRunner/loadGovernance";
+export type ApprovalStatus =
+  | "not_required"
+  | "awaiting_owner"
+  | "approved"
+  | "revision_requested"
+  | "cancelled";
 export type QueuedMessageState = "queued" | "processing" | "sent" | "cleared";
 export type TaskGlobalFileLinkSource = "root_default" | "project" | "manual";
 export const MAX_QUEUED_MESSAGES_PER_TASK = 5;
@@ -178,6 +187,57 @@ export async function getUserByOpenId(openId: string) {
     .where(eq(users.openId, openId))
     .limit(1);
   return result[0];
+}
+
+export async function getUserPreference(ownerUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for user preferences");
+
+  const existing = await db
+    .select()
+    .from(userPreferences)
+    .where(eq(userPreferences.ownerUserId, ownerUserId))
+    .limit(1);
+  if (existing[0]) return existing[0];
+
+  const timestamp = nowMs();
+  const insertValues: InsertUserPreference = {
+    ownerUserId,
+    alwaysRequireKimiApproval: true,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  await db.insert(userPreferences).values(insertValues);
+  const created = await db
+    .select()
+    .from(userPreferences)
+    .where(eq(userPreferences.ownerUserId, ownerUserId))
+    .limit(1);
+  if (!created[0]) throw new Error("Failed to create user preferences");
+  return created[0];
+}
+
+export async function updateUserPreference(values: {
+  ownerUserId: number;
+  alwaysRequireKimiApproval: boolean;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for user preferences");
+
+  const timestamp = nowMs();
+  const insertValues: InsertUserPreference = {
+    ownerUserId: values.ownerUserId,
+    alwaysRequireKimiApproval: values.alwaysRequireKimiApproval,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  await db.insert(userPreferences).values(insertValues).onDuplicateKeyUpdate({
+    set: {
+      alwaysRequireKimiApproval: values.alwaysRequireKimiApproval,
+      updatedAt: timestamp,
+    },
+  });
+  return getUserPreference(values.ownerUserId);
 }
 
 export function sanitizeTaskTitle(input: string) {
@@ -658,6 +718,54 @@ export async function updateTurnState(
         eq(orchestrationTurns.ownerUserId, ownerUserId)
       )
     );
+}
+
+export async function updateTurnApprovalState(values: {
+  turnId: number;
+  ownerUserId: number;
+  state: TurnState;
+  approvalStatus: ApprovalStatus;
+  approvalPlanContent?: string | null;
+  approvalDecisionMessage?: string | null;
+  approvalRequestedAt?: number | null;
+  approvalResolvedAt?: number | null;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for orchestration turns");
+
+  await db
+    .update(orchestrationTurns)
+    .set({
+      state: values.state,
+      approvalStatus: values.approvalStatus,
+      approvalPlanContent: values.approvalPlanContent,
+      approvalDecisionMessage: values.approvalDecisionMessage,
+      approvalRequestedAt: values.approvalRequestedAt,
+      approvalResolvedAt: values.approvalResolvedAt,
+    })
+    .where(
+      and(
+        eq(orchestrationTurns.id, values.turnId),
+        eq(orchestrationTurns.ownerUserId, values.ownerUserId)
+      )
+    );
+}
+
+export async function getTurnForOwner(turnId: number, ownerUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for orchestration turns");
+
+  const result = await db
+    .select()
+    .from(orchestrationTurns)
+    .where(
+      and(
+        eq(orchestrationTurns.id, turnId),
+        eq(orchestrationTurns.ownerUserId, ownerUserId)
+      )
+    )
+    .limit(1);
+  return result[0];
 }
 
 export async function completeTurn(turnId: number, ownerUserId: number) {
