@@ -32,3 +32,15 @@ No validation gate is open. A production-build chunk-size warning remains from t
 ## Authenticated Browser Visual Evidence
 
 A managed browser inspection of the authenticated preview confirmed the core §1A-CONV surfaces are present in the live UI: the existing form wizard remains visible as Advanced Setup, the center thread includes the Architect-in-Portal onboarding card, the Credentials drawer triggers are visible, the task list exposes Rename and most-recent sorting, Project Memory is scoped to the selected project state, and the Task Inspector still includes the Diagnostics tab unchanged. This browser inspection is the authenticated visual source of truth for the screenshot closeout package.
+
+## Fallback Screenshot Verification
+
+The authenticated HTML snapshot rendered successfully into a closeout screenshot at 1440px. The screenshot shows the §1A-CONV Architect-in-Portal onboarding card, unchanged Advanced Setup wizard, credentials drawer trigger, approval-gate copy, provider route selector, Credentials composer action, Task Inspector tabs, and file panels. This fallback image is based on the saved authenticated browser DOM snapshot and avoids unauthenticated CLI cookie limitations.
+
+## Credentials Drawer Visual Evidence
+
+The authenticated preview drawer opens from the center task thread and shows provider status without exposing token values. The drawer lists Claude with env var name `CLAUDE_API_KEY`, Kimi with env var name `KIMI_API_KEY`, configured status badges, per-provider `Test now` actions, last-tested placeholders, and an `Advanced Setup` escape hatch from the drawer. This confirms the conversational credential-management surface operates on env var names only and preserves the Advanced Setup escape path.
+
+## Responsive Screenshot Verification
+
+Responsive authenticated HTML snapshots were generated at 1440px, 1024px, and 390px. The inspected 390px capture verifies the mobile-width presentation keeps the task-first workspace, Advanced Setup wizard, credential env-var-name field, paste-detection error copy, and setup steps visible without exposing token values. Drawer-specific captures were also generated for 1440px and 390px from the authenticated drawer DOM snapshot.

@@ -106,6 +106,19 @@ The classification must preserve these boundaries: Architect never sees or store
 
 The existing form wizard stays as Advanced Setup. All §1A-FU-04 safety guarantees apply unchanged: paste-detection, connection-test before save, and plain-English errors. §9 approval gate still applies to all Kimi build turns. Architect does not bypass approval. Token values stay in Manus env vars. Architect operates on env var names only. The new schema is additive only: one new table, `project_memory`, through `0013_project_memory.sql`; no existing tables were changed. Per-project memory isolation is enforced at query level, and cross-project bleed is forbidden.
 
+## Screenshot Evidence
+
+Visual closeout evidence is stored under `.taskmaster/docs/screenshots/PORTAL_PHASE_3_DIRECTIVE-S1A-CONV/` and indexed in `screenshot-index.md`. The screenshots cover the authenticated desktop workspace, responsive workspace widths, the Credentials Drawer, mobile Advanced Setup visibility, token-env-var-name-only presentation, and the retained Advanced Setup escape hatch. The screenshots were generated from authenticated browser DOM snapshots because raw Chromium navigation cannot reuse the managed preview session cookie.
+
+| Evidence File | Purpose |
+|---|---|
+| `01-authenticated-html-snapshot-1440.png` | Desktop workspace, Architect card, Advanced Setup, approval copy, task inspector. |
+| `02-authenticated-html-snapshot-1024.png` | Tablet-width workspace layout evidence. |
+| `03-authenticated-html-snapshot-390.png` | Mobile-width Advanced Setup and env-var-name-only credential input evidence. |
+| `04-credentials-drawer-html-snapshot-1440.png` | Desktop Credentials Drawer with configured provider statuses and Test now actions. |
+| `05-credentials-drawer-html-snapshot-390.png` | Mobile Credentials Drawer evidence. |
+| `overview-1440.png` | Earlier unauthenticated raw Chromium baseline retained only as diagnostic evidence. |
+
 ## Product Owner Gate
 
 This package is delivered for Product Owner review. §1A-CONV should not be marked accepted, and Phase 3 should not be closed, until the Product Owner signs off in writing.
