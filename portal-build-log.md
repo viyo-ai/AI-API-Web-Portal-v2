@@ -95,3 +95,19 @@ The §1A Product Owner follow-up items are complete and remain limited to the Pr
 | Automated validation | Passed | `pnpm check`, `pnpm test --run server/section1.build-targets.contract.test.ts` with 4 tests passing, and `pnpm test --run` with 23 files and 105 tests passing. An initial full-suite attempt exposed repeated Anthropic TLS `ECONNRESET` failures in the live credential smoke test; deterministic product tests passed, connectivity to Anthropic was confirmed separately, and the validation-only retry hardening allowed the final full suite to complete successfully. |
 
 Product Owner boundary: §4 Branch Isolation remains paused. No §4 implementation work has begun, and the build must wait for explicit Product Owner confirmation of this §1A follow-up before proceeding.
+
+## Phase 2 §4 Complete — Branch Isolation, Push Policy, and Environment Injection
+
+§4 from the authorized Phase 2 continuation directive is complete for Product Owner acceptance review. The implementation remains limited to Branch Isolation, Push Policy, and Environment Variable Injection; §8 Composer Queue/Stop work has not been started. The existing `buildRunner` scaffold was extended rather than replaced, and Project setup now creates isolated `agent-work/` branches with per-branch workspace paths, protected-branch push blocking, mapped-only agent environment generation, and cleanup behavior.
+
+| §4 acceptance area | Result | Evidence |
+|---|---|---|
+| Branch namespace and isolation | Passed | Build Branch names are required to start with `agent-work/`, unsafe names are rejected, and workspace paths are finalized with the persisted Build Branch ID so each branch receives a distinct workspace root. |
+| Push policy | Passed | Protected branches are blocked before network push attempts, push results are returned as structured `pushed`, `blocked`, or `error` states, and cloned workspaces install a defense-in-depth pre-push hook that rejects protected remote refs. |
+| Environment injection | Passed | `.env.agent` is generated in the workspace root from `agentEnvVarMapJson`, `.env.agent` is gitignored, missing mapped source variables fail closed, and the isolated child-process environment helper exposes only configured mapped variables. |
+| Project setup and existing Project UI | Passed | Wizard-created Projects and existing Project branch creation both use the same id-finalized isolated workspace path and agent environment mapping. The UI defaults branch creation to the `agent-work/` namespace and renders structured protected-push blocks as owner-readable policy messages instead of transport failures. |
+| Cleanup | Passed | Build Branch deletion removes the workspace path, including `.git`, `.env.agent`, and uncommitted files, while removing the Build Branch record through the existing owned-branch deletion flow. |
+| Regression coverage | Passed | `server/section4.branch-policy.contract.test.ts` covers all six §4 invariants, including prefix enforcement, workspace isolation, mapped-only env behavior, pre-push protection, structured protected push results, and cleanup. `client/src/pages/Home.behavior.test.tsx` covers `agent-work/` branch creation, protected-push UI handling, and deletion behavior. |
+| Automated validation | Passed | `pnpm check`, `pnpm test -- --run`, and `pnpm build` completed successfully after the final §4 implementation repair. |
+
+Product Owner boundary: §4 is complete for acceptance review. Phase 2 is not being declared complete, and §8 Composer Queue/Stop remains paused until Product Owner approval explicitly authorizes the next section.

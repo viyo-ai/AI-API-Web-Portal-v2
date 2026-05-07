@@ -2101,6 +2101,25 @@ export async function updateBuildBranchPushState(values: {
   return getBuildBranchForOwner(values.branchId, values.ownerUserId);
 }
 
+export async function updateBuildBranchWorkspacePath(values: {
+  branchId: number;
+  ownerUserId: number;
+  workspacePath: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for Build Branches");
+  await db
+    .update(buildBranches)
+    .set({ workspacePath: values.workspacePath, updatedAt: nowMs() })
+    .where(
+      and(
+        eq(buildBranches.id, values.branchId),
+        eq(buildBranches.ownerUserId, values.ownerUserId)
+      )
+    );
+  return getBuildBranchForOwner(values.branchId, values.ownerUserId);
+}
+
 export async function listBuildBranchesForTarget(
   buildTargetId: number,
   ownerUserId: number,

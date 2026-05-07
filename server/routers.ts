@@ -64,6 +64,7 @@ import {
   searchMemory,
   updateBuildBranchPushState,
   updateBuildBranchState,
+  updateBuildBranchWorkspacePath,
   updateBuildTargetEnvMap,
   updateBuildTargetGovernanceSettings,
   upsertWizardSessionCache,
@@ -189,6 +190,40 @@ function buildTargetGitConfig(
   };
 }
 
+async function createBuildBranchWithIsolatedWorkspace(params: {
+  buildTargetId: number;
+  ownerUserId: number;
+  branchName: string;
+  baseBranch: string;
+  taskId?: number | null;
+}) {
+  const branch = await createBuildBranch({
+    buildTargetId: params.buildTargetId,
+    ownerUserId: params.ownerUserId,
+    branchName: params.branchName,
+    baseBranch: params.baseBranch,
+    workspacePath: getBuildBranchWorkspacePath({
+      ownerUserId: params.ownerUserId,
+      buildTargetId: params.buildTargetId,
+      branchId: 0,
+      branchName: params.branchName,
+    }),
+    taskId: params.taskId ?? null,
+  });
+  const workspacePath = getBuildBranchWorkspacePath({
+    ownerUserId: params.ownerUserId,
+    buildTargetId: params.buildTargetId,
+    branchId: branch.id,
+    branchName: params.branchName,
+  });
+  const updated = await updateBuildBranchWorkspacePath({
+    branchId: branch.id,
+    ownerUserId: params.ownerUserId,
+    workspacePath,
+  });
+  return updated ?? { ...branch, workspacePath };
+}
+
 async function pushOwnedBuildBranch(branchId: number, ownerUserId: number) {
   const branch = await getBuildBranchForOwner(branchId, ownerUserId);
   if (!branch)
@@ -220,9 +255,13 @@ async function pushOwnedBuildBranch(branchId: number, ownerUserId: number) {
     lastPushedCommit: result.pushedCommit ?? null,
     lastPushError: result.errorMessage ?? null,
   });
-  if (result.pushState !== "pushed")
-    throw new Error(result.errorMessage ?? "Push blocked by Section 4 policy.");
-  return { branch: updated, result };
+  return {
+    branch: updated,
+    result,
+    pushState: result.pushState,
+    pushedCommit: result.pushedCommit ?? null,
+    errorMessage: result.errorMessage ?? null,
+  };
 }
 
 const routeModes = ["auto", "claude", "kimi", "dual"] as const;
@@ -2203,7 +2242,7 @@ export const appRouter = router({
             .trim()
             .min(1)
             .max(220)
-            .default("portal-wizard-setup"),
+            .default("agent-work/portal-wizard-setup"),
           protectedBranches: z
             .array(z.string().trim().min(1).max(160))
             .min(1)
@@ -2245,17 +2284,11 @@ export const appRouter = router({
           governanceBudgetEnforced: true,
         });
         const branchName = assertSafeBranchName(input.initialBuildBranch);
-        const branch = await createBuildBranch({
+        const branch = await createBuildBranchWithIsolatedWorkspace({
           buildTargetId: target.id,
           ownerUserId: ctx.user.id,
           branchName,
           baseBranch: input.defaultBaseBranch,
-          workspacePath: getBuildBranchWorkspacePath({
-            ownerUserId: ctx.user.id,
-            buildTargetId: target.id,
-            branchId: Date.now(),
-            branchName,
-          }),
           taskId: null,
         });
         void cloneOrSyncBranch({
@@ -2270,6 +2303,7 @@ export const appRouter = router({
             defaultBaseBranch: input.defaultBaseBranch,
             githubTokenEnvVar: input.githubTokenEnvVar,
             protectedBranches: input.protectedBranches,
+            agentEnvVarMap: input.agentEnvVarMap,
           },
         })
           .then(result =>
@@ -2328,17 +2362,11 @@ export const appRouter = router({
             "Project not found or not owned by the authenticated user"
           );
         const branchName = assertSafeBranchName(input.branchName);
-        const branch = await createBuildBranch({
+        const branch = await createBuildBranchWithIsolatedWorkspace({
           buildTargetId: target.id,
           ownerUserId: ctx.user.id,
           branchName,
           baseBranch: input.baseBranch ?? target.defaultBaseBranch,
-          workspacePath: getBuildBranchWorkspacePath({
-            ownerUserId: ctx.user.id,
-            buildTargetId: target.id,
-            branchId: Date.now(),
-            branchName,
-          }),
           taskId: input.taskId ?? null,
         });
         void cloneOrSyncBranch({
@@ -2348,15 +2376,7 @@ export const appRouter = router({
           branchName,
           baseBranch: input.baseBranch ?? target.defaultBaseBranch,
           workspacePath: branch.workspacePath,
-          target: {
-            repoUrl: target.repoUrl,
-            defaultBaseBranch: target.defaultBaseBranch,
-            githubTokenEnvVar: target.githubTokenEnvVar,
-            protectedBranches: parseJsonStringArray(
-              target.protectedBranchesJson,
-              ["main", "staging"]
-            ),
-          },
+          target: buildTargetGitConfig(target),
         })
           .then(workspace =>
             updateBuildBranchState({
@@ -2459,17 +2479,11 @@ export const appRouter = router({
             "Project not found or not owned by the authenticated user"
           );
         const branchName = assertSafeBranchName(input.branchName);
-        const branch = await createBuildBranch({
+        const branch = await createBuildBranchWithIsolatedWorkspace({
           buildTargetId: target.id,
           ownerUserId: ctx.user.id,
           branchName,
           baseBranch: input.baseBranch ?? target.defaultBaseBranch,
-          workspacePath: getBuildBranchWorkspacePath({
-            ownerUserId: ctx.user.id,
-            buildTargetId: target.id,
-            branchId: Date.now(),
-            branchName,
-          }),
           taskId: input.taskId ?? null,
         });
         void cloneOrSyncBranch({
@@ -2479,15 +2493,7 @@ export const appRouter = router({
           branchName,
           baseBranch: input.baseBranch ?? target.defaultBaseBranch,
           workspacePath: branch.workspacePath,
-          target: {
-            repoUrl: target.repoUrl,
-            defaultBaseBranch: target.defaultBaseBranch,
-            githubTokenEnvVar: target.githubTokenEnvVar,
-            protectedBranches: parseJsonStringArray(
-              target.protectedBranchesJson,
-              ["main", "staging"]
-            ),
-          },
+          target: buildTargetGitConfig(target),
         })
           .then(workspace =>
             updateBuildBranchState({

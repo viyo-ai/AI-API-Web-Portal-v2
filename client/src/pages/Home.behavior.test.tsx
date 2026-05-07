@@ -360,8 +360,8 @@ beforeEach(() => {
   stopGenerationMock.mockResolvedValue({ stopped: true, stop: { destructiveOperation: false, boundary: "before_next_generation_step" } });
   createFileMetadataMock.mockResolvedValue(mockTaskFiles[0]);
   attachGlobalToTaskMock.mockResolvedValue({ id: 501, taskId: 7, globalFileId: 56, attachedLabel: "Owner playbook.pdf", file: mockGlobalFiles[0] });
-  createBuildBranchMock.mockResolvedValue({ id: 301, branchName: "feature/plain-language", state: "clean", pushState: "never_pushed", workspacePath: "/tmp/plain-language", taskId: 7 });
-  pushBuildBranchMock.mockResolvedValue({ id: 301, branchName: "feature/plain-language", state: "clean", pushState: "pushed", workspacePath: "/tmp/plain-language", taskId: 7 });
+  createBuildBranchMock.mockResolvedValue({ id: 301, branchName: "agent-work/plain-language", state: "clean", pushState: "never_pushed", workspacePath: "/tmp/plain-language", taskId: 7 });
+  pushBuildBranchMock.mockResolvedValue({ branch: { id: 301, branchName: "agent-work/plain-language", state: "clean", pushState: "pushed", workspacePath: "/tmp/plain-language", taskId: 7 }, pushState: "pushed", pushedCommit: "1234567890abcdef", errorMessage: null, result: { pushState: "pushed", pushedCommit: "1234567890abcdef" } });
   analyzeWizardMock.mockResolvedValue({
     status: "ok",
     cacheStatus: "miss",
@@ -376,7 +376,7 @@ beforeEach(() => {
     },
     recommendation: {
       defaultBaseBranch: { value: "main", confidence: "high", rationale: "Detected from the GitHub default branch." },
-      branchStrategy: { value: { initialBuildBranch: "portal-wizard-setup", protectedBranches: ["main", "staging"] }, confidence: "medium", rationale: "Keep protected branches read-only and use a separate Build Branch." },
+      branchStrategy: { value: { initialBuildBranch: "agent-work/portal-wizard-setup", protectedBranches: ["main", "staging"] }, confidence: "medium", rationale: "Keep protected branches read-only and use a separate Build Branch." },
       validationCommands: { value: ["pnpm check", "pnpm test", "pnpm build"], confidence: "high", rationale: "Detected from package scripts." },
       serviceChecks: { value: ["pnpm dev"], confidence: "medium", rationale: "Local service command is available." },
       projectRuleBooks: { value: [], confidence: "low", rationale: "No authoritative Project rule books were detected." },
@@ -401,7 +401,7 @@ beforeEach(() => {
       createdAt: 1777999500000,
       updatedAt: 1777999500000,
     },
-    branch: { id: 910, branchName: "portal-wizard-setup", baseBranch: "main", state: "syncing", pushState: "never_pushed", workspacePath: "/tmp/portal-wizard-setup", taskId: null },
+    branch: { id: 910, branchName: "agent-work/portal-wizard-setup", baseBranch: "main", state: "syncing", pushState: "never_pushed", workspacePath: "/tmp/portal-wizard-setup", taskId: null },
   });
   uploadWorkspaceFileMock.mockResolvedValue({
     relativePath: "uploads/1777999300000-owner-brief.txt",
@@ -538,7 +538,7 @@ describe("Home v2 task-first workspace behavior", () => {
       repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git",
       githubTokenEnvVar: "BUILD_TARGET_GITHUB_TOKEN",
       defaultBaseBranch: "main",
-      initialBuildBranch: "portal-wizard-setup",
+      initialBuildBranch: "agent-work/portal-wizard-setup",
       protectedBranches: ["main", "staging"],
       validationCommands: ["pnpm check", "pnpm test", "pnpm build"],
       serviceChecks: ["pnpm dev"],
@@ -581,7 +581,7 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(screen.getByRole("button", { name: /Current focus indicator/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/Focus indicator name/i)).toBeInTheDocument();
 
-    await user.type(screen.getByPlaceholderText(/feature\/portal-task/i), "feature/plain-language");
+    await user.type(screen.getByPlaceholderText(/agent-work\/portal-task/i), "agent-work/plain-language");
     await user.click(screen.getByRole("button", { name: /^Open$/i }));
     expect(await screen.findByText(/Push checks: protected branches blocked/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Push branch$/i })).toBeInTheDocument();
@@ -591,6 +591,44 @@ describe("Home v2 task-first workspace behavior", () => {
     ["Build Target", "Build Mode", "Governance Files", "Validation Commands", "Service Checks", "Agent Env Var", "Conventional Commit", "Token Budget", "Pre-push Hook"].forEach((legacyLabel) => {
       expect(ownerCopy).not.toContain(legacyLabel);
     });
+  });
+
+  it("shows structured Section 4 push-blocked results without closing the workspace", async () => {
+    const user = userEvent.setup();
+    mockBuildTargets = [
+      {
+        id: 77,
+        ownerUserId: 42,
+        name: "AI API Portal",
+        repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2",
+        defaultBaseBranch: "main",
+        protectedBranchesJson: JSON.stringify(["main", "staging"]),
+        validationCommandsJson: JSON.stringify(["pnpm check", "pnpm test"]),
+        serviceChecksJson: JSON.stringify([]),
+        agentEnvVarMapJson: JSON.stringify({ WORKSHOP_GITHUB_TOKEN: "BUILD_TARGET_GITHUB_TOKEN" }),
+        governanceFilesJson: JSON.stringify([]),
+        governanceBudgetEnforced: true,
+        archivedAt: null,
+        createdAt: 1777999300000,
+        updatedAt: 1777999400000,
+      },
+    ];
+    pushBuildBranchMock.mockResolvedValueOnce({
+      branch: { id: 301, branchName: "agent-work/plain-language", state: "clean", pushState: "blocked", workspacePath: "/tmp/plain-language", taskId: 7 },
+      pushState: "blocked",
+      pushedCommit: null,
+      errorMessage: "Section 4 push blocked: main is protected.",
+      result: { pushState: "blocked", errorMessage: "Section 4 push blocked: main is protected." },
+    });
+
+    render(<Home />);
+    await screen.findAllByText("Implement v2 shell");
+    await user.type(screen.getByPlaceholderText(/agent-work\/portal-task/i), "agent-work/plain-language");
+    await user.click(screen.getByRole("button", { name: /^Open$/i }));
+    await user.click(await screen.findByRole("button", { name: /^Push branch$/i }));
+
+    expect(await screen.findByText(/Section 4 push blocked: main is protected/i)).toBeInTheDocument();
+    expect(screen.getByText(/Branch: agent-work\/plain-language/i)).toBeInTheDocument();
   });
 
   it("drafts an empty-memory note into the focused task composer", async () => {
