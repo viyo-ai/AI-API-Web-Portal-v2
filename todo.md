@@ -299,3 +299,6 @@
 - [x] §1A: Add focused §1A acceptance and regression tests for directive coverage, §3A vocabulary, LLM contract shape, Project rule book wiring, and non-regression of §3 Skill Libraries.
 - [x] §1A: Run `pnpm check`, `pnpm test`, and `pnpm build`; append §1A closeout evidence to `portal-build-log.md`.
 - [x] §1A: Commit and push with required prefixed format and `[PORTAL-P2-S1A-01]`, then report the standalone commit URL and stop for §1A acceptance.
+
+- [x] §1A acceptance spot-check: paste raw committed contents for the wizard procedures/helpers, migration/schema table, contract test, and wizard UI components before starting §4.
+- [x] §1A acceptance spot-check: verify exact model configuration, 90-second timeout enforcement, cache-HIT coverage, and temp-clone cleanup behavior; add a cache-HIT test if missing.
