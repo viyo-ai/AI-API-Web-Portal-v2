@@ -14,6 +14,13 @@ import SkillLibrariesPanel from "./SkillLibraries";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import {
+  WIZARD_CONNECTION_SUCCESS,
+  WIZARD_PROJECT_CONNECTED_SUCCESS,
+  validateWizardRepoLink,
+  validateWizardTokenEnvVarName,
+  wizardConnectionResultMessage,
+} from "@/lib/projectWizardCopy";
+import {
   Activity,
   Archive,
   Bot,
@@ -383,12 +390,12 @@ export default function Home() {
   const [buildTargetName, setBuildTargetName] = useState("Workshop repo");
   const [buildTargetRepoUrl, setBuildTargetRepoUrl] = useState("");
   const [buildBranchName, setBuildBranchName] = useState("");
-  const [buildTargetTokenEnvVar, setBuildTargetTokenEnvVar] = useState("BUILD_TARGET_GITHUB_TOKEN");
+  const [buildTargetTokenEnvVar, setBuildTargetTokenEnvVar] = useState("VIYO_GITHUB_TOKEN");
   const [buildTargetDefaultBaseBranch, setBuildTargetDefaultBaseBranch] = useState("main");
   const [buildTargetProtectedBranches, setBuildTargetProtectedBranches] = useState("main,staging");
   const [buildTargetValidationCommands, setBuildTargetValidationCommands] = useState("");
   const [buildTargetServiceChecks, setBuildTargetServiceChecks] = useState("");
-  const [buildTargetAgentEnvMap, setBuildTargetAgentEnvMap] = useState("WORKSHOP_GITHUB_TOKEN=BUILD_TARGET_GITHUB_TOKEN");
+  const [buildTargetAgentEnvMap, setBuildTargetAgentEnvMap] = useState("WORKSHOP_GITHUB_TOKEN=VIYO_GITHUB_TOKEN");
   const [buildTargetGovernanceFiles, setBuildTargetGovernanceFiles] = useState<GovernanceFileRow[]>([defaultGovernanceRow()]);
   const [buildTargetGovernanceBudgetEnforced, setBuildTargetGovernanceBudgetEnforced] = useState(true);
   const [isWizardMode, setIsWizardMode] = useState(true);
@@ -396,14 +403,17 @@ export default function Home() {
   const [wizardAnalysis, setWizardAnalysis] = useState<ProjectWizardAnalysisResult | null>(null);
   const [wizardDisplayName, setWizardDisplayName] = useState("Workshop repo");
   const [wizardRepoUrl, setWizardRepoUrl] = useState("");
-  const [wizardTokenEnvVar, setWizardTokenEnvVar] = useState("BUILD_TARGET_GITHUB_TOKEN");
+  const [wizardTokenEnvVar, setWizardTokenEnvVar] = useState("VIYO_GITHUB_TOKEN");
   const [wizardBaseBranch, setWizardBaseBranch] = useState("main");
-  const [wizardInitialBranch, setWizardInitialBranch] = useState("portal-wizard-setup");
+  const [wizardInitialBranch, setWizardInitialBranch] = useState("claude-kimi-work");
   const [wizardProtectedBranches, setWizardProtectedBranches] = useState("main");
   const [wizardValidationCommands, setWizardValidationCommands] = useState("");
   const [wizardServiceChecks, setWizardServiceChecks] = useState("");
   const [wizardAgentEnvMap, setWizardAgentEnvMap] = useState("");
   const [wizardGovernanceFiles, setWizardGovernanceFiles] = useState<GovernanceFileRow[]>([]);
+  const [wizardConnectionStatus, setWizardConnectionStatus] = useState<"untested" | "testing" | "ok" | "failed">("untested");
+  const [wizardConnectionMessage, setWizardConnectionMessage] = useState("");
+  const [showWizardAdvancedSettings, setShowWizardAdvancedSettings] = useState(false);
   const [openedBuildBranch, setOpenedBuildBranch] = useState<any | null>(null);
   const [useBuildBranchDiagnosticsWorkspace, setUseBuildBranchDiagnosticsWorkspace] = useState(false);
   const [showThreadDetails, setShowThreadDetails] = useState(false);
@@ -441,6 +451,8 @@ export default function Home() {
   const approvalPreferenceQuery = trpc.orchestration.kimiApprovalPreference.useQuery(undefined, { enabled: isAuthenticated });
   const buildTargetsInput = useMemo(() => ({ includeArchived: false, limit: 50 }), []);
   const buildTargetsQuery = trpc.buildTargets.list.useQuery(buildTargetsInput, { enabled: isAuthenticated });
+  const wizardRepoValidationMessage = validateWizardRepoLink(wizardRepoUrl);
+  const wizardTokenValidationMessage = validateWizardTokenEnvVarName(wizardTokenEnvVar);
 
   const createTask = trpc.tasks.create.useMutation();
   const updateTaskStatus = trpc.tasks.updateStatus.useMutation();
@@ -505,7 +517,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!selectedBuildTarget) return;
-    setBuildTargetAgentEnvMap(Object.entries(selectedBuildTargetEnvMap).map(([key, value]) => `${key}=${value}`).join("\n") || "WORKSHOP_GITHUB_TOKEN=BUILD_TARGET_GITHUB_TOKEN");
+    setBuildTargetAgentEnvMap(Object.entries(selectedBuildTargetEnvMap).map(([key, value]) => `${key}=${value}`).join("\n") || "WORKSHOP_GITHUB_TOKEN=VIYO_GITHUB_TOKEN");
     setBuildTargetGovernanceFiles(selectedBuildTargetGovernanceFiles.length > 0 ? selectedBuildTargetGovernanceFiles : [defaultGovernanceRow()]);
     setBuildTargetGovernanceBudgetEnforced(selectedBuildTarget.governanceBudgetEnforced !== false);
   }, [selectedBuildTarget, selectedBuildTargetEnvMap, selectedBuildTargetGovernanceFiles]);
@@ -622,6 +634,23 @@ export default function Home() {
     return Object.fromEntries(entries);
   }
 
+  function invalidateWizardConnectionIfNeeded() {
+    if (wizardConnectionStatus === "ok") {
+      setWizardConnectionStatus("untested");
+      setWizardConnectionMessage("Test the connection again after your change.");
+    }
+  }
+
+  function updateWizardTextField(setter: (value: string) => void, value: string) {
+    setter(value);
+    invalidateWizardConnectionIfNeeded();
+  }
+
+  function updateWizardGovernanceRows(value: GovernanceFileRow[]) {
+    setWizardGovernanceFiles(value);
+    invalidateWizardConnectionIfNeeded();
+  }
+
   function applyWizardRecommendation(recommendation: ProjectWizardRecommendation) {
     setWizardBaseBranch(recommendation.defaultBaseBranch.value);
     setWizardInitialBranch(recommendation.branchStrategy.value.initialBuildBranch);
@@ -633,14 +662,14 @@ export default function Home() {
   }
 
   async function handleAnalyzeWizard() {
-    if (!wizardRepoUrl.trim()) {
-      const message = "Add a Repo URL before starting the Project setup wizard.";
-      setWorkspaceNotice(message);
-      toast.warning(message);
+    const validationMessage = wizardRepoValidationMessage || wizardTokenValidationMessage;
+    if (validationMessage) {
+      setWorkspaceNotice(validationMessage);
+      toast.warning(validationMessage);
       return;
     }
-    if (!wizardTokenEnvVar.trim()) {
-      const message = "Add the GitHub token environment variable name before starting the Project setup wizard.";
+    if (wizardConnectionStatus !== "ok") {
+      const message = "Test the connection before reviewing the Project setup.";
       setWorkspaceNotice(message);
       toast.warning(message);
       return;
@@ -665,7 +694,7 @@ export default function Home() {
       applyWizardRecommendation(result.recommendation);
       setWizardStep(3);
       const cacheCopy = result.cacheStatus === "hit" ? " using the cached recommendation" : "";
-      const message = `Project recommendations are ready${cacheCopy}. Review and confirm them before creating the Project.`;
+      const message = `Project recommendations are ready${cacheCopy}. Review them, test again if you make changes, then save the Project.`;
       setWorkspaceNotice(message);
       toast.success(message);
     } catch (error) {
@@ -691,6 +720,18 @@ export default function Home() {
   }
 
   async function handleCompleteWizard() {
+    const validationMessage = wizardRepoValidationMessage || wizardTokenValidationMessage;
+    if (validationMessage) {
+      setWorkspaceNotice(validationMessage);
+      toast.warning(validationMessage);
+      return;
+    }
+    if (wizardConnectionStatus !== "ok") {
+      const message = "Test the connection before saving this Project.";
+      setWorkspaceNotice(message);
+      toast.warning(message);
+      return;
+    }
     const protectedBranches = wizardProtectedBranches.split(",").map((value) => value.trim()).filter(Boolean);
     const validationCommands = wizardValidationCommands.split("\n").map((value) => value.trim()).filter(Boolean);
     const serviceChecks = wizardServiceChecks.split("\n").map((value) => value.trim()).filter(Boolean);
@@ -703,7 +744,7 @@ export default function Home() {
       return;
     }
     if (!protectedBranches.length || !validationCommands.length) {
-      const message = "Review requires at least one protected branch and one validation command before creating the Project.";
+      const message = "Review requires at least one branch-protection entry and one validation command before saving the Project.";
       setWorkspaceNotice(message);
       toast.warning(message);
       return;
@@ -726,7 +767,8 @@ export default function Home() {
       setBuildTargetName(result.target.name ?? wizardDisplayName);
       setBuildTargetRepoUrl("");
       setWizardStep(4);
-      const message = `Project created for ${result.target.name ?? wizardDisplayName}. Build Branch ${result.branch.branchName} is opening.`;
+      setWizardConnectionStatus("untested");
+      const message = WIZARD_PROJECT_CONNECTED_SUCCESS;
       setWorkspaceNotice(message);
       toast.success(message);
       await refreshWorkspace();
@@ -829,6 +871,42 @@ export default function Home() {
       await refreshWorkspace();
     } catch (error) {
       const message = error instanceof Error ? error.message : "The project could not be created.";
+      setWorkspaceNotice(message);
+      toast.error(message);
+    }
+  }
+
+  async function handleTestWizardConnection() {
+    const validationMessage = wizardRepoValidationMessage || wizardTokenValidationMessage;
+    if (validationMessage) {
+      setWizardConnectionStatus("failed");
+      setWizardConnectionMessage(validationMessage);
+      setWorkspaceNotice(validationMessage);
+      toast.warning(validationMessage);
+      return;
+    }
+    setWizardConnectionStatus("testing");
+    setWizardConnectionMessage("Testing GitHub access…");
+    try {
+      const result = await testBuildTargetConnectionMutation.mutateAsync({
+        repoUrl: wizardRepoUrl.trim(),
+        githubTokenEnvVar: wizardTokenEnvVar.trim(),
+        defaultBaseBranch: wizardBaseBranch.trim() || "main",
+      }) as { status?: string; message?: string | null };
+      const message = wizardConnectionResultMessage(result);
+      setWizardConnectionMessage(message);
+      setWorkspaceNotice(message);
+      if (result.status === "ok") {
+        setWizardConnectionStatus("ok");
+        toast.success(WIZARD_CONNECTION_SUCCESS);
+      } else {
+        setWizardConnectionStatus("failed");
+        toast.error(message);
+      }
+    } catch (error) {
+      const message = wizardConnectionResultMessage({ status: "unknown", message: error instanceof Error ? error.message : null });
+      setWizardConnectionStatus("failed");
+      setWizardConnectionMessage(message);
       setWorkspaceNotice(message);
       toast.error(message);
     }
@@ -1242,37 +1320,55 @@ export default function Home() {
             <div className="rounded-2xl border border-[#d9d8d1] bg-white p-3" data-testid="project-setup-wizard">
               <div className="mb-3 flex items-start justify-between gap-2">
                 <div>
-                  <p className="text-sm font-semibold text-[#30302b]">Project setup wizard</p>
-                  <p className="mt-1 text-[11px] leading-4 text-[#77766e]">Add a Repo URL, let the AI analyze the repository, then review Project recommendations before creation.</p>
+                  <p className="text-sm font-semibold text-[#30302b]">Connect a Project</p>
+                  <p className="mt-1 text-[11px] leading-4 text-[#77766e]">Add your GitHub repository link, tell us where your token is stored, test the connection, then save the Project.</p>
                 </div>
-                <Badge variant="outline" className="shrink-0 rounded-full border-sky-200 bg-sky-50 text-[10px] text-sky-700">§1A</Badge>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button type="button" variant="ghost" onClick={() => setIsWizardMode(false)} className="h-7 rounded-xl px-2 text-[11px] text-[#5f5f58]">Advanced setup</Button>
+                  <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-[10px] text-sky-700">§1A</Badge>
+                </div>
               </div>
 
               {isWizardMode ? (
                 <div className="space-y-3">
-                  <div className="grid grid-cols-4 gap-1 text-[10px] font-semibold text-[#77766e]" aria-label="Project setup wizard steps">
-                    {["Input", "Analyze", "Review", "Create"].map((label, index) => (
+                  <div className="grid grid-cols-4 gap-1 text-[10px] font-semibold text-[#77766e]" aria-label="Connect a Project steps">
+                    {["Where is your code?", "How should we sign in to your code?", "Where Claude and Kimi will work", "Test the connection"].map((label, index) => (
                       <div key={label} className={`rounded-full border px-2 py-1 text-center ${wizardStep === index + 1 ? "border-[#1f1f1f] bg-[#1f1f1f] text-white" : "border-[#deded8] bg-[#fbfaf7]"}`}>{index + 1}. {label}</div>
                     ))}
                   </div>
 
                   {wizardStep === 4 ? (
                     <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-900">
-                      <CheckCircle2 className="mb-2 h-4 w-4" /> Project created. The new Build Branch is opening so tasks can use the approved Project configuration.
+                      <CheckCircle2 className="mb-2 h-4 w-4" /> {WIZARD_PROJECT_CONNECTED_SUCCESS}
                     </div>
                   ) : null}
 
                   <div className="space-y-2">
-                    <Input aria-label="Project name" value={wizardDisplayName} onChange={(event) => setWizardDisplayName(event.target.value)} placeholder="Project name" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
-                    <Input aria-label="Repo URL" value={wizardRepoUrl} onChange={(event) => setWizardRepoUrl(event.target.value)} placeholder="Repo URL, for example https://github.com/org/repo" className="h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
-                    <Input aria-label="GitHub token environment variable" value={wizardTokenEnvVar} onChange={(event) => setWizardTokenEnvVar(event.target.value)} placeholder="BUILD_TARGET_GITHUB_TOKEN" className="h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
-                    <Input aria-label="Default base branch" value={wizardBaseBranch} onChange={(event) => setWizardBaseBranch(event.target.value)} placeholder="Default base branch: main" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
-                    <p className="text-[11px] leading-4 text-[#77766e]">Enter only the environment variable name where the GitHub PAT is set. The token value itself never goes in this form.</p>
+                    <label className="block text-[11px] font-semibold text-[#30302b]" htmlFor="wizard-project-name">Project name</label>
+                    <Input id="wizard-project-name" aria-label="Project name" value={wizardDisplayName} onChange={(event) => updateWizardTextField(setWizardDisplayName, event.target.value)} placeholder="Project name" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                    <label className="block text-[11px] font-semibold text-[#30302b]" htmlFor="wizard-repo-link">Where is your code?</label>
+                    <Input id="wizard-repo-link" aria-label="GitHub repository link" value={wizardRepoUrl} onChange={(event) => updateWizardTextField(setWizardRepoUrl, event.target.value)} placeholder="GitHub repository link, for example https://github.com/your-name/your-repo" className="h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                    {wizardRepoValidationMessage ? <p role="alert" className="text-[11px] leading-4 text-rose-700">{wizardRepoValidationMessage}</p> : null}
+                    <label className="block text-[11px] font-semibold text-[#30302b]" htmlFor="wizard-token-env">How should we sign in to your code?</label>
+                    <Input id="wizard-token-env" aria-label="GitHub token (stored as an environment variable)" value={wizardTokenEnvVar} onChange={(event) => updateWizardTextField(setWizardTokenEnvVar, event.target.value)} placeholder="VIYO_GITHUB_TOKEN" className="h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                    {wizardTokenValidationMessage ? <p role="alert" className="text-[11px] leading-4 text-rose-700">{wizardTokenValidationMessage}</p> : null}
+                    <p className="text-[11px] leading-4 text-[#77766e]">We use a GitHub token to read and write code in your repository. The token value lives in your Manus environment — we only need its name here. Don’t paste the token here; paste only the environment variable name where you stored it (for example: VIYO_GITHUB_TOKEN).</p>
+                    <details className="rounded-xl border border-[#deded8] bg-[#fbfaf7] p-2 text-[11px] leading-4 text-[#686861]">
+                      <summary className="cursor-pointer font-semibold text-[#30302b]">Need help generating a token?</summary>
+                      <p className="mt-2">Generate a fine-grained GitHub Personal Access Token scoped to this one repository with Contents read and write permission.</p>
+                      <a className="mt-2 inline-block text-sky-700 underline" href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens" target="_blank" rel="noreferrer">Open GitHub’s token guide</a>
+                    </details>
+                    <label className="block text-[11px] font-semibold text-[#30302b]" htmlFor="wizard-base-branch">Where Claude and Kimi will work</label>
+                    <Input id="wizard-base-branch" aria-label="Main branch name (usually main or master)" value={wizardBaseBranch} onChange={(event) => updateWizardTextField(setWizardBaseBranch, event.target.value)} placeholder="Main branch name (usually main or master)" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                    <Button type="button" variant="outline" onClick={handleTestWizardConnection} disabled={isMutating || Boolean(wizardRepoValidationMessage || wizardTokenValidationMessage) || testBuildTargetConnectionMutation.isPending} className="w-full rounded-xl border-sky-200 bg-white text-xs text-sky-900">
+                      {testBuildTargetConnectionMutation.isPending || wizardConnectionStatus === "testing" ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="mr-2 h-3.5 w-3.5" />} Test the connection
+                    </Button>
+                    {wizardConnectionMessage ? <p role="status" className={`rounded-xl border px-3 py-2 text-[11px] leading-4 ${wizardConnectionStatus === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>{wizardConnectionMessage}</p> : null}
                   </div>
 
                   {wizardStep === 2 || analyzeWizardMutation.isPending ? (
                     <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-xs leading-5 text-sky-900">
-                      <Loader2 className="mb-2 h-4 w-4 animate-spin" /> Analyzing the Project repository with the LLM. If analysis cannot complete, the wizard will offer Advanced setup.
+                      <Loader2 className="mb-2 h-4 w-4 animate-spin" /> Reviewing the repository setup with AI. If review cannot complete, you can use optional advanced settings.
                     </div>
                   ) : null}
 
@@ -1288,58 +1384,69 @@ export default function Home() {
                     <div className="space-y-2" data-testid="project-wizard-review">
                       <div className="rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-3 text-xs leading-5 text-[#66665f]">
                         <p className="font-semibold text-[#30302b]">Review AI recommendations</p>
-                        <p>Each card can be approved as-is or overridden before the Project is created. Repo context: {wizardAnalysis.repoContext?.detectedFrameworks?.join(", ") || "frameworks not detected"}{wizardAnalysis.repoContext?.commitSha ? ` · ${wizardAnalysis.repoContext.commitSha.slice(0, 12)}` : ""}.</p>
+                        <p>Each card can be approved as-is or adjusted before the Project is created. Repository context: {wizardAnalysis.repoContext?.detectedFrameworks?.join(", ") || "frameworks not detected"}.</p>
                       </div>
 
                       <div className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="setup-wizard-review-card">
-                        <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">Default base branch</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.defaultBaseBranch.confidence)}`}>{wizardAnalysis.recommendation.defaultBaseBranch.confidence}</Badge></div>
+                        <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">Where Claude and Kimi will work</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.defaultBaseBranch.confidence)}`}>{wizardAnalysis.recommendation.defaultBaseBranch.confidence}</Badge></div>
                         <p className="mt-1 text-[11px] leading-4 text-[#77766e]">{wizardAnalysis.recommendation.defaultBaseBranch.rationale}</p>
-                        <Input value={wizardBaseBranch} onChange={(event) => setWizardBaseBranch(event.target.value)} className="mt-2 h-8 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                        <Input value={wizardBaseBranch} onChange={(event) => updateWizardTextField(setWizardBaseBranch, event.target.value)} className="mt-2 h-8 rounded-xl border-[#d9d8d1] bg-white text-xs" />
                       </div>
 
                       <div className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="setup-wizard-review-card">
-                        <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">Branch strategy</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.branchStrategy.confidence)}`}>{wizardAnalysis.recommendation.branchStrategy.confidence}</Badge></div>
+                        <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">First workspace name</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.branchStrategy.confidence)}`}>{wizardAnalysis.recommendation.branchStrategy.confidence}</Badge></div>
                         <p className="mt-1 text-[11px] leading-4 text-[#77766e]">{wizardAnalysis.recommendation.branchStrategy.rationale}</p>
-                        <Input value={wizardInitialBranch} onChange={(event) => setWizardInitialBranch(event.target.value)} placeholder="Initial Build Branch" className="mt-2 h-8 rounded-xl border-[#d9d8d1] bg-white text-xs" />
-                        <Input value={wizardProtectedBranches} onChange={(event) => setWizardProtectedBranches(event.target.value)} placeholder="Protected branches, comma-separated" className="mt-2 h-8 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                        <Input value={wizardInitialBranch} onChange={(event) => updateWizardTextField(setWizardInitialBranch, event.target.value)} placeholder="claude-kimi-work" className="mt-2 h-8 rounded-xl border-[#d9d8d1] bg-white text-xs" />
                       </div>
 
                       <div className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="setup-wizard-review-card">
                         <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">Validation commands</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.validationCommands.confidence)}`}>{wizardAnalysis.recommendation.validationCommands.confidence}</Badge></div>
                         <p className="mt-1 text-[11px] leading-4 text-[#77766e]">{wizardAnalysis.recommendation.validationCommands.rationale}</p>
-                        <Textarea value={wizardValidationCommands} onChange={(event) => setWizardValidationCommands(event.target.value)} className="mt-2 min-h-[58px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                        <Textarea value={wizardValidationCommands} onChange={(event) => updateWizardTextField(setWizardValidationCommands, event.target.value)} className="mt-2 min-h-[58px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
                       </div>
 
                       <div className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="setup-wizard-review-card">
                         <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">Service checks</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.serviceChecks.confidence)}`}>{wizardAnalysis.recommendation.serviceChecks.confidence}</Badge></div>
                         <p className="mt-1 text-[11px] leading-4 text-[#77766e]">{wizardAnalysis.recommendation.serviceChecks.rationale}</p>
-                        <Textarea value={wizardServiceChecks} onChange={(event) => setWizardServiceChecks(event.target.value)} placeholder="Optional service checks, one per line" className="mt-2 min-h-[50px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                        <Textarea value={wizardServiceChecks} onChange={(event) => updateWizardTextField(setWizardServiceChecks, event.target.value)} placeholder="Optional service checks, one per line" className="mt-2 min-h-[50px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
                       </div>
 
-                      <div className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="setup-wizard-review-card">
-                        <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">Project rule books</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.projectRuleBooks.confidence)}`}>{wizardAnalysis.recommendation.projectRuleBooks.confidence}</Badge></div>
-                        <p className="mt-1 text-[11px] leading-4 text-[#77766e]">{wizardAnalysis.recommendation.projectRuleBooks.rationale}</p>
-                        {wizardGovernanceFiles.length === 0 ? <p className="mt-2 rounded-xl border border-dashed border-[#d9d8d1] bg-[#fbfaf7] p-2 text-[11px] text-[#77766e]">No Project rule books were detected. Leaving this empty is safe; add one path per line only if a repository document should govern agent work.</p> : null}
-                        <Textarea value={wizardGovernanceFiles.map((row) => row.path).join("\n")} onChange={(event) => setWizardGovernanceFiles(governanceRowsFromPaths(event.target.value))} placeholder="Project rule books, one path per line" className="mt-2 min-h-[50px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                      <div className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="setup-wizard-advanced-disclosure" onKeyDown={(event) => { if (event.key === "Escape") setShowWizardAdvancedSettings(false); }}>
+                        <button type="button" aria-expanded={showWizardAdvancedSettings} onClick={() => setShowWizardAdvancedSettings((value) => !value)} className="flex w-full items-center justify-between text-left text-xs font-semibold text-[#30302b]">
+                          <span>Advanced settings (optional)</span>
+                          <span aria-hidden="true">{showWizardAdvancedSettings ? "Hide" : "Show"}</span>
+                        </button>
+                        {showWizardAdvancedSettings ? (
+                          <div className="mt-3 space-y-3" data-testid="setup-wizard-advanced-settings">
+                            <div data-testid="wizard-protected-branch-list">
+                              <label className="text-[11px] font-semibold text-[#30302b]">Branch protection list</label>
+                              <Input value={wizardProtectedBranches} onChange={(event) => updateWizardTextField(setWizardProtectedBranches, event.target.value)} placeholder="main, production" className="mt-1 h-8 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                            </div>
+                            <div data-testid="wizard-governance-files-editor">
+                              <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">Project rule books</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.projectRuleBooks.confidence)}`}>{wizardAnalysis.recommendation.projectRuleBooks.confidence}</Badge></div>
+                              <p className="mt-1 text-[11px] leading-4 text-[#77766e]">{wizardAnalysis.recommendation.projectRuleBooks.rationale}</p>
+                              {wizardGovernanceFiles.length === 0 ? <p className="mt-2 rounded-xl border border-dashed border-[#d9d8d1] bg-[#fbfaf7] p-2 text-[11px] text-[#77766e]">No Project rule books were detected. Leaving this empty is safe; add one path per line only if a repository document should guide AI work.</p> : null}
+                              <Textarea value={wizardGovernanceFiles.map((row) => row.path).join("\n")} onChange={(event) => updateWizardGovernanceRows(governanceRowsFromPaths(event.target.value))} placeholder="Project rule books, one path per line" className="mt-2 min-h-[50px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                            </div>
+                            <div data-testid="wizard-agent-env-map-editor">
+                              <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">AI environment variables</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.environmentVariables.confidence)}`}>{wizardAnalysis.recommendation.environmentVariables.confidence}</Badge></div>
+                              <p className="mt-1 text-[11px] leading-4 text-[#77766e]">{wizardAnalysis.recommendation.environmentVariables.rationale}</p>
+                              <Textarea value={wizardAgentEnvMap} onChange={(event) => updateWizardTextField(setWizardAgentEnvMap, event.target.value)} placeholder="WORKSPACE_ENV=SERVER_ENV_SOURCE" className="mt-2 min-h-[50px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
 
-                      <div className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="setup-wizard-review-card">
-                        <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">AI environment variables</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.environmentVariables.confidence)}`}>{wizardAnalysis.recommendation.environmentVariables.confidence}</Badge></div>
-                        <p className="mt-1 text-[11px] leading-4 text-[#77766e]">{wizardAnalysis.recommendation.environmentVariables.rationale}</p>
-                        <Textarea value={wizardAgentEnvMap} onChange={(event) => setWizardAgentEnvMap(event.target.value)} placeholder="WORKSPACE_ENV=SERVER_ENV_SOURCE" className="mt-2 min-h-[50px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
-                      </div>
-
-                      <Button type="button" onClick={handleCompleteWizard} disabled={isMutating} className="w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">
-                        {completeWizardMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-2 h-3.5 w-3.5" />} Confirm and create Project
+                      <Button type="button" onClick={handleCompleteWizard} disabled={isMutating || wizardConnectionStatus !== "ok"} className="w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">
+                        {completeWizardMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-2 h-3.5 w-3.5" />} Save Project
                       </Button>
                     </div>
                   ) : (
-                    <Button type="button" onClick={handleAnalyzeWizard} disabled={isMutating || !wizardRepoUrl.trim() || !wizardTokenEnvVar.trim()} className="w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">
-                      {analyzeWizardMutation.isPending || wizardStep === 2 ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />} Analyze Project
+                    <Button type="button" onClick={handleAnalyzeWizard} disabled={isMutating || wizardConnectionStatus !== "ok"} className="w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">
+                      {analyzeWizardMutation.isPending || wizardStep === 2 ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />} Review recommended setup
                     </Button>
                   )}
 
-                  <Button type="button" variant="ghost" onClick={handleUseAdvancedSetup} className="w-full rounded-xl text-xs text-[#5f5f58]">Advanced setup</Button>
                 </div>
               ) : (
                 <div className="space-y-2" data-testid="advanced-project-setup">
@@ -1348,11 +1455,11 @@ export default function Home() {
                     <Button type="button" variant="ghost" onClick={() => setIsWizardMode(true)} className="h-7 rounded-xl px-2 text-[11px] text-[#5f5f58]">Use setup wizard</Button>
                   </div>
                   <Input value={buildTargetName} onChange={(event) => setBuildTargetName(event.target.value)} placeholder="Project name" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
-                  <Input value={buildTargetRepoUrl} onChange={(event) => setBuildTargetRepoUrl(event.target.value)} placeholder="Repo URL, for example https://github.com/org/repo" className="h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
-                  <Input value={buildTargetTokenEnvVar} onChange={(event) => setBuildTargetTokenEnvVar(event.target.value)} placeholder="BUILD_TARGET_VIYO_GITHUB_TOKEN" className="h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
-                  <p className="text-[11px] leading-4 text-[#77766e]">Enter only the environment variable name where the GitHub PAT is set. The token value itself never goes in this form.</p>
-                  <Input value={buildTargetDefaultBaseBranch} onChange={(event) => setBuildTargetDefaultBaseBranch(event.target.value)} placeholder="Default base branch: main or staging" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
-                  <Input value={buildTargetProtectedBranches} onChange={(event) => setBuildTargetProtectedBranches(event.target.value)} placeholder="Protected branches: main,staging" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                  <Input value={buildTargetRepoUrl} onChange={(event) => setBuildTargetRepoUrl(event.target.value)} placeholder="GitHub repository link, for example https://github.com/org/repo" className="h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                  <Input value={buildTargetTokenEnvVar} onChange={(event) => setBuildTargetTokenEnvVar(event.target.value)} placeholder="VIYO_GITHUB_TOKEN" className="h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                  <p className="text-[11px] leading-4 text-[#77766e]">Enter only the environment variable name where the GitHub token is stored. The token value itself never goes in this form.</p>
+                  <Input value={buildTargetDefaultBaseBranch} onChange={(event) => setBuildTargetDefaultBaseBranch(event.target.value)} placeholder="Main branch name, for example main or staging" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                  <Input value={buildTargetProtectedBranches} onChange={(event) => setBuildTargetProtectedBranches(event.target.value)} placeholder="Branch protection list: main,staging" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
                   <Textarea value={buildTargetValidationCommands} onChange={(event) => setBuildTargetValidationCommands(event.target.value)} placeholder="Optional validation commands, one per line" className="min-h-[62px] rounded-xl border-[#d9d8d1] bg-white text-xs" />
                   <Textarea value={buildTargetServiceChecks} onChange={(event) => setBuildTargetServiceChecks(event.target.value)} placeholder="Optional service checks, one per line" className="min-h-[50px] rounded-xl border-[#d9d8d1] bg-white text-xs" />
                   <Textarea value={buildTargetAgentEnvMap} onChange={(event) => setBuildTargetAgentEnvMap(event.target.value)} placeholder="WORKSPACE_ENV=SERVER_ENV_SOURCE" className="min-h-[62px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" data-testid="agent-env-var-map-input" />

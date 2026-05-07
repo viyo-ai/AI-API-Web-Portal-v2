@@ -1,9 +1,0 @@
-{
-  "query": "SHOW COLUMNS FROM orchestration_turns LIKE 'approvalRequestedAt'; SHOW COLUMNS FROM orchestration_turns LIKE 'approvalResolvedAt'; SHOW TABLES LIKE 'user_preferences';",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3aAiEZGvt2NNVee.ae03d21acc17 --database 5KVWo4UoTpTyEXqmynzSfU --execute SHOW COLUMNS FROM orchestration_turns LIKE 'approvalRequestedAt'; SHOW COLUMNS FROM orchestration_turns LIKE 'approvalResolvedAt'; SHOW TABLES LIKE 'user_preferences';",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 109
-}

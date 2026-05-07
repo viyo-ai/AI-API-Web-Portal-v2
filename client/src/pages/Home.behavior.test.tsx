@@ -28,6 +28,7 @@ const createBuildBranchMock = vi.fn();
 const pushBuildBranchMock = vi.fn();
 const analyzeWizardMock = vi.fn();
 const completeWizardMock = vi.fn();
+const testBuildTargetConnectionMock = vi.fn();
 const filesystemTreeRefetchMock = vi.fn(async () => undefined);
 const filesystemWriteMock = vi.fn();
 const filesystemMkdirMock = vi.fn();
@@ -271,7 +272,7 @@ vi.mock("@/lib/trpc", () => ({
       get: { useQuery: () => ({ data: undefined, isLoading: false }) },
       create: { useMutation: () => ({ mutateAsync: createBuildTargetMock, isPending: false }) },
       updateSettings: { useMutation: () => ({ mutateAsync: updateBuildTargetSettingsMock, isPending: false }) },
-      testConnection: { useMutation: () => ({ mutateAsync: vi.fn(async () => ({ ok: false, message: "No token configured.", tokenConfigured: false })), isPending: false }) },
+      testConnection: { useMutation: () => ({ mutateAsync: testBuildTargetConnectionMock, isPending: false }) },
       analyzeWizard: { useMutation: () => ({ mutateAsync: analyzeWizardMock, isPending: false }) },
       completeWizard: { useMutation: () => ({ mutateAsync: completeWizardMock, isPending: false }) },
     },
@@ -362,6 +363,7 @@ beforeEach(() => {
   pushBuildBranchMock.mockReset();
   analyzeWizardMock.mockReset();
   completeWizardMock.mockReset();
+  testBuildTargetConnectionMock.mockReset();
   filesystemTreeRefetchMock.mockReset();
   filesystemWriteMock.mockReset();
   filesystemMkdirMock.mockReset();
@@ -381,6 +383,7 @@ beforeEach(() => {
   attachGlobalToTaskMock.mockResolvedValue({ id: 501, taskId: 7, globalFileId: 56, attachedLabel: "Owner playbook.pdf", file: mockGlobalFiles[0] });
   createBuildBranchMock.mockResolvedValue({ id: 301, branchName: "agent-work/plain-language", state: "clean", pushState: "never_pushed", workspacePath: "/tmp/plain-language", taskId: 7 });
   pushBuildBranchMock.mockResolvedValue({ branch: { id: 301, branchName: "agent-work/plain-language", state: "clean", pushState: "pushed", workspacePath: "/tmp/plain-language", taskId: 7 }, pushState: "pushed", pushedCommit: "1234567890abcdef", errorMessage: null, result: { pushState: "pushed", pushedCommit: "1234567890abcdef" } });
+  testBuildTargetConnectionMock.mockResolvedValue({ status: "ok", message: "Repository connection succeeded." });
   analyzeWizardMock.mockResolvedValue({
     status: "ok",
     cacheStatus: "miss",
@@ -520,13 +523,13 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(FakeWebSocket.instances).toHaveLength(0);
   });
 
-  it("runs the §1A LLM-driven Project setup wizard and preserves Advanced setup fallback", async () => {
+  it("runs the §1A LLM-driven Project setup wizard through the required plain-English connection gate", async () => {
     const user = userEvent.setup();
     render(<Home />);
 
     expect(await screen.findByTestId("project-setup-wizard")).toBeInTheDocument();
-    expect(screen.getByText(/Project setup wizard/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Advanced setup/i })).toBeInTheDocument();
+    expect(screen.getByText(/Connect a Project/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/GitHub repository link/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Advanced setup/i }));
     expect(screen.getByTestId("advanced-project-setup")).toBeInTheDocument();
@@ -536,27 +539,36 @@ describe("Home v2 task-first workspace behavior", () => {
 
     await user.clear(screen.getByLabelText(/Project name/i));
     await user.type(screen.getByLabelText(/Project name/i), "AI API Portal");
-    await user.type(screen.getByLabelText(/Repo URL/i), "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git");
-    await user.click(screen.getByRole("button", { name: /Analyze Project/i }));
+    await user.type(screen.getByLabelText(/GitHub repository link/i), "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git");
+    await user.click(screen.getByRole("button", { name: /Test the connection/i }));
 
+    await waitFor(() => expect(testBuildTargetConnectionMock).toHaveBeenCalledWith({
+      repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git",
+      githubTokenEnvVar: "VIYO_GITHUB_TOKEN",
+      defaultBaseBranch: "main",
+    }));
+    expect((await screen.findAllByText(/Connected\. Read access confirmed\./i)).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: /Review recommended setup/i }));
     await waitFor(() => expect(analyzeWizardMock).toHaveBeenCalledWith({
       displayName: "AI API Portal",
       repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git",
-      githubTokenEnvVar: "BUILD_TARGET_GITHUB_TOKEN",
+      githubTokenEnvVar: "VIYO_GITHUB_TOKEN",
       defaultBaseBranch: "main",
     }));
     expect(await screen.findByTestId("project-wizard-review")).toBeInTheDocument();
-    expect(screen.getAllByTestId("setup-wizard-review-card")).toHaveLength(6);
+    expect(screen.getAllByTestId("setup-wizard-review-card")).toHaveLength(4);
     expect(screen.getByText(/Review AI recommendations/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Advanced settings \(optional\)/i }));
     expect(screen.getByText(/No Project rule books were detected/i)).toBeInTheDocument();
     expect(screen.getByDisplayValue(/pnpm check/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Confirm and create Project/i }));
+    await user.click(screen.getByRole("button", { name: /Save Project/i }));
 
     await waitFor(() => expect(completeWizardMock).toHaveBeenCalledWith(expect.objectContaining({
       displayName: "AI API Portal",
       repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git",
-      githubTokenEnvVar: "BUILD_TARGET_GITHUB_TOKEN",
+      githubTokenEnvVar: "VIYO_GITHUB_TOKEN",
       defaultBaseBranch: "main",
       initialBuildBranch: "agent-work/portal-wizard-setup",
       protectedBranches: ["main", "staging"],
@@ -565,7 +577,155 @@ describe("Home v2 task-first workspace behavior", () => {
       governanceFiles: [],
       agentEnvVarMap: { PORTAL_GITHUB_TOKEN: "BUILD_TARGET_GITHUB_TOKEN" },
     })));
-    await waitFor(() => expect(screen.getAllByText(/Project created/i).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText(/Your Project is connected\. You can start a new task whenever you’re ready\./i).length).toBeGreaterThan(0));
+  });
+
+  it("§1A-FU-04-01 presents the owner wizard in plain English without forbidden technical vocabulary", async () => {
+    render(<Home />);
+
+    const wizard = await screen.findByTestId("project-setup-wizard");
+    expect(within(wizard).getByText(/Connect a Project/i)).toBeInTheDocument();
+    expect(within(wizard).getAllByText(/Where is your code\?/i).length).toBeGreaterThan(0);
+    expect(within(wizard).getAllByText(/How should we sign in to your code\?/i).length).toBeGreaterThan(0);
+    expect(within(wizard).getByLabelText(/GitHub token \(stored as an environment variable\)/i)).toBeInTheDocument();
+    expect(within(wizard).getAllByText(/Where Claude and Kimi will work/i).length).toBeGreaterThan(0);
+    expect(within(wizard).getByRole("button", { name: /Test the connection/i })).toBeInTheDocument();
+    expect(within(wizard).getByText(/Need help generating a token\?/i)).toBeInTheDocument();
+    expect(wizard.textContent).not.toMatch(/BUILD_TARGET_GITHUB_TOKEN|Repo URL|Token Env Var|Default Base Branch|Build Target|Build Branch|agent-work\/portal-task|governanceBudgetEnforced|agent env var map|protected branches/);
+  });
+
+  it("§1A-FU-04-02 rejects pasted token-looking values and keeps the setup blocked", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    const tokenInput = await screen.findByLabelText(/GitHub token \(stored as an environment variable\)/i);
+    await user.clear(tokenInput);
+    await user.type(tokenInput, "ghp_actualSecretValue123");
+
+    expect(screen.getByText("That looks like the actual token. Paste only the environment variable name where the token is stored — for example, VIYO_GITHUB_TOKEN.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Test the connection/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Review recommended setup/i })).toBeDisabled();
+  });
+
+  it("§1A-FU-04-03 tests the private repository connection before review", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.type(await screen.findByLabelText(/GitHub repository link/i), "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git");
+    await user.click(screen.getByRole("button", { name: /Test the connection/i }));
+
+    await waitFor(() => expect(testBuildTargetConnectionMock).toHaveBeenCalledWith({
+      repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git",
+      githubTokenEnvVar: "VIYO_GITHUB_TOKEN",
+      defaultBaseBranch: "main",
+    }));
+    expect((await screen.findAllByText("Connected. Read access confirmed.")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /Review recommended setup/i })).toBeEnabled();
+  });
+
+  it("§1A-FU-04-04 disables Save Project until a successful current connection test and resets after edits", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.clear(await screen.findByLabelText(/Project name/i));
+    await user.type(screen.getByLabelText(/Project name/i), "AI API Portal");
+    await user.type(screen.getByLabelText(/GitHub repository link/i), "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git");
+    expect(screen.getByRole("button", { name: /Review recommended setup/i })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /Test the connection/i }));
+    expect((await screen.findAllByText("Connected. Read access confirmed.")).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: /Review recommended setup/i }));
+    expect(await screen.findByRole("button", { name: /Save Project/i })).toBeEnabled();
+    await user.type(screen.getByDisplayValue("https://github.com/viyo-ai/AI-API-Web-Portal-v2.git"), "-edited");
+    expect(screen.getByText("Test the connection again after your change.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Save Project/i })).toBeDisabled();
+  });
+
+  it("§1A-FU-04-05 maps connection failure modes to actionable owner messages", async () => {
+    const user = userEvent.setup();
+    testBuildTargetConnectionMock
+      .mockResolvedValueOnce({ status: "missing_env", message: "Environment variable VIYO_GITHUB_TOKEN is not set." })
+      .mockResolvedValueOnce({ status: "invalid_token", message: "401 bad credentials" })
+      .mockResolvedValueOnce({ status: "repo_not_accessible", message: "404 not found" });
+    render(<Home />);
+
+    await user.type(await screen.findByLabelText(/GitHub repository link/i), "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git");
+    await user.click(screen.getByRole("button", { name: /Test the connection/i }));
+    expect((await screen.findAllByText("We couldn’t find that environment variable in Manus. Add it to your Manus environment, then test again.")).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: /Test the connection/i }));
+    expect((await screen.findAllByText("GitHub rejected the token stored in that environment variable. Check that it is a fine-grained token for this repository with Contents read and write access, then test again.")).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: /Test the connection/i }));
+    expect((await screen.findAllByText("We couldn’t find that repository, or the token does not have access to it. Check the GitHub repository link and token permissions, then test again.")).length).toBeGreaterThan(0);
+  });
+
+  it("§1A-FU-04-06 redacts token-looking values from connection failure messages", async () => {
+    const user = userEvent.setup();
+    testBuildTargetConnectionMock.mockResolvedValueOnce({ status: "unknown", message: "remote rejected ghp_secretTokenValue12345 for repo" });
+    render(<Home />);
+
+    await user.type(await screen.findByLabelText(/GitHub repository link/i), "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git");
+    await user.click(screen.getByRole("button", { name: /Test the connection/i }));
+
+    expect((await screen.findAllByText(/\[redacted token\]/i)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/ghp_secretTokenValue12345/i)).not.toBeInTheDocument();
+  });
+
+  it("§1A-FU-04-07 validates GitHub repository links with plain-English owner messages", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    expect(await screen.findByText("Add the link to your GitHub repository.")).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/GitHub repository link/i), "git@github.com:viyo-ai/AI-API-Web-Portal-v2.git");
+    expect(await screen.findByText("Use the full GitHub link, like https://github.com/your-name/your-repo.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Test the connection/i })).toBeDisabled();
+  });
+
+  it("§1A-FU-04-08 preserves AI review output and optional advanced settings editors", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.type(await screen.findByLabelText(/GitHub repository link/i), "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git");
+    await user.click(screen.getByRole("button", { name: /Test the connection/i }));
+    expect((await screen.findAllByText("Connected. Read access confirmed.")).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: /Review recommended setup/i }));
+    expect(await screen.findByText(/Review AI recommendations/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("setup-wizard-advanced-settings")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Advanced settings \(optional\)/i }));
+    expect(screen.getByTestId("wizard-protected-branch-list")).toBeInTheDocument();
+    expect(screen.getByTestId("wizard-governance-files-editor")).toBeInTheDocument();
+    expect(screen.getByTestId("wizard-agent-env-map-editor")).toBeInTheDocument();
+  });
+
+  it("§1A-FU-04-09 keeps the wizard keyboard-accessible for Enter and Escape", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.type(await screen.findByLabelText(/GitHub repository link/i), "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git");
+    const testButton = screen.getByRole("button", { name: /Test the connection/i });
+    testButton.focus();
+    await user.keyboard("{Enter}");
+    expect((await screen.findAllByText("Connected. Read access confirmed.")).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: /Review recommended setup/i }));
+    const advancedButton = await screen.findByRole("button", { name: /Advanced settings \(optional\)/i });
+    advancedButton.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("setup-wizard-advanced-settings")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByTestId("setup-wizard-advanced-settings")).not.toBeInTheDocument());
+  });
+
+  it("§1A-FU-04-10 confirms successful save in plain English without internal IDs", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.type(await screen.findByLabelText(/GitHub repository link/i), "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git");
+    await user.click(screen.getByRole("button", { name: /Test the connection/i }));
+    expect((await screen.findAllByText("Connected. Read access confirmed.")).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: /Review recommended setup/i }));
+    await user.click(await screen.findByRole("button", { name: /Save Project/i }));
+
+    const confirmations = await screen.findAllByText("Your Project is connected. You can start a new task whenever you’re ready.");
+    expect(confirmations.length).toBeGreaterThan(0);
+    expect(screen.queryByText(/target-77|buildTargetId|Project ID|internal ID/i)).not.toBeInTheDocument();
   });
 
   it("renders §3A plain-language project and rule-book vocabulary without legacy owner labels", async () => {
