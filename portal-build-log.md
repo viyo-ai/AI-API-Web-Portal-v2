@@ -67,3 +67,17 @@ The Product Owner approved rewritten §3 and identified two closeout corrections
 | Regression coverage | Added by follow-up | `server/section3.skills.contract.test.ts` now asserts Streamdown remains wired in the assistant chat component and the Vitest dependency-transform guard remains present. |
 
 Product Owner boundary remains unchanged: §1A has not been started and must remain paused until both follow-ups are validated and reported.
+## Phase 2 §1A Complete — LLM-Driven Project Setup Wizard
+
+§1A from `PORTAL_PHASE_2_DIRECTIVE.md` is complete for acceptance review. The implementation adds a wizard-first Project setup flow that analyzes a Project name, Repo URL, optional commit SHA, and optional Project notes through the server-side wizard contract, then presents reviewable recommendations before creating the Project. The existing manual Project configuration remains available as the Advanced setup fallback.
+
+| §1A acceptance area | Result | Evidence |
+|---|---|---|
+| LLM-driven wizard contract | Passed | Added secure server-side wizard recommendation and completion procedures backed by cached wizard sessions, using existing server-side LLM helpers and safe fallback recommendations when provider output is unavailable or malformed. |
+| Project setup wizard UI | Passed | Added wizard-first UI copy using accepted §3A vocabulary: Project, Repo URL, Project rule books, AI Activity, and Project setup. |
+| Review-before-create workflow | Passed | Wizard recommendations populate Project setup fields for description, branch, install/build/test/service commands, AI Activity checks, environment variable mapping, and Project rule books before Project creation. |
+| Manual fallback preservation | Passed | Advanced setup remains available and continues to expose the existing manual Project configuration flow with Test connection and Add Project controls. |
+| Regression coverage | Passed | `client/src/pages/Home.behavior.test.tsx` covers wizard analyze/complete behavior, §3A vocabulary, recommendation review cards, completion payload mapping, and manual fallback preservation; `server/section1.build-targets.contract.test.ts` covers wizard cache schema and tRPC procedure surfaces. |
+| Automated validation | Passed | `pnpm check`, `pnpm test -- --run` with 23 files and 103 tests passing, focused §1A tests passing, and `pnpm build` completed successfully. A first full-test attempt hit transient external TLS socket resets against Anthropic/Cloudflare, and the same external credential tests passed immediately afterward and in the final full suite. |
+
+Product Owner boundary: §1A is complete for review. Phase 2 is not being declared complete; the build is stopped at §1A acceptance pending Product Owner review.

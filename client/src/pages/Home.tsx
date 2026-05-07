@@ -231,6 +231,43 @@ type GovernanceFileRow = {
   resolverKey?: string;
 };
 
+type WizardConfidence = "low" | "medium" | "high";
+
+type WizardRecommendationCard<T> = {
+  value: T;
+  confidence: WizardConfidence;
+  rationale: string;
+};
+
+type ProjectWizardRecommendation = {
+  defaultBaseBranch: WizardRecommendationCard<string>;
+  branchStrategy: WizardRecommendationCard<{
+    initialBuildBranch: string;
+    protectedBranches: string[];
+  }>;
+  validationCommands: WizardRecommendationCard<string[]>;
+  serviceChecks: WizardRecommendationCard<string[]>;
+  projectRuleBooks: WizardRecommendationCard<GovernanceFileRow[]>;
+  environmentVariables: WizardRecommendationCard<Record<string, string>>;
+};
+
+type ProjectWizardAnalysisResult = {
+  status: "ok" | "validation_failed" | "analysis_failed";
+  connection?: { status: string; message?: string };
+  repoContext?: {
+    normalizedRepoUrl?: string;
+    commitSha?: string;
+    fileCount?: number;
+    scripts?: string[];
+    detectedFrameworks?: string[];
+    ruleBookCandidates?: string[];
+  };
+  recommendation?: ProjectWizardRecommendation;
+  fallbackMessage?: string | null;
+  cacheStatus?: "hit" | "miss";
+  errorMessage?: string;
+};
+
 const defaultGovernanceRow = (): GovernanceFileRow => ({
   path: "docs/governance.md",
   required: true,
@@ -238,6 +275,30 @@ const defaultGovernanceRow = (): GovernanceFileRow => ({
   role: "governance",
   resolverKey: "",
 });
+
+function confidenceTone(confidence: WizardConfidence) {
+  if (confidence === "high") return "border-emerald-200 bg-emerald-50 text-emerald-800";
+  if (confidence === "medium") return "border-amber-200 bg-amber-50 text-amber-800";
+  return "border-slate-200 bg-slate-50 text-slate-700";
+}
+
+function formatEnvMapForInput(value: Record<string, string>) {
+  return Object.entries(value).map(([workspaceEnvName, sourceEnvName]) => `${workspaceEnvName}=${sourceEnvName}`).join("\n");
+}
+
+function governanceRowsFromPaths(value: string) {
+  return value
+    .split("\n")
+    .map((path) => path.trim())
+    .filter(Boolean)
+    .map((path): GovernanceFileRow => ({
+      path,
+      required: true,
+      dynamic: false,
+      role: "governance",
+      resolverKey: "",
+    }));
+}
 
 type ActiveTurnRecord = {
   id: number;
@@ -314,6 +375,19 @@ export default function Home() {
   const [buildTargetAgentEnvMap, setBuildTargetAgentEnvMap] = useState("WORKSHOP_GITHUB_TOKEN=BUILD_TARGET_GITHUB_TOKEN");
   const [buildTargetGovernanceFiles, setBuildTargetGovernanceFiles] = useState<GovernanceFileRow[]>([defaultGovernanceRow()]);
   const [buildTargetGovernanceBudgetEnforced, setBuildTargetGovernanceBudgetEnforced] = useState(true);
+  const [isWizardMode, setIsWizardMode] = useState(true);
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
+  const [wizardAnalysis, setWizardAnalysis] = useState<ProjectWizardAnalysisResult | null>(null);
+  const [wizardDisplayName, setWizardDisplayName] = useState("Workshop repo");
+  const [wizardRepoUrl, setWizardRepoUrl] = useState("");
+  const [wizardTokenEnvVar, setWizardTokenEnvVar] = useState("BUILD_TARGET_GITHUB_TOKEN");
+  const [wizardBaseBranch, setWizardBaseBranch] = useState("main");
+  const [wizardInitialBranch, setWizardInitialBranch] = useState("portal-wizard-setup");
+  const [wizardProtectedBranches, setWizardProtectedBranches] = useState("main");
+  const [wizardValidationCommands, setWizardValidationCommands] = useState("");
+  const [wizardServiceChecks, setWizardServiceChecks] = useState("");
+  const [wizardAgentEnvMap, setWizardAgentEnvMap] = useState("");
+  const [wizardGovernanceFiles, setWizardGovernanceFiles] = useState<GovernanceFileRow[]>([]);
   const [openedBuildBranch, setOpenedBuildBranch] = useState<any | null>(null);
   const [showThreadDetails, setShowThreadDetails] = useState(false);
   const [workspaceNotice, setWorkspaceNotice] = useState("");
@@ -364,6 +438,8 @@ export default function Home() {
   const updateBuildTargetSettingsMutation = trpc.buildTargets.updateSettings.useMutation();
   const pushBuildBranchMutation = trpc.buildBranches.push.useMutation();
   const testBuildTargetConnectionMutation = trpc.buildTargets.testConnection.useMutation();
+  const analyzeWizardMutation = trpc.buildTargets.analyzeWizard.useMutation();
+  const completeWizardMutation = trpc.buildTargets.completeWizard.useMutation();
 
   const selectedThread = threadQuery.data;
   const selectedTask = selectedThread?.task ?? tasks.find((task) => task.id === selectedTaskId) ?? null;
@@ -438,7 +514,7 @@ export default function Home() {
       .map((event) => ({ ...activityStepForEvent(event), id: event.id, status: event.status, createdAt: event.createdAt }));
   }, [events]);
 
-  const isMutating = createTask.isPending || updateTaskStatus.isPending || submitMessage.isPending || updateQueuedMessageMutation.isPending || clearQueuedMessageMutation.isPending || stopGenerationMutation.isPending || createFileMetadata.isPending || uploadWorkspaceFileMutation.isPending || attachGlobalToTaskMutation.isPending || createBuildTargetMutation.isPending || createBuildBranchMutation.isPending || updateBuildTargetSettingsMutation.isPending || pushBuildBranchMutation.isPending || testBuildTargetConnectionMutation.isPending;
+  const isMutating = createTask.isPending || updateTaskStatus.isPending || submitMessage.isPending || updateQueuedMessageMutation.isPending || clearQueuedMessageMutation.isPending || stopGenerationMutation.isPending || createFileMetadata.isPending || uploadWorkspaceFileMutation.isPending || attachGlobalToTaskMutation.isPending || createBuildTargetMutation.isPending || createBuildBranchMutation.isPending || updateBuildTargetSettingsMutation.isPending || pushBuildBranchMutation.isPending || testBuildTargetConnectionMutation.isPending || analyzeWizardMutation.isPending || completeWizardMutation.isPending;
 
   async function refreshWorkspace() {
     await Promise.all([
@@ -493,6 +569,140 @@ export default function Home() {
     return buildTargetGovernanceFiles
       .map((row) => ({ path: row.path.trim(), required: row.required, dynamic: row.dynamic, role: row.role, resolverKey: row.resolverKey?.trim() || undefined }))
       .filter((row) => row.path);
+  }
+
+  function normalizedWizardGovernanceRows() {
+    return wizardGovernanceFiles
+      .map((row) => ({ path: row.path.trim(), required: row.required, dynamic: row.dynamic, role: row.role, resolverKey: row.resolverKey?.trim() || undefined }))
+      .filter((row) => row.path);
+  }
+
+  function parseWizardAgentEnvMapInput() {
+    const entries = wizardAgentEnvMap
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [workspaceEnvName, ...sourceParts] = line.split("=");
+        return [workspaceEnvName?.trim(), sourceParts.join("=").trim()] as const;
+      })
+      .filter(([workspaceEnvName, sourceEnvName]) => Boolean(workspaceEnvName && sourceEnvName));
+    return Object.fromEntries(entries);
+  }
+
+  function applyWizardRecommendation(recommendation: ProjectWizardRecommendation) {
+    setWizardBaseBranch(recommendation.defaultBaseBranch.value);
+    setWizardInitialBranch(recommendation.branchStrategy.value.initialBuildBranch);
+    setWizardProtectedBranches(recommendation.branchStrategy.value.protectedBranches.join(","));
+    setWizardValidationCommands(recommendation.validationCommands.value.join("\n"));
+    setWizardServiceChecks(recommendation.serviceChecks.value.join("\n"));
+    setWizardGovernanceFiles(recommendation.projectRuleBooks.value);
+    setWizardAgentEnvMap(formatEnvMapForInput(recommendation.environmentVariables.value));
+  }
+
+  async function handleAnalyzeWizard() {
+    if (!wizardRepoUrl.trim()) {
+      const message = "Add a Repo URL before starting the Project setup wizard.";
+      setWorkspaceNotice(message);
+      toast.warning(message);
+      return;
+    }
+    if (!wizardTokenEnvVar.trim()) {
+      const message = "Add the GitHub token environment variable name before starting the Project setup wizard.";
+      setWorkspaceNotice(message);
+      toast.warning(message);
+      return;
+    }
+    setWizardStep(2);
+    setWizardAnalysis(null);
+    try {
+      const result = await analyzeWizardMutation.mutateAsync({
+        displayName: wizardDisplayName.trim() || "Workshop repo",
+        repoUrl: wizardRepoUrl.trim(),
+        githubTokenEnvVar: wizardTokenEnvVar.trim(),
+        defaultBaseBranch: wizardBaseBranch.trim() || "main",
+      }) as ProjectWizardAnalysisResult;
+      setWizardAnalysis(result);
+      if (result.status !== "ok" || !result.recommendation) {
+        const message = result.fallbackMessage || "Setup wizard couldn't complete. Switch to manual setup?";
+        setWizardStep(1);
+        setWorkspaceNotice(message);
+        toast.warning(message);
+        return;
+      }
+      applyWizardRecommendation(result.recommendation);
+      setWizardStep(3);
+      const cacheCopy = result.cacheStatus === "hit" ? " using the cached recommendation" : "";
+      const message = `Project recommendations are ready${cacheCopy}. Review and confirm them before creating the Project.`;
+      setWorkspaceNotice(message);
+      toast.success(message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Setup wizard couldn't complete. Switch to manual setup?";
+      setWizardAnalysis({ status: "analysis_failed", fallbackMessage: "Setup wizard couldn't complete. Switch to manual setup?", errorMessage: message });
+      setWizardStep(1);
+      setWorkspaceNotice("Setup wizard couldn't complete. Switch to manual setup?");
+      toast.error("Setup wizard couldn't complete. Switch to manual setup?");
+    }
+  }
+
+  function handleUseAdvancedSetup() {
+    setIsWizardMode(false);
+    setBuildTargetName(wizardDisplayName.trim() || buildTargetName);
+    setBuildTargetRepoUrl(wizardRepoUrl.trim() || buildTargetRepoUrl);
+    setBuildTargetTokenEnvVar(wizardTokenEnvVar.trim() || buildTargetTokenEnvVar);
+    setBuildTargetDefaultBaseBranch(wizardBaseBranch.trim() || buildTargetDefaultBaseBranch);
+    setBuildTargetProtectedBranches(wizardProtectedBranches.trim() || buildTargetProtectedBranches);
+    setBuildTargetValidationCommands(wizardValidationCommands);
+    setBuildTargetServiceChecks(wizardServiceChecks);
+    setBuildTargetAgentEnvMap(wizardAgentEnvMap || buildTargetAgentEnvMap);
+    setBuildTargetGovernanceFiles(wizardGovernanceFiles.length ? wizardGovernanceFiles : buildTargetGovernanceFiles);
+  }
+
+  async function handleCompleteWizard() {
+    const protectedBranches = wizardProtectedBranches.split(",").map((value) => value.trim()).filter(Boolean);
+    const validationCommands = wizardValidationCommands.split("\n").map((value) => value.trim()).filter(Boolean);
+    const serviceChecks = wizardServiceChecks.split("\n").map((value) => value.trim()).filter(Boolean);
+    const governanceFiles = normalizedWizardGovernanceRows();
+    const errors = governanceValidationErrors(governanceFiles);
+    if (errors.length > 0) {
+      const message = errors[0];
+      setWorkspaceNotice(message);
+      toast.warning(message);
+      return;
+    }
+    if (!protectedBranches.length || !validationCommands.length) {
+      const message = "Review requires at least one protected branch and one validation command before creating the Project.";
+      setWorkspaceNotice(message);
+      toast.warning(message);
+      return;
+    }
+    try {
+      const result = await completeWizardMutation.mutateAsync({
+        displayName: wizardDisplayName.trim() || "Workshop repo",
+        repoUrl: wizardRepoUrl.trim(),
+        githubTokenEnvVar: wizardTokenEnvVar.trim(),
+        defaultBaseBranch: wizardBaseBranch.trim() || "main",
+        initialBuildBranch: wizardInitialBranch.trim() || "portal-wizard-setup",
+        protectedBranches,
+        validationCommands,
+        serviceChecks,
+        governanceFiles,
+        agentEnvVarMap: parseWizardAgentEnvMapInput(),
+      }) as { target: any; branch: any };
+      setSelectedBuildTargetId(result.target.id);
+      setOpenedBuildBranch(result.branch);
+      setBuildTargetName(result.target.name ?? wizardDisplayName);
+      setBuildTargetRepoUrl("");
+      setWizardStep(4);
+      const message = `Project created for ${result.target.name ?? wizardDisplayName}. Build Branch ${result.branch.branchName} is opening.`;
+      setWorkspaceNotice(message);
+      toast.success(message);
+      await refreshWorkspace();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The Project could not be created from the setup wizard.";
+      setWorkspaceNotice(message);
+      toast.error(message);
+    }
   }
 
   function updateGovernanceRow(index: number, patch: Partial<GovernanceFileRow>) {
@@ -949,21 +1159,130 @@ export default function Home() {
             <GitBranch className="h-3.5 w-3.5" /> Projects
           </div>
           <div className="mb-6 space-y-2">
-            <div className="rounded-2xl border border-[#d9d8d1] bg-white p-3">
-              <Input value={buildTargetName} onChange={(event) => setBuildTargetName(event.target.value)} placeholder="Project name" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
-              <Input value={buildTargetRepoUrl} onChange={(event) => setBuildTargetRepoUrl(event.target.value)} placeholder="https://github.com/org/repo" className="mt-2 h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
-              <Input value={buildTargetTokenEnvVar} onChange={(event) => setBuildTargetTokenEnvVar(event.target.value)} placeholder="BUILD_TARGET_VIYO_GITHUB_TOKEN" className="mt-2 h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
-              <p className="mt-1 text-[11px] leading-4 text-[#77766e]">Enter only the environment variable name where the GitHub PAT is set. The token value itself never goes in this form.</p>
-              <Input value={buildTargetDefaultBaseBranch} onChange={(event) => setBuildTargetDefaultBaseBranch(event.target.value)} placeholder="Default base branch: main or staging" className="mt-2 h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
-              <Input value={buildTargetProtectedBranches} onChange={(event) => setBuildTargetProtectedBranches(event.target.value)} placeholder="Protected branches: main,staging" className="mt-2 h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
-              <Textarea value={buildTargetValidationCommands} onChange={(event) => setBuildTargetValidationCommands(event.target.value)} placeholder="Optional validation commands, one per line" className="mt-2 min-h-[62px] rounded-xl border-[#d9d8d1] bg-white text-xs" />
-              <Textarea value={buildTargetServiceChecks} onChange={(event) => setBuildTargetServiceChecks(event.target.value)} placeholder="Optional service checks, one per line" className="mt-2 min-h-[50px] rounded-xl border-[#d9d8d1] bg-white text-xs" />
-              <Textarea value={buildTargetAgentEnvMap} onChange={(event) => setBuildTargetAgentEnvMap(event.target.value)} placeholder="WORKSPACE_ENV=SERVER_ENV_SOURCE" className="mt-2 min-h-[62px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" data-testid="agent-env-var-map-input" />
-              <p className="mt-1 text-[11px] leading-4 text-[#77766e]">Paste only the env var names where you set tokens and secrets. The actual values go in your portal environment, never in this form.</p>
-              <Button type="button" variant="outline" onClick={handleTestBuildTargetConnection} disabled={isMutating || !buildTargetRepoUrl.trim() || !buildTargetTokenEnvVar.trim()} className="mt-2 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">Test connection</Button>
-              <Button type="button" onClick={handleCreateBuildTarget} disabled={isMutating || !buildTargetRepoUrl.trim() || !buildTargetTokenEnvVar.trim()} className="mt-2 w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">
-                {createBuildTargetMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Plus className="mr-2 h-3.5 w-3.5" />} Add Project
-              </Button>
+            <div className="rounded-2xl border border-[#d9d8d1] bg-white p-3" data-testid="project-setup-wizard">
+              <div className="mb-3 flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-[#30302b]">Project setup wizard</p>
+                  <p className="mt-1 text-[11px] leading-4 text-[#77766e]">Add a Repo URL, let the AI analyze the repository, then review Project recommendations before creation.</p>
+                </div>
+                <Badge variant="outline" className="shrink-0 rounded-full border-sky-200 bg-sky-50 text-[10px] text-sky-700">§1A</Badge>
+              </div>
+
+              {isWizardMode ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-4 gap-1 text-[10px] font-semibold text-[#77766e]" aria-label="Project setup wizard steps">
+                    {["Input", "Analyze", "Review", "Create"].map((label, index) => (
+                      <div key={label} className={`rounded-full border px-2 py-1 text-center ${wizardStep === index + 1 ? "border-[#1f1f1f] bg-[#1f1f1f] text-white" : "border-[#deded8] bg-[#fbfaf7]"}`}>{index + 1}. {label}</div>
+                    ))}
+                  </div>
+
+                  {wizardStep === 4 ? (
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-900">
+                      <CheckCircle2 className="mb-2 h-4 w-4" /> Project created. The new Build Branch is opening so tasks can use the approved Project configuration.
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-2">
+                    <Input aria-label="Project name" value={wizardDisplayName} onChange={(event) => setWizardDisplayName(event.target.value)} placeholder="Project name" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                    <Input aria-label="Repo URL" value={wizardRepoUrl} onChange={(event) => setWizardRepoUrl(event.target.value)} placeholder="Repo URL, for example https://github.com/org/repo" className="h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                    <Input aria-label="GitHub token environment variable" value={wizardTokenEnvVar} onChange={(event) => setWizardTokenEnvVar(event.target.value)} placeholder="BUILD_TARGET_GITHUB_TOKEN" className="h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                    <Input aria-label="Default base branch" value={wizardBaseBranch} onChange={(event) => setWizardBaseBranch(event.target.value)} placeholder="Default base branch: main" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                    <p className="text-[11px] leading-4 text-[#77766e]">Enter only the environment variable name where the GitHub PAT is set. The token value itself never goes in this form.</p>
+                  </div>
+
+                  {wizardStep === 2 || analyzeWizardMutation.isPending ? (
+                    <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-xs leading-5 text-sky-900">
+                      <Loader2 className="mb-2 h-4 w-4 animate-spin" /> Analyzing the Project repository with the LLM. If analysis cannot complete, the wizard will offer Advanced setup.
+                    </div>
+                  ) : null}
+
+                  {wizardAnalysis && wizardAnalysis.status !== "ok" ? (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+                      <p className="font-semibold">{wizardAnalysis.fallbackMessage || "Setup wizard couldn't complete. Switch to manual setup?"}</p>
+                      {wizardAnalysis.errorMessage ? <p className="mt-1">{wizardAnalysis.errorMessage}</p> : null}
+                      <Button type="button" variant="outline" onClick={handleUseAdvancedSetup} className="mt-2 h-8 w-full rounded-xl border-amber-300 bg-white text-xs">Switch to manual setup</Button>
+                    </div>
+                  ) : null}
+
+                  {wizardStep === 3 && wizardAnalysis?.recommendation ? (
+                    <div className="space-y-2" data-testid="project-wizard-review">
+                      <div className="rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-3 text-xs leading-5 text-[#66665f]">
+                        <p className="font-semibold text-[#30302b]">Review AI recommendations</p>
+                        <p>Each card can be approved as-is or overridden before the Project is created. Repo context: {wizardAnalysis.repoContext?.detectedFrameworks?.join(", ") || "frameworks not detected"}{wizardAnalysis.repoContext?.commitSha ? ` · ${wizardAnalysis.repoContext.commitSha.slice(0, 12)}` : ""}.</p>
+                      </div>
+
+                      <div className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="setup-wizard-review-card">
+                        <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">Default base branch</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.defaultBaseBranch.confidence)}`}>{wizardAnalysis.recommendation.defaultBaseBranch.confidence}</Badge></div>
+                        <p className="mt-1 text-[11px] leading-4 text-[#77766e]">{wizardAnalysis.recommendation.defaultBaseBranch.rationale}</p>
+                        <Input value={wizardBaseBranch} onChange={(event) => setWizardBaseBranch(event.target.value)} className="mt-2 h-8 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                      </div>
+
+                      <div className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="setup-wizard-review-card">
+                        <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">Branch strategy</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.branchStrategy.confidence)}`}>{wizardAnalysis.recommendation.branchStrategy.confidence}</Badge></div>
+                        <p className="mt-1 text-[11px] leading-4 text-[#77766e]">{wizardAnalysis.recommendation.branchStrategy.rationale}</p>
+                        <Input value={wizardInitialBranch} onChange={(event) => setWizardInitialBranch(event.target.value)} placeholder="Initial Build Branch" className="mt-2 h-8 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                        <Input value={wizardProtectedBranches} onChange={(event) => setWizardProtectedBranches(event.target.value)} placeholder="Protected branches, comma-separated" className="mt-2 h-8 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                      </div>
+
+                      <div className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="setup-wizard-review-card">
+                        <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">Validation commands</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.validationCommands.confidence)}`}>{wizardAnalysis.recommendation.validationCommands.confidence}</Badge></div>
+                        <p className="mt-1 text-[11px] leading-4 text-[#77766e]">{wizardAnalysis.recommendation.validationCommands.rationale}</p>
+                        <Textarea value={wizardValidationCommands} onChange={(event) => setWizardValidationCommands(event.target.value)} className="mt-2 min-h-[58px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                      </div>
+
+                      <div className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="setup-wizard-review-card">
+                        <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">Service checks</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.serviceChecks.confidence)}`}>{wizardAnalysis.recommendation.serviceChecks.confidence}</Badge></div>
+                        <p className="mt-1 text-[11px] leading-4 text-[#77766e]">{wizardAnalysis.recommendation.serviceChecks.rationale}</p>
+                        <Textarea value={wizardServiceChecks} onChange={(event) => setWizardServiceChecks(event.target.value)} placeholder="Optional service checks, one per line" className="mt-2 min-h-[50px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                      </div>
+
+                      <div className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="setup-wizard-review-card">
+                        <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">Project rule books</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.projectRuleBooks.confidence)}`}>{wizardAnalysis.recommendation.projectRuleBooks.confidence}</Badge></div>
+                        <p className="mt-1 text-[11px] leading-4 text-[#77766e]">{wizardAnalysis.recommendation.projectRuleBooks.rationale}</p>
+                        {wizardGovernanceFiles.length === 0 ? <p className="mt-2 rounded-xl border border-dashed border-[#d9d8d1] bg-[#fbfaf7] p-2 text-[11px] text-[#77766e]">No Project rule books were detected. Leaving this empty is safe; add one path per line only if a repository document should govern agent work.</p> : null}
+                        <Textarea value={wizardGovernanceFiles.map((row) => row.path).join("\n")} onChange={(event) => setWizardGovernanceFiles(governanceRowsFromPaths(event.target.value))} placeholder="Project rule books, one path per line" className="mt-2 min-h-[50px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                      </div>
+
+                      <div className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="setup-wizard-review-card">
+                        <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">AI environment variables</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.environmentVariables.confidence)}`}>{wizardAnalysis.recommendation.environmentVariables.confidence}</Badge></div>
+                        <p className="mt-1 text-[11px] leading-4 text-[#77766e]">{wizardAnalysis.recommendation.environmentVariables.rationale}</p>
+                        <Textarea value={wizardAgentEnvMap} onChange={(event) => setWizardAgentEnvMap(event.target.value)} placeholder="WORKSPACE_ENV=SERVER_ENV_SOURCE" className="mt-2 min-h-[50px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                      </div>
+
+                      <Button type="button" onClick={handleCompleteWizard} disabled={isMutating} className="w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">
+                        {completeWizardMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-2 h-3.5 w-3.5" />} Confirm and create Project
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button type="button" onClick={handleAnalyzeWizard} disabled={isMutating || !wizardRepoUrl.trim() || !wizardTokenEnvVar.trim()} className="w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">
+                      {analyzeWizardMutation.isPending || wizardStep === 2 ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />} Analyze Project
+                    </Button>
+                  )}
+
+                  <Button type="button" variant="ghost" onClick={handleUseAdvancedSetup} className="w-full rounded-xl text-xs text-[#5f5f58]">Advanced setup</Button>
+                </div>
+              ) : (
+                <div className="space-y-2" data-testid="advanced-project-setup">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold text-[#30302b]">Advanced setup</p>
+                    <Button type="button" variant="ghost" onClick={() => setIsWizardMode(true)} className="h-7 rounded-xl px-2 text-[11px] text-[#5f5f58]">Use setup wizard</Button>
+                  </div>
+                  <Input value={buildTargetName} onChange={(event) => setBuildTargetName(event.target.value)} placeholder="Project name" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                  <Input value={buildTargetRepoUrl} onChange={(event) => setBuildTargetRepoUrl(event.target.value)} placeholder="Repo URL, for example https://github.com/org/repo" className="h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                  <Input value={buildTargetTokenEnvVar} onChange={(event) => setBuildTargetTokenEnvVar(event.target.value)} placeholder="BUILD_TARGET_VIYO_GITHUB_TOKEN" className="h-9 rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" />
+                  <p className="text-[11px] leading-4 text-[#77766e]">Enter only the environment variable name where the GitHub PAT is set. The token value itself never goes in this form.</p>
+                  <Input value={buildTargetDefaultBaseBranch} onChange={(event) => setBuildTargetDefaultBaseBranch(event.target.value)} placeholder="Default base branch: main or staging" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                  <Input value={buildTargetProtectedBranches} onChange={(event) => setBuildTargetProtectedBranches(event.target.value)} placeholder="Protected branches: main,staging" className="h-9 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                  <Textarea value={buildTargetValidationCommands} onChange={(event) => setBuildTargetValidationCommands(event.target.value)} placeholder="Optional validation commands, one per line" className="min-h-[62px] rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                  <Textarea value={buildTargetServiceChecks} onChange={(event) => setBuildTargetServiceChecks(event.target.value)} placeholder="Optional service checks, one per line" className="min-h-[50px] rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                  <Textarea value={buildTargetAgentEnvMap} onChange={(event) => setBuildTargetAgentEnvMap(event.target.value)} placeholder="WORKSPACE_ENV=SERVER_ENV_SOURCE" className="min-h-[62px] rounded-xl border-[#d9d8d1] bg-white font-mono text-xs" data-testid="agent-env-var-map-input" />
+                  <p className="text-[11px] leading-4 text-[#77766e]">Paste only the env var names where you set tokens and secrets. The actual values go in your portal environment, never in this form.</p>
+                  <Button type="button" variant="outline" onClick={handleTestBuildTargetConnection} disabled={isMutating || !buildTargetRepoUrl.trim() || !buildTargetTokenEnvVar.trim()} className="w-full rounded-xl border-[#d9d8d1] bg-white text-xs">Test connection</Button>
+                  <Button type="button" onClick={handleCreateBuildTarget} disabled={isMutating || !buildTargetRepoUrl.trim() || !buildTargetTokenEnvVar.trim()} className="w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">
+                    {createBuildTargetMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Plus className="mr-2 h-3.5 w-3.5" />} Add Project
+                  </Button>
+                </div>
+              )}
             </div>
             {buildTargetsQuery.isLoading ? (
               <div className="rounded-2xl border border-[#d9d8d1] bg-white p-3 text-xs text-[#6d6d65]">Loading projects...</div>

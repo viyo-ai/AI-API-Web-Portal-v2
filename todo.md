@@ -290,3 +290,12 @@
 - [x] §3 approval follow-up: append a build-log note documenting that commit 650fbf9 should be associated with task ID [PORTAL-P2-S3-01], then make a prefixed follow-up commit without force-pushing.
 - [x] §3 approval follow-up: restore markdown rendering for assistant messages in `AIChatBox.tsx` or implement an equivalent no-regression markdown renderer that passes tests and build.
 - [x] §3 approval follow-up: re-run `pnpm check`, `pnpm test`, and `pnpm build` before reporting the follow-up commit URL and remaining paused before §1A.
+
+- [x] §1A: Re-ingest `PORTAL_PHASE_2_DIRECTIVE.md` §1A.1–§1A.4 and mandatory VIYO development guidance, with Phase 2 closeout explicitly deferred.
+- [x] §1A: Audit existing Project creation/settings, Repo URL, Project rule book, and AI Activity flows before changing the wizard.
+- [x] §1A: Implement the LLM-driven Project setup wizard server contract using existing secure server-side LLM helpers without exposing credentials in the browser.
+- [x] §1A: Build the owner-facing Project setup wizard UI using accepted §3A vocabulary: Project, Repo URL, Project rule books, AI Activity, and Project setup.
+- [x] §1A: Ensure generated wizard recommendations can populate or update Project setup fields without breaking existing manual Project configuration behavior.
+- [x] §1A: Add focused §1A acceptance and regression tests for directive coverage, §3A vocabulary, LLM contract shape, Project rule book wiring, and non-regression of §3 Skill Libraries.
+- [x] §1A: Run `pnpm check`, `pnpm test`, and `pnpm build`; append §1A closeout evidence to `portal-build-log.md`.
+- [x] §1A: Commit and push with required prefixed format and `[PORTAL-P2-S1A-01]`, then report the standalone commit URL and stop for §1A acceptance.
