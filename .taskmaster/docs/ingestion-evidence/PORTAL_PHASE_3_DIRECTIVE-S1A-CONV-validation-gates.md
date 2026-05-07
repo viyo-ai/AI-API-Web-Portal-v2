@@ -28,3 +28,7 @@ This evidence file records the seven validation gates and closeout proofs requir
 ## Non-Pass Observations
 
 No validation gate is open. A production-build chunk-size warning remains from the existing application bundle shape and did not block build success. No out-of-scope proposal commit was required.
+
+## Authenticated Browser Visual Evidence
+
+A managed browser inspection of the authenticated preview confirmed the core §1A-CONV surfaces are present in the live UI: the existing form wizard remains visible as Advanced Setup, the center thread includes the Architect-in-Portal onboarding card, the Credentials drawer triggers are visible, the task list exposes Rename and most-recent sorting, Project Memory is scoped to the selected project state, and the Task Inspector still includes the Diagnostics tab unchanged. This browser inspection is the authenticated visual source of truth for the screenshot closeout package.
