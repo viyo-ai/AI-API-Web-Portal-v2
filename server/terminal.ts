@@ -10,6 +10,7 @@ import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { sdk } from "./_core/sdk";
 
 const WORKSPACE_ROOT = process.env.AICW_WORKSPACE_ROOT || "/tmp/ai-coding-workshop-workspaces";
+const BUILD_WORKSPACE_ROOT = process.env.AICW_BUILD_WORKSPACE_ROOT || "/tmp/ai-coding-workshop-build-targets";
 const MAX_INPUT_BYTES = 16 * 1024;
 const DEFAULT_COLS = 100;
 const DEFAULT_ROWS = 28;
@@ -167,6 +168,26 @@ export async function getUserWorkspaceRoot(ownerUserId: number) {
   return root;
 }
 
+function isPathInside(parent: string, child: string) {
+  const relative = path.relative(parent, child);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+export async function resolveTerminalWorkspaceRoot(ownerUserId: number, requestedCwd?: string | null) {
+  const personalRoot = path.resolve(await getUserWorkspaceRoot(ownerUserId));
+  const ownerBuildRoot = path.resolve(path.join(BUILD_WORKSPACE_ROOT, `owner-${ownerUserId}`));
+
+  if (!requestedCwd) return personalRoot;
+
+  const resolvedCwd = path.resolve(requestedCwd);
+  if (!isPathInside(personalRoot, resolvedCwd) && !isPathInside(ownerBuildRoot, resolvedCwd)) {
+    throw new Error("Requested terminal workspace is outside your Personal workspace and Project Build Branch directories.");
+  }
+
+  await fs.mkdir(resolvedCwd, { recursive: true, mode: 0o700 });
+  return resolvedCwd;
+}
+
 function wirePtyTerminal(socket: WebSocket, terminal: NodePty.IPty) {
   terminal.onData(data => sendJson(socket, { type: "output", data }));
   terminal.onExit(({ exitCode, signal }) => {
@@ -241,12 +262,14 @@ export function registerTerminalWebSocket(server: Server): RegisteredTerminal {
     }
   });
 
-  wss.on("connection", async (socket: WebSocket) => {
+  wss.on("connection", async (socket: WebSocket, req: IncomingMessage) => {
     try {
       const user = (socket as AuthenticatedSocket).authenticatedUser;
       if (!user) throw new Error("Terminal connection is missing authenticated user context.");
       const ownerUserId = user.id;
-      const cwd = await getUserWorkspaceRoot(ownerUserId);
+      const { query } = parseUrl(req.url || "", true);
+      const requestedCwd = typeof query.cwd === "string" ? query.cwd : null;
+      const cwd = await resolveTerminalWorkspaceRoot(ownerUserId, requestedCwd);
       const ptyLoad = await loadNodePty();
       const terminalMode: TerminalMode = ptyLoad.pty ? "pty" : "basic";
       const launchCommand = await buildTerminalLaunchCommand(ownerUserId, terminalMode, ptyLoad.errorMessage);

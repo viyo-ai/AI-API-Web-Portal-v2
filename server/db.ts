@@ -1085,6 +1085,51 @@ export async function listRootGovernanceGlobalFilesForOwner(ownerUserId: number)
   );
 }
 
+export const PROJECT_GLOBAL_FILE_DETACH_ERROR =
+  "This file is attached from your Project. To remove it, change your Project's settings — not this task.";
+
+export async function detachOrDeleteGlobalFileFromTask(
+  taskId: number,
+  globalFileId: number,
+  ownerUserId: number
+) {
+  const task = await getTaskForOwner(taskId, ownerUserId);
+  if (!task) throw new Error("Task not found");
+
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for global file links");
+
+  const result = await db
+    .select()
+    .from(taskGlobalFileLinks)
+    .where(
+      and(
+        eq(taskGlobalFileLinks.taskId, taskId),
+        eq(taskGlobalFileLinks.globalFileId, globalFileId),
+        eq(taskGlobalFileLinks.ownerUserId, ownerUserId)
+      )
+    )
+    .limit(1);
+  const link = result[0];
+  if (!link) throw new Error("Global file link not found");
+  if (link.source === "project" || link.source === "root_default") {
+    throw new Error(PROJECT_GLOBAL_FILE_DETACH_ERROR);
+  }
+
+  await db
+    .delete(taskGlobalFileLinks)
+    .where(
+      and(
+        eq(taskGlobalFileLinks.id, link.id),
+        eq(taskGlobalFileLinks.taskId, taskId),
+        eq(taskGlobalFileLinks.globalFileId, globalFileId),
+        eq(taskGlobalFileLinks.ownerUserId, ownerUserId)
+      )
+    );
+  await touchTask(taskId, ownerUserId);
+  return { success: true, deleted: link } as const;
+}
+
 export async function listGlobalFileLinksForTask(
   taskId: number,
   ownerUserId: number,

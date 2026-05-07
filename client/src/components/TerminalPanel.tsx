@@ -14,12 +14,18 @@ type TerminalMessage =
   | { type: "status"; status: string }
   | { type: "error"; message: string; fatal?: boolean };
 
-function createTerminalSocketUrl() {
+type TerminalPanelProps = {
+  workspacePath?: string | null;
+  workspaceLabel?: string;
+};
+
+function createTerminalSocketUrl(workspacePath?: string | null) {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/api/terminal`;
+  const query = workspacePath ? `?cwd=${encodeURIComponent(workspacePath)}` : "";
+  return `${protocol}//${window.location.host}/api/terminal${query}`;
 }
 
-export default function TerminalPanel() {
+export default function TerminalPanel({ workspacePath, workspaceLabel = "Personal workspace" }: TerminalPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -37,6 +43,7 @@ export default function TerminalPanel() {
   useEffect(() => {
     if (!containerRef.current) return;
 
+    disposedRef.current = false;
     const removeResizeObserverErrorGuard = installBenignResizeObserverErrorGuard();
 
     const terminal = new Terminal({
@@ -70,7 +77,7 @@ export default function TerminalPanel() {
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(containerRef.current);
-    terminal.writeln("\x1b[36mAI Coding Workshop terminal booting...\x1b[0m");
+    terminal.writeln(`\x1b[36mAI Coding Workshop terminal booting for ${workspaceLabel}...\x1b[0m`);
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
@@ -96,7 +103,7 @@ export default function TerminalPanel() {
 
     const connect = () => {
       setConnectionState("connecting");
-      const socket = new WebSocket(createTerminalSocketUrl());
+      const socket = new WebSocket(createTerminalSocketUrl(workspacePath));
       socketRef.current = socket;
 
       socket.addEventListener("open", () => {
@@ -167,7 +174,7 @@ export default function TerminalPanel() {
       socketRef.current?.close();
       terminal.dispose();
     };
-  }, []);
+  }, [workspaceLabel, workspacePath]);
 
   const stateStyles: Record<ConnectionState, string> = {
     connecting: "bg-amber-400/15 text-amber-200 ring-amber-400/30",

@@ -18,6 +18,7 @@ import {
   assertSafeRelativePath,
   attachGlobalFileToTask,
   autoAttachRootGlobalFiles,
+  detachOrDeleteGlobalFileFromTask,
   createBuildBranch,
   createBuildTarget,
   updateBuildTarget,
@@ -2765,6 +2766,33 @@ export const appRouter = router({
           }),
         });
         return attached;
+      }),
+    detachGlobalFromTask: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.number().int().positive(),
+          globalFileId: z.number().int().positive(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const detached = await detachOrDeleteGlobalFileFromTask(
+          input.taskId,
+          input.globalFileId,
+          ctx.user.id
+        );
+        await appendTaskEvent({
+          taskId: input.taskId,
+          ownerUserId: ctx.user.id,
+          actor: "system",
+          eventType: "file_event",
+          status: "succeeded",
+          content: "Global file detached from this task.",
+          metadataJson: serializeJson({
+            globalFileId: input.globalFileId,
+            linkId: detached.deleted.id,
+          }),
+        });
+        return detached;
       }),
     createMetadata: protectedProcedure
       .input(

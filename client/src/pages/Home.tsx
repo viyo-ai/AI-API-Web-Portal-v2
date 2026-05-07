@@ -396,6 +396,7 @@ export default function Home() {
   const [wizardAgentEnvMap, setWizardAgentEnvMap] = useState("");
   const [wizardGovernanceFiles, setWizardGovernanceFiles] = useState<GovernanceFileRow[]>([]);
   const [openedBuildBranch, setOpenedBuildBranch] = useState<any | null>(null);
+  const [useBuildBranchDiagnosticsWorkspace, setUseBuildBranchDiagnosticsWorkspace] = useState(false);
   const [showThreadDetails, setShowThreadDetails] = useState(false);
   const [workspaceNotice, setWorkspaceNotice] = useState("");
   const [isFileDragActive, setIsFileDragActive] = useState(false);
@@ -467,6 +468,8 @@ export default function Home() {
   const buildTargets = buildTargetsQuery.data ?? [];
   const selectedBuildTarget = buildTargets.find((target) => target.id === selectedBuildTargetId) ?? buildTargets[0] ?? null;
   const isBuildModeOpen = Boolean(selectedBuildTarget && openedBuildBranch);
+  const diagnosticsBuildBranchPath = useBuildBranchDiagnosticsWorkspace && openedBuildBranch?.workspacePath ? openedBuildBranch.workspacePath : null;
+  const diagnosticsWorkspaceLabel = diagnosticsBuildBranchPath ? "Project Build Branch" : "Personal workspace";
   const selectedBuildTargetEnvMap = useMemo(() => {
     try {
       return selectedBuildTarget?.agentEnvVarMapJson ? JSON.parse(selectedBuildTarget.agentEnvVarMapJson) as Record<string, string> : {};
@@ -489,6 +492,10 @@ export default function Home() {
     setBuildTargetGovernanceFiles(selectedBuildTargetGovernanceFiles.length > 0 ? selectedBuildTargetGovernanceFiles : [defaultGovernanceRow()]);
     setBuildTargetGovernanceBudgetEnforced(selectedBuildTarget.governanceBudgetEnforced !== false);
   }, [selectedBuildTarget, selectedBuildTargetEnvMap, selectedBuildTargetGovernanceFiles]);
+
+  useEffect(() => {
+    if (!openedBuildBranch?.workspacePath) setUseBuildBranchDiagnosticsWorkspace(false);
+  }, [openedBuildBranch]);
 
   const filteredTasks = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -1980,7 +1987,28 @@ export default function Home() {
                     </div>
                   ) : null}
                   <FilesystemPanel workspaceId={selectedTaskId ?? undefined} />
-                  <TerminalPanel />
+                  <div className="rounded-2xl border border-[#deded8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#686861]" data-testid="diagnostics-workspace-toggle">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="font-semibold text-[#30302b]">Terminal workspace</p>
+                        <p className="mt-1">Choose where developer diagnostics open. Personal workspace is the default; Project Build Branch is available only after a branch is opened for the selected Project.</p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={!openedBuildBranch?.workspacePath}
+                        onClick={() => setUseBuildBranchDiagnosticsWorkspace((value) => !value)}
+                        className="rounded-xl border-[#d9d8d1] bg-white text-xs"
+                      >
+                        {diagnosticsBuildBranchPath ? "Use Personal workspace" : "Use Project Build Branch"}
+                      </Button>
+                    </div>
+                    <p className="mt-3 text-[11px] font-medium text-[#55554f]">Current diagnostics terminal: {diagnosticsWorkspaceLabel}</p>
+                    {!openedBuildBranch?.workspacePath ? (
+                      <p className="mt-2 text-[11px] text-[#85857b]">Open a Project Build Branch before using the Project Build Branch terminal workspace.</p>
+                    ) : null}
+                  </div>
+                  <TerminalPanel workspacePath={diagnosticsBuildBranchPath} workspaceLabel={diagnosticsWorkspaceLabel} />
                 </div>
               ) : null}
             </TabsContent>

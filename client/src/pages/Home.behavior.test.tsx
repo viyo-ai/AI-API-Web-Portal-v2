@@ -1082,24 +1082,70 @@ describe("Home v2 task-first workspace behavior", () => {
       socket.readyState = FakeWebSocket.OPEN;
       socket.dispatch("open", {});
     });
-    await waitFor(() => expect(screen.getAllByText(/connected/i).length).toBeGreaterThan(0));
-
-    await act(async () => {
-      socket.dispatchJson({
-        type: "ready",
-        sessionKey: "test-session",
-        tmuxSessionName: "ai-workshop-test",
-        tmuxEnabled: true,
-        terminalMode: "pty",
-        cwd: "/workspace/task-7",
-      });
+    socket.dispatchJson({
+      type: "ready",
+      sessionKey: "user-42",
+      tmuxSessionName: "aicw-user-42",
+      tmuxEnabled: true,
+      terminalMode: "pty",
+      cwd: "/tmp/ai-coding-workshop-workspaces/user-42",
     });
+    socket.dispatchJson({ type: "status", status: "Authenticated node-pty terminal connected to a persistent tmux session." });
 
-    expect(screen.getByText(/tmux PTY terminal/i)).toBeInTheDocument();
-    expect(screen.getByText(/tmux · ai-workshop-test · \/workspace\/task-7/i)).toBeInTheDocument();
+    expect(await screen.findByText("connected", { selector: "span" })).toBeInTheDocument();
+    expect(screen.getByText("tmux PTY terminal")).toBeInTheDocument();
+    expect(screen.getByText(/tmux · aicw-user-42 · \/tmp\/ai-coding-workshop-workspaces\/user-42/i)).toBeInTheDocument();
   });
 
-  it("throttles terminal ResizeObserver fitting through requestAnimationFrame", async () => {
+  it("keeps diagnostics terminal in the Personal workspace by default and switches to Project Build Branch only after the explicit toggle", async () => {
+    const user = userEvent.setup();
+    mockBuildTargets = [
+      {
+        id: 77,
+        ownerUserId: 42,
+        name: "AI API Portal",
+        repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2",
+        defaultBaseBranch: "main",
+        protectedBranchesJson: JSON.stringify(["main", "staging"]),
+        validationCommandsJson: JSON.stringify(["pnpm check", "pnpm test"]),
+        serviceChecksJson: JSON.stringify([]),
+        agentEnvVarMapJson: JSON.stringify({ WORKSHOP_GITHUB_TOKEN: "BUILD_TARGET_GITHUB_TOKEN" }),
+        governanceFilesJson: JSON.stringify([]),
+        governanceBudgetEnforced: true,
+        archivedAt: null,
+        createdAt: 1777999300000,
+        updatedAt: 1777999400000,
+      },
+    ];
+    const buildBranchPath = "/tmp/ai-coding-workshop-build-targets/owner-42/target-77/branch-301-agent-work-plain-language";
+    createBuildBranchMock.mockResolvedValueOnce({ id: 301, branchName: "agent-work/plain-language", state: "clean", pushState: "never_pushed", workspacePath: buildBranchPath, taskId: 7 });
+
+    render(<Home />);
+    await screen.findAllByText("Implement v2 shell");
+    await user.type(screen.getByPlaceholderText(/agent-work\/portal-task/i), "agent-work/plain-language");
+    await user.click(screen.getByRole("button", { name: /^Open$/i }));
+    expect(await screen.findByText(/Branch: agent-work\/plain-language/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /diagnostics/i }));
+    await user.click(screen.getByRole("button", { name: /show developer diagnostics/i }));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    expect(FakeWebSocket.instances[FakeWebSocket.instances.length - 1].url).toMatch(/^ws:\/\/localhost(?::\d+)?\/api\/terminal$/);
+    expect(screen.getByTestId("diagnostics-workspace-toggle")).toHaveTextContent(/Current diagnostics terminal: Personal workspace/i);
+
+    await user.click(screen.getByRole("button", { name: /Use Project Build Branch/i }));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(1));
+    const buildBranchSocketUrl = new URL(FakeWebSocket.instances[FakeWebSocket.instances.length - 1].url);
+    expect(buildBranchSocketUrl.pathname).toBe("/api/terminal");
+    expect(buildBranchSocketUrl.searchParams.get("cwd")).toBe(buildBranchPath);
+    expect(screen.getByTestId("diagnostics-workspace-toggle")).toHaveTextContent(/Current diagnostics terminal: Project Build Branch/i);
+
+    await user.click(screen.getByRole("button", { name: /Use Personal workspace/i }));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(2));
+    expect(FakeWebSocket.instances[FakeWebSocket.instances.length - 1].url).toMatch(/^ws:\/\/localhost(?::\d+)?\/api\/terminal$/);
+    expect(screen.getByTestId("diagnostics-workspace-toggle")).toHaveTextContent(/Current diagnostics terminal: Personal workspace/i);
+  });
+
+  it("debounces resize observer terminal refits to avoid ResizeObserver loop noise", async () => {
     const rafCallbacks: FrameRequestCallback[] = [];
     const requestAnimationFrameMock = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
       rafCallbacks.push(callback);
