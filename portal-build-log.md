@@ -55,3 +55,15 @@ Rewritten §3 from `PHASE_2_SECTION_3_REWRITE.md` is complete as the approved Sk
 | Automated validation | Passed | `pnpm check`, `pnpm test` with 23 files and 101 tests passing, and `pnpm build` completed successfully. Browser smoke loaded the OAuth-protected app shell; authenticated workspace UI remains covered by automated tests because the browser session was not logged into Manus OAuth. |
 
 Product Owner boundary: rewritten §3 is complete for review. §1A has not been started and must remain paused until Product Owner approval is received.
+
+## Phase 2 Rewritten §3 Approval Follow-up — Task ID and Chat Markdown Restoration
+The Product Owner approved rewritten §3 and identified two closeout corrections before §1A. The original rewritten §3 commit `650fbf94bd5620abaaa20febfe445c5e2778f19a` should be associated with task ID `[PORTAL-P2-S3-01]`; the original commit was not force-pushed or rewritten. A follow-up commit records this directive-compliance note and uses the required prefixed commit-message format for future continuity.
+
+| Follow-up area | Result | Evidence |
+|---|---|---|
+| Commit-message directive note | Corrected by follow-up | Original commit `650fbf9` remains intact; this build log now maps rewritten §3 to `[PORTAL-P2-S3-01]` and future commits must use `type(scope): description [TASK-ID]`. |
+| Assistant markdown rendering | Corrected by follow-up | `client/src/components/AIChatBox.tsx` restores Streamdown rendering for assistant messages so headings, lists, code blocks, and other Markdown are formatted in the chat UI. |
+| Test compatibility rationale | Corrected by follow-up | The temporary plain-text replacement had been made only to bypass a Vitest dependency issue where Streamdown imported KaTeX CSS through an externalized package. The durable fix keeps Streamdown and inlines Streamdown/KaTeX-related dependencies in `vitest.config.ts` so tests transform the CSS dependency instead of degrading runtime UX. |
+| Regression coverage | Added by follow-up | `server/section3.skills.contract.test.ts` now asserts Streamdown remains wired in the assistant chat component and the Vitest dependency-transform guard remains present. |
+
+Product Owner boundary remains unchanged: §1A has not been started and must remain paused until both follow-ups are validated and reported.

@@ -286,3 +286,7 @@
 - [x] Run rewritten §3 validation gate: `pnpm check`, `pnpm test` with no skipped tests, and `pnpm build`.
 - [x] Append rewritten §3 closeout evidence to `portal-build-log.md`.
 - [x] Commit and push rewritten §3 only, report standalone `Commit URL: https://github.com/viyo-ai/AI-API-Web-Portal-v2/commit/<full-SHA>`, then stop before §1A.
+
+- [x] §3 approval follow-up: append a build-log note documenting that commit 650fbf9 should be associated with task ID [PORTAL-P2-S3-01], then make a prefixed follow-up commit without force-pushing.
+- [x] §3 approval follow-up: restore markdown rendering for assistant messages in `AIChatBox.tsx` or implement an equivalent no-regression markdown renderer that passes tests and build.
+- [x] §3 approval follow-up: re-run `pnpm check`, `pnpm test`, and `pnpm build` before reporting the follow-up commit URL and remaining paused before §1A.

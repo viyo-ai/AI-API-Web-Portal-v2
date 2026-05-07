@@ -86,4 +86,12 @@ describe("rewritten Section 3 Skill Libraries contracts", () => {
     expect(skillsPanel).not.toContain("Build Target governance");
     expect(skillsPanel).not.toContain("Chat Wrapper");
   });
+
+  it("preserves Streamdown markdown rendering for assistant messages while keeping tests compatible with KaTeX CSS imports", () => {
+    const aiChatBox = readFileSync(path.resolve(process.cwd(), "client/src/components/AIChatBox.tsx"), "utf8");
+    const vitestConfig = readFileSync(path.resolve(process.cwd(), "vitest.config.ts"), "utf8");
+    expect(aiChatBox).toContain("import { Streamdown } from \"streamdown\"");
+    expect(aiChatBox).toContain("<Streamdown>{message.content}</Streamdown>");
+    expect(vitestConfig).toContain('inline: ["streamdown", "katex", "rehype-katex"]');
+  });
 });

@@ -15,5 +15,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["server/**/*.test.ts", "server/**/*.spec.ts", "client/src/**/*.test.ts", "client/src/**/*.test.tsx", "client/src/**/*.spec.ts", "client/src/**/*.spec.tsx"],
+    server: {
+      deps: {
+        inline: ["streamdown", "katex", "rehype-katex"],
+      },
+    },
   },
 });

@@ -4,6 +4,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { Loader2, Send, User, Sparkles } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
+import { Streamdown } from "streamdown";
 
 /**
  * Message type matching server-side LLM Message interface
@@ -63,7 +64,7 @@ export type AIChatBoxProps = {
  *
  * Features:
  * - Matches server-side Message interface for seamless integration
- * - Markdown-friendly pre-wrapped assistant rendering without browser-only CSS side effects
+ * - Markdown rendering with Streamdown
  * - Auto-scrolls to latest message
  * - Loading states
  * - Uses global theme colors from index.css
@@ -260,8 +261,8 @@ export function AIChatBox({
                       )}
                     >
                       {message.role === "assistant" ? (
-                        <div className="whitespace-pre-wrap text-sm leading-6">
-                          {message.content}
+                        <div className="prose prose-sm dark:prose-invert max-w-none">
+                          <Streamdown>{message.content}</Streamdown>
                         </div>
                       ) : (
                         <p className="whitespace-pre-wrap text-sm">
