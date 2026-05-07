@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Drawer, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -429,6 +430,10 @@ export default function Home() {
   const [wizardConnectionStatus, setWizardConnectionStatus] = useState<"untested" | "testing" | "ok" | "failed">("untested");
   const [wizardConnectionMessage, setWizardConnectionMessage] = useState("");
   const [showWizardAdvancedSettings, setShowWizardAdvancedSettings] = useState(false);
+  const [credentialsDrawerOpen, setCredentialsDrawerOpen] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
+  const [editingTaskTitle, setEditingTaskTitle] = useState("");
+  const [taskSortMode, setTaskSortMode] = useState<"recent" | "created">("recent");
   const [openedBuildBranch, setOpenedBuildBranch] = useState<any | null>(null);
   const [useBuildBranchDiagnosticsWorkspace, setUseBuildBranchDiagnosticsWorkspace] = useState(false);
   const [showThreadDetails, setShowThreadDetails] = useState(false);
@@ -447,7 +452,7 @@ export default function Home() {
   const globalUploadInputRef = useRef<HTMLInputElement | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const taskListInput = useMemo(() => ({ includeArchived: false, limit: 50 }), []);
+  const taskListInput = useMemo(() => ({ includeArchived: true, limit: 75 }), []);
   const tasksQuery = trpc.tasks.list.useQuery(taskListInput, { enabled: isAuthenticated });
   const tasks = tasksQuery.data ?? [];
 
@@ -477,6 +482,7 @@ export default function Home() {
 
   const createTask = trpc.tasks.create.useMutation();
   const updateTaskStatus = trpc.tasks.updateStatus.useMutation();
+  const renameTaskMutation = trpc.tasks.rename.useMutation();
   const submitMessage = trpc.orchestration.submitMessage.useMutation();
   const updateQueuedMessageMutation = trpc.orchestration.updateQueuedMessage.useMutation();
   const clearQueuedMessageMutation = trpc.orchestration.clearQueuedMessage.useMutation();
@@ -522,6 +528,9 @@ export default function Home() {
   const buildTargets = buildTargetsQuery.data ?? [];
   const alwaysRequireKimiApproval = approvalPreferenceQuery.data?.alwaysRequireKimiApproval !== false;
   const selectedBuildTarget = buildTargets.find((target) => target.id === selectedBuildTargetId) ?? buildTargets[0] ?? null;
+  const projectMemoryInput = useMemo(() => ({ buildTargetId: selectedBuildTarget?.id ?? 0, limit: 30 }), [selectedBuildTarget?.id]);
+  const projectMemoryQuery = trpc.projectMemory.list.useQuery(projectMemoryInput, { enabled: isAuthenticated && Boolean(selectedBuildTarget?.id) });
+  const projectMemories = projectMemoryQuery.data ?? [];
   const isBuildModeOpen = Boolean(selectedBuildTarget && openedBuildBranch);
   const diagnosticsBuildBranchPath = useBuildBranchDiagnosticsWorkspace && openedBuildBranch?.workspacePath ? openedBuildBranch.workspacePath : null;
   const diagnosticsWorkspaceLabel = diagnosticsBuildBranchPath ? "Project Build Branch" : "Personal workspace";
@@ -554,9 +563,15 @@ export default function Home() {
 
   const filteredTasks = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
-    if (!query) return tasks;
-    return tasks.filter((task) => `${task.title} ${task.summary ?? ""} ${task.status}`.toLowerCase().includes(query));
-  }, [tasks, searchTerm]);
+    const searchedTasks = query ? tasks.filter((task) => `${task.title} ${task.summary ?? ""} ${task.status}`.toLowerCase().includes(query)) : tasks;
+    return [...searchedTasks].sort((a, b) => {
+      const aTime = new Date(taskSortMode === "recent" ? a.updatedAt ?? a.createdAt : a.createdAt).getTime() || 0;
+      const bTime = new Date(taskSortMode === "recent" ? b.updatedAt ?? b.createdAt : b.createdAt).getTime() || 0;
+      return bTime - aTime || b.id - a.id;
+    });
+  }, [tasks, searchTerm, taskSortMode]);
+  const liveTasks = useMemo(() => filteredTasks.filter((task) => task.status !== "archived"), [filteredTasks]);
+  const archivedTasks = useMemo(() => filteredTasks.filter((task) => task.status === "archived"), [filteredTasks]);
 
   const fileExplorerGroups = useMemo(() => {
     const folders = new Map<string, TaskFileRecord[]>();
@@ -583,7 +598,7 @@ export default function Home() {
       .map((event) => ({ ...activityStepForEvent(event), id: event.id, status: event.status, createdAt: event.createdAt }));
   }, [events]);
 
-  const isMutating = createTask.isPending || updateTaskStatus.isPending || submitMessage.isPending || updateQueuedMessageMutation.isPending || clearQueuedMessageMutation.isPending || stopGenerationMutation.isPending || updateApprovalPreferenceMutation.isPending || approveKimiHandoffMutation.isPending || requestKimiHandoffRevisionMutation.isPending || cancelKimiHandoffMutation.isPending || createFileMetadata.isPending || uploadWorkspaceFileMutation.isPending || attachGlobalToTaskMutation.isPending || createBuildTargetMutation.isPending || createBuildBranchMutation.isPending || updateBuildTargetSettingsMutation.isPending || pushBuildBranchMutation.isPending || testBuildTargetConnectionMutation.isPending || analyzeWizardMutation.isPending || completeWizardMutation.isPending;
+  const isMutating = createTask.isPending || updateTaskStatus.isPending || renameTaskMutation.isPending || submitMessage.isPending || updateQueuedMessageMutation.isPending || clearQueuedMessageMutation.isPending || stopGenerationMutation.isPending || updateApprovalPreferenceMutation.isPending || approveKimiHandoffMutation.isPending || requestKimiHandoffRevisionMutation.isPending || cancelKimiHandoffMutation.isPending || createFileMetadata.isPending || uploadWorkspaceFileMutation.isPending || attachGlobalToTaskMutation.isPending || createBuildTargetMutation.isPending || createBuildBranchMutation.isPending || updateBuildTargetSettingsMutation.isPending || pushBuildBranchMutation.isPending || testBuildTargetConnectionMutation.isPending || analyzeWizardMutation.isPending || completeWizardMutation.isPending;
 
   async function refreshWorkspace() {
     await Promise.all([
@@ -594,6 +609,7 @@ export default function Home() {
       utils.files.listAll.invalidate(),
       utils.files.listGlobal.invalidate(),
       utils.memory.list.invalidate(),
+      utils.projectMemory.list.invalidate(),
       utils.credentials.status.invalidate(),
       utils.orchestration.kimiApprovalPreference.invalidate(),
       utils.filesystem.tree.invalidate(),
@@ -983,6 +999,37 @@ export default function Home() {
   async function handleRefreshCredentials() {
     await credentialsRefreshMutation.mutateAsync({ providers: ["claude", "kimi"] });
     await utils.credentials.status.invalidate();
+  }
+
+  async function handleRefreshCredential(provider: "claude" | "kimi") {
+    await credentialsRefreshMutation.mutateAsync({ providers: [provider] });
+    await utils.credentials.status.invalidate();
+  }
+
+  function beginTaskRename(task: { id: number; title: string }) {
+    setEditingTaskId(task.id);
+    setEditingTaskTitle(task.title);
+  }
+
+  async function handleRenameTask(taskId: number) {
+    const cleanTitle = editingTaskTitle.trim();
+    if (!cleanTitle) {
+      toast.warning("Task title is required.");
+      return;
+    }
+    await renameTaskMutation.mutateAsync({ taskId, title: cleanTitle });
+    setEditingTaskId(null);
+    setEditingTaskTitle("");
+    await refreshWorkspace();
+  }
+
+  function draftArchitectOnboardingMessage(kind: "setup" | "credentials") {
+    const draft = kind === "credentials"
+      ? "Help me connect credentials using env var names only. Show me what is connected and what needs testing."
+      : "Architect, help me set up this project conversationally. Ask for the repo, branch, validation commands, and env var names one step at a time.";
+    setComposerText(draft);
+    setRouteMode("auto");
+    setWorkspaceNotice("Architect draft added to the composer. Review it, then send it when ready.");
   }
 
   async function createTaskRecordOnly() {
@@ -1545,19 +1592,22 @@ export default function Home() {
               ))
             )}
           </div>
-          <div className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">
-            <PanelLeft className="h-3.5 w-3.5" /> Live tasks
+          <div className="mb-2 flex items-center justify-between gap-2 px-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">
+            <span className="inline-flex items-center gap-2"><PanelLeft className="h-3.5 w-3.5" /> Live tasks</span>
+            <Button type="button" variant="outline" onClick={() => setTaskSortMode((mode) => mode === "recent" ? "created" : "recent")} className="h-7 rounded-full border-[#d9d8d1] bg-white px-2.5 text-[11px] normal-case tracking-normal text-[#55554f]" data-testid="section1a-conv-task-sort">
+              Sort: {taskSortMode === "recent" ? "Most recent" : "Created"}
+            </Button>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-2" data-testid="section1a-conv-live-tasks">
             {tasksQuery.isLoading ? (
               <div className="rounded-2xl border border-[#d9d8d1] bg-white p-4 text-sm text-[#6d6d65]">Loading tasks...</div>
-            ) : filteredTasks.length === 0 ? (
+            ) : liveTasks.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white/70 p-4 text-sm leading-6 text-[#6d6d65]">
                 No live tasks yet. Create one from the title and task message to establish Claude/Kimi coordination context.
                 <Button type="button" onClick={handleCreateTask} disabled={isMutating} className="mt-3 w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">Create first task</Button>
               </div>
             ) : (
-              filteredTasks.map((task) => (
+              liveTasks.map((task) => (
                 <article
                   key={task.id}
                   data-testid="left-nav-task-card"
@@ -1565,7 +1615,11 @@ export default function Home() {
                 >
                   <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
                     <button type="button" onClick={() => setSelectedTaskId(task.id)} className="min-w-0 overflow-hidden text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200">
-                      <p className="truncate text-sm font-semibold text-[#2c2c28]">{task.title}</p>
+                      {editingTaskId === task.id ? (
+                        <Input value={editingTaskTitle} onChange={(event) => setEditingTaskTitle(event.target.value)} onClick={(event) => event.stopPropagation()} aria-label={`Rename ${task.title}`} className="h-8 rounded-xl border-[#d9d8d1] bg-white text-sm font-semibold" />
+                      ) : (
+                        <p className="truncate text-sm font-semibold text-[#2c2c28]">{task.title}</p>
+                      )}
                     </button>
                     <Badge variant="outline" className={`max-w-[96px] shrink-0 truncate rounded-full text-[10px] ${statusTone[task.status] ?? statusTone.active}`}>{task.status}</Badge>
                   </div>
@@ -1573,7 +1627,15 @@ export default function Home() {
                     <p className="line-clamp-2 text-xs leading-5 text-[#66665f]">{ownerFacingText(task.summary) || "No summary recorded yet."}</p>
                     <p className="mt-2 truncate text-[11px] text-[#9a998f]">Updated {compactDate(task.updatedAt)}</p>
                   </button>
-                  <div className="mt-3 flex min-w-0 justify-end">
+                  <div className="mt-3 flex min-w-0 flex-wrap justify-end gap-2">
+                    {editingTaskId === task.id ? (
+                      <>
+                        <Button type="button" variant="outline" size="sm" onClick={() => void handleRenameTask(task.id)} disabled={renameTaskMutation.isPending} className="h-8 rounded-full border-emerald-200 bg-emerald-50 px-3 text-[11px] text-emerald-900">Save</Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => { setEditingTaskId(null); setEditingTaskTitle(""); }} className="h-8 rounded-full border-[#d9d8d1] bg-white px-3 text-[11px] text-[#66665f]">Cancel</Button>
+                      </>
+                    ) : (
+                      <Button type="button" variant="outline" size="sm" onClick={() => beginTaskRename(task)} className="h-8 rounded-full border-[#d9d8d1] bg-white px-3 text-[11px] text-[#66665f] hover:text-[#2c2c28]" data-testid="section1a-conv-task-rename">Rename</Button>
+                    )}
                     <Button
                       type="button"
                       variant="outline"
@@ -1590,11 +1652,53 @@ export default function Home() {
               ))
             )}
           </div>
+          <div className="mt-5 space-y-2" data-testid="section1a-conv-archived-tasks">
+            <div className="px-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">Archived tasks</div>
+            {archivedTasks.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white/70 p-3 text-xs leading-5 text-[#6d6d65]">No archived tasks match this search.</div>
+            ) : (
+              archivedTasks.map((task) => (
+                <button key={task.id} type="button" onClick={() => setSelectedTaskId(task.id)} className="w-full rounded-2xl border border-transparent bg-white/40 p-3 text-left opacity-80 hover:bg-white/70">
+                  <div className="flex min-w-0 items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[#2c2c28]">{task.title}</p>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#66665f]">{ownerFacingText(task.summary) || "No summary recorded yet."}</p>
+                    </div>
+                    <Badge variant="outline" className={`max-w-[96px] shrink-0 truncate rounded-full text-[10px] ${statusTone[task.status] ?? statusTone.archived}`}>{task.status}</Badge>
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
 
           <div className="mt-6 mb-2 flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">
             <Brain className="h-3.5 w-3.5" /> Global memory
           </div>
           <div className="space-y-2 pb-4">
+            <div className="rounded-2xl border border-indigo-100 bg-indigo-50/80 p-3" data-testid="section1a-conv-project-memory-viewer">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-indigo-950">Project Memory</p>
+                <Badge variant="outline" className="rounded-full border-indigo-200 bg-white text-[10px] text-indigo-800">{selectedBuildTarget ? selectedBuildTarget.name : "No project"}</Badge>
+              </div>
+              <p className="mt-1 text-[11px] leading-4 text-indigo-900/80">Scoped to the selected project only. Cross-project context is not shown here.</p>
+              <div className="mt-2 space-y-2">
+                {!selectedBuildTarget ? (
+                  <p className="rounded-xl border border-dashed border-indigo-200 bg-white/70 p-2 text-[11px] leading-4 text-indigo-900/70">Select an Advanced Setup project before project-scoped memory appears.</p>
+                ) : projectMemories.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-indigo-200 bg-white/70 p-2 text-[11px] leading-4 text-indigo-900/70">No project memory is saved for this project yet.</p>
+                ) : (
+                  projectMemories.slice(0, 5).map((memory) => (
+                    <div key={memory.id} className="rounded-xl border border-indigo-100 bg-white p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate text-[11px] font-semibold text-[#30302b]">{memory.key}</p>
+                        <Badge variant="outline" className="rounded-full text-[10px]">Project</Badge>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-[#74746c]">{memory.value}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
             {memories.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white/70 p-4 text-xs leading-5 text-[#6d6d65]">
                 Durable memory is empty. Decisions, features, research, and past-task learnings will appear here only after real records exist.
@@ -1719,6 +1823,14 @@ export default function Home() {
               ))}
               <Button variant="outline" onClick={() => logout()} className="rounded-full border-[#d9d8d1] bg-white">Logout</Button>
             </div>
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" aria-label="Open provider status drawer" onClick={() => setCredentialsDrawerOpen(true)} className="h-8 rounded-full border-violet-200 bg-violet-50 px-3 text-xs text-violet-900" data-testid="section1a-conv-credentials-drawer-open">
+                <LockKeyhole className="mr-1.5 h-3.5 w-3.5" /> Credentials drawer
+              </Button>
+              <Button type="button" variant="outline" onClick={() => draftArchitectOnboardingMessage("setup")} className="h-8 rounded-full border-indigo-200 bg-indigo-50 px-3 text-xs text-indigo-900" data-testid="section1a-conv-architect-start">
+                <Bot className="mr-1.5 h-3.5 w-3.5" /> Ask Architect
+              </Button>
+            </div>
             {credentials.some((credential: { configured: boolean }) => !credential.configured) ? (
               <p className="max-w-xl text-right text-[11px] leading-4 text-[#77766e]">
                 {credentials.filter((credential: { configured: boolean }) => !credential.configured).map((credential: { reason?: string }) => credential.reason).filter(Boolean).join(" ")}
@@ -1733,6 +1845,22 @@ export default function Home() {
           <>
         <div className="min-h-0 flex-1 overflow-y-auto p-5" data-testid="center-task-thread-scroll">
           <div className="mx-auto max-w-4xl space-y-4">
+            <div className="rounded-3xl border border-indigo-100 bg-gradient-to-br from-white to-indigo-50/70 p-4 shadow-sm" data-testid="section1a-conv-onboarding-card">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-indigo-700">
+                    <Bot className="h-4 w-4" /> Architect-in-Portal
+                  </div>
+                  <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-[#20201d]">Conversational project onboarding</h2>
+                  <p className="mt-1 text-sm leading-6 text-[#5f5e57]">Use the task composer for setup, credentials, and onboarding questions. Build turns still pause for the same §9 review before Kimi runs.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={() => draftArchitectOnboardingMessage("setup")} className="rounded-full border-indigo-200 bg-white text-xs text-indigo-900">Start setup chat</Button>
+                  <Button type="button" variant="outline" aria-label="Draft provider setup question" onClick={() => draftArchitectOnboardingMessage("credentials")} className="rounded-full border-violet-200 bg-white text-xs text-violet-900">Check credentials</Button>
+                  <Button type="button" variant="outline" aria-label="Open form wizard escape hatch" onClick={() => setIsWizardMode(false)} className="rounded-full border-[#d9d8d1] bg-white text-xs text-[#42423c]" data-testid="section1a-conv-advanced-setup-escape">Advanced Setup</Button>
+                </div>
+              </div>
+            </div>
             {selectedTaskId ? (
               <div data-testid="handoff-indicator" className="flex flex-wrap items-center gap-2 rounded-2xl border border-sky-100 bg-sky-50/80 px-3 py-2 text-xs leading-5 text-[#4f5f68]">
                 <Sparkles className="h-4 w-4 text-sky-600" />
@@ -1979,7 +2107,39 @@ export default function Home() {
                 {submitMessage.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : hasActiveGeneration ? <span className="text-xs font-semibold">Queue</span> : <SendHorizontal className="h-4 w-4" />}
               </Button>
             </div>
-            <AlertDialog open={stopConfirmOpen} onOpenChange={setStopConfirmOpen}>
+            <Drawer open={credentialsDrawerOpen} onOpenChange={setCredentialsDrawerOpen} direction="right">
+        <DrawerContent className="bg-[#fbfaf7] text-[#30302b]" data-testid="section1a-conv-credentials-drawer">
+          <DrawerHeader>
+            <DrawerTitle>Credentials Drawer</DrawerTitle>
+            <DrawerDescription>Token values stay in Manus env vars. This view shows provider status and env var names only.</DrawerDescription>
+          </DrawerHeader>
+          <div className="flex-1 space-y-3 overflow-y-auto px-4 pb-4">
+            {credentials.map((credential: { provider: string; configured: boolean; status: string; reason?: string; lastCheckedAt?: number | string | Date | null; envVarName?: string | null }) => (
+              <div key={credential.provider} className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="section1a-conv-credential-row">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold capitalize text-[#30302b]">{credential.provider}</p>
+                    <p className="mt-1 font-mono text-[11px] text-[#6d6d65]">{credential.envVarName ?? credential.provider.toUpperCase() + "_API_KEY"}</p>
+                  </div>
+                  <Badge variant="outline" className={credential.configured ? "rounded-full border-emerald-200 bg-emerald-50 text-[10px] text-emerald-800" : "rounded-full border-rose-200 bg-rose-50 text-[10px] text-rose-800"}>{credential.status}</Badge>
+                </div>
+                {credential.reason ? <p className="mt-2 text-xs leading-5 text-[#6d6d65]">{credential.reason}</p> : null}
+                <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-[#77766e]">
+                  <span>Last tested: {compactDate(credential.lastCheckedAt)}</span>
+                  <Button type="button" variant="outline" onClick={() => { if (credential.provider === "claude" || credential.provider === "kimi") void handleRefreshCredential(credential.provider); }} disabled={credentialsRefreshMutation.isPending || (credential.provider !== "claude" && credential.provider !== "kimi")} className="h-7 rounded-full border-[#d9d8d1] bg-white px-2.5 text-[11px]">Test now</Button>
+                </div>
+              </div>
+            ))}
+            {credentials.length === 0 ? <p className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white/70 p-3 text-xs leading-5 text-[#77766e]">No credential rows are available yet.</p> : null}
+          </div>
+          <DrawerFooter>
+            <Button type="button" variant="outline" aria-label="Open form wizard from drawer" onClick={() => { setCredentialsDrawerOpen(false); setIsWizardMode(false); }} className="rounded-xl border-[#d9d8d1] bg-white text-xs">Advanced Setup</Button>
+            <Button type="button" onClick={() => setCredentialsDrawerOpen(false)} className="rounded-xl bg-[#242420] text-xs text-white hover:bg-black">Close drawer</Button>
+          </DrawerFooter>
+        </DrawerContent>
+      </Drawer>
+
+      <AlertDialog open={stopConfirmOpen} onOpenChange={setStopConfirmOpen}>
               <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>Stop and discard this plan?</AlertDialogTitle>

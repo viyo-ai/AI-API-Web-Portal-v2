@@ -372,3 +372,30 @@
 - [x] §8 implementation: Implement Composer Queue UI polish and Stop button label adjustment against all ten INV-S8-XX invariants, UI-only unless the directive proves otherwise.
 - [x] §8 validation: Run all four required validation gates, resolve scoped failures, and verify the final Manus publish gate is available after checkpoint.
 - [x] §8 closeout: Commit and push with `[PORTAL-P3-S8-XX]` conventional prefixes, then hold for Product Owner sign-off.
+
+- [x] §1A-FU-05: Produce directive ingestion evidence at `.taskmaster/docs/ingestion-evidence/PORTAL_PHASE_3_DIRECTIVE-S1A-FU-05-ingestion.md` before code changes, including hard-requirement IDs, invariant map, surface notes, and conservative verdict
+- [ ] §1A-FU-05: Move Project Setup Wizard out of the sidebar into desktop Dialog and mobile Sheet while preserving all §1A-FU-04 behavior and copy
+- [ ] §1A-FU-05: Replace cramped wizard step pills with desktop horizontal labeled stepper and mobile `Step N of 4: <name>` indicator without copy changes
+- [ ] §1A-FU-05: Polish Composer responsive control bar and reserve Stop button width for `Stop and discard plan` without altering queue mechanics
+- [ ] §1A-FU-05: Elevate Approval Card styling and enforce Approve/default, Request revision/outline, Cancel handoff/ghost-or-destructive button variants without flow changes
+- [ ] §1A-FU-05: Implement responsive workspace behavior for ≥1280px three-panel, 768–1279px two-panel plus Inspector Sheet, and <768px single panel plus Tasks/Thread/Inspector bottom tab bar
+- [ ] §1A-FU-05: Group Task Inspector Files tab sections with Task folder and Attached Global Files open by default, help disclosures collapsed, and Diagnostics tab untouched
+- [ ] §1A-FU-05: Fix Skills view overlap and add skeleton empty/loading placeholders while preserving the existing skill action dropdown
+- [ ] §1A-FU-05: Tighten Sidebar, Center Header, Mobile touch targets, focus states, and Made-with-Manus branding badge positioning without vocabulary changes
+- [ ] §1A-FU-05: Add visual invariant tests for INV-S1A-FU-05-01 through INV-S1A-FU-05-10 without modifying locked functional tests
+- [ ] §1A-FU-05: Run validation gates: `pnpm check`, focused Home behavior tests, focused section1 build-targets contract tests, full `pnpm test --run`, and `pnpm build`
+- [ ] §1A-FU-05: Produce closeout proofs for zero copy diff, zero backend/server/drizzle diff, and zero dependency/package diff
+- [ ] §1A-FU-05: Capture closeout screenshots at 1440px, 1024px, and 390px for Project Setup Wizard, Composer, Approval Card, Three-Panel Layout, Task Inspector, Skills View, Sidebar, Center Header, Mobile Layout, and Branding Badge
+- [ ] §1A-FU-05: Commit and push with `[PORTAL-P3-S1A-FU-05-XX]` prefix, save Manus Project checkpoint, and hold for Product Owner sign-off
+
+- [x] §1A-CONV: Produce directive ingestion evidence at `.taskmaster/docs/ingestion-evidence/PORTAL_PHASE_3_DIRECTIVE-S1A-CONV-ingestion.md` before code changes, including hard-requirement IDs, invariant map, surface notes, and conservative verdict
+- [x] §1A-CONV: Keep existing form wizard as Advanced Setup escape hatch without removing §1A-FU-04 paste-detection, connection-test gating, or plain-English errors
+- [x] §1A-CONV: Add additive `project_memory` schema and migration `0013_project_memory.sql` with per-project query isolation and no existing-table changes
+- [x] §1A-CONV: Implement Architect Claude role module with system prompt and intent-detection prompt for setup, credentials, and onboarding only
+- [x] §1A-CONV: Route setup, credentials, and onboarding composer intents to Architect while preserving existing Auto/Kimi/Claude build routing, §8 queue mechanics, and §9 approval gate
+- [x] §1A-CONV: Implement conversational onboarding and credential-management flows using env var names only and never token values
+- [x] §1A-CONV: Add Credentials Drawer with read-only credential rows, status pills, last-tested timestamps, Test now action, and Advanced Setup link
+- [x] §1A-CONV: Add inline task rename, most-recently-used task sorting, live/archived sections, and no task slug or ID changes
+- [x] §1A-CONV: Add read-only Project Memory UI viewer scoped to selected Project and preserve Diagnostics tab unchanged
+- [x] §1A-CONV: Add focused behavioral and contract tests for all ten invariants without modifying locked functional tests
+- [x] §1A-CONV: Run all seven validation gates, generate closeout proofs, commit with `[PORTAL-P3-S1A-CONV-XX]`, push, and create a Manus Project publish gate

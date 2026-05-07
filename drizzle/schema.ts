@@ -241,6 +241,33 @@ export const globalMemory = mysqlTable(
   })
 );
 
+export const projectMemory = mysqlTable(
+  "project_memory",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    ownerUserId: int("ownerUserId").notNull(),
+    buildTargetId: int("buildTargetId").notNull(),
+    key: varchar("key", { length: 160 }).notNull(),
+    value: longtext("value").notNull(),
+    createdAt: bigint("createdAt", { mode: "number" }).notNull(),
+    updatedAt: bigint("updatedAt", { mode: "number" }).notNull(),
+  },
+  table => ({
+    buildTargetKeyUnique: uniqueIndex("project_memory_build_target_key_unique").on(
+      table.buildTargetId,
+      table.key
+    ),
+    ownerBuildTargetIdx: index("project_memory_owner_build_target_idx").on(
+      table.ownerUserId,
+      table.buildTargetId
+    ),
+    buildTargetUpdatedIdx: index("project_memory_build_target_updated_idx").on(
+      table.buildTargetId,
+      table.updatedAt
+    ),
+  })
+);
+
 export const globalFiles = mysqlTable(
   "global_files",
   {
@@ -578,6 +605,8 @@ export type OrchestrationTurn = typeof orchestrationTurns.$inferSelect;
 export type InsertOrchestrationTurn = typeof orchestrationTurns.$inferInsert;
 export type GlobalMemory = typeof globalMemory.$inferSelect;
 export type InsertGlobalMemory = typeof globalMemory.$inferInsert;
+export type ProjectMemory = typeof projectMemory.$inferSelect;
+export type InsertProjectMemory = typeof projectMemory.$inferInsert;
 export type GlobalFile = typeof globalFiles.$inferSelect;
 export type InsertGlobalFile = typeof globalFiles.$inferInsert;
 export type TaskGlobalFileLink = typeof taskGlobalFileLinks.$inferSelect;

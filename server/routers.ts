@@ -51,6 +51,7 @@ import {
   listGlobalFileLinksForTask,
   listGlobalFilesForOwner,
   listMemoryByCategory,
+  listProjectMemoryForTarget,
   linkTaskToBuildTarget,
   listExpiredAwaitingApprovalTurns,
   listTaskEvents,
@@ -78,6 +79,7 @@ import {
   updateTaskStatus,
   updateTurnApprovalState,
   updateUserPreference,
+  upsertProjectMemoryForTarget,
   createSkill,
   deleteSkill,
   duplicateSkill,
@@ -129,6 +131,14 @@ import {
   KIMI_OWNER_MODEL_LABEL,
   resolveEffectiveRoute,
 } from "./wrapperLLM";
+import {
+  buildArchitectReply,
+  containsTokenLikeValue,
+  detectArchitectIntent,
+  loadArchitectIntentPrompt,
+  loadArchitectSystemPrompt,
+  redactTokenLikeValues,
+} from "./architectLLM";
 import { requestTurnStop } from "./wrapperLLM/stop-registry";
 import {
   loadGovernanceForTask,
@@ -1086,6 +1096,90 @@ function serializeJson(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
+async function appendArchitectTurn(params: {
+  task: OwnedTask;
+  ownerUserId: number;
+  userContent: string;
+}) {
+  const intent = detectArchitectIntent(params.userContent);
+  if (!intent.shouldRouteToArchitect) return false;
+
+  const safeUserContent = redactTokenLikeValues(params.userContent);
+  if (safeUserContent !== params.userContent) {
+    await appendTaskEvent({
+      taskId: params.task.id,
+      ownerUserId: params.ownerUserId,
+      actor: "system",
+      eventType: "credential_status",
+      status: "blocked",
+      content:
+        "A token-like value was detected and redacted. Token values stay in Manus environment variables; Architect uses env var names only.",
+      metadataJson: serializeJson({
+        architectRole: "Claude Opus 4.7",
+        intent,
+        tokenValueRejected: true,
+      }),
+    });
+  }
+
+  const reply = buildArchitectReply({
+    message: params.userContent,
+    intent,
+    hasBuildTarget: Boolean(params.task.buildTargetId),
+  });
+
+  await appendTaskEvent({
+    taskId: params.task.id,
+    ownerUserId: params.ownerUserId,
+    actor: "system",
+    eventType: "route_decision",
+    status: "succeeded",
+    content: intent.reason,
+    metadataJson: serializeJson({
+      architectRole: "Claude Opus 4.7",
+      routedToArchitect: true,
+      intent,
+      tokenValueRejected: containsTokenLikeValue(params.userContent),
+    }),
+  });
+
+  await appendTaskEvent({
+    taskId: params.task.id,
+    ownerUserId: params.ownerUserId,
+    actor: "system",
+    eventType: "message",
+    status: "succeeded",
+    content: reply,
+    metadataJson: serializeJson({
+      architectRole: "Claude Opus 4.7",
+      routedToArchitect: true,
+      intent,
+      systemPromptPath: "server/prompts/architect.system.md",
+      intentPromptPath: "server/prompts/architect.intent.md",
+    }),
+  });
+
+  if (params.task.buildTargetId) {
+    await upsertProjectMemoryForTarget({
+      ownerUserId: params.ownerUserId,
+      buildTargetId: params.task.buildTargetId,
+      key: "architect.last_intent",
+      value: JSON.stringify(
+        {
+          intent: intent.intent,
+          confidence: intent.confidence,
+          reason: intent.reason,
+          lastMessage: safeUserContent.slice(0, 1000),
+        },
+        null,
+        2
+      ),
+    });
+  }
+
+  return true;
+}
+
 async function requireOwnedTask(taskId: number, ownerUserId: number) {
   const task = await getTaskForOwner(taskId, ownerUserId);
   if (!task) {
@@ -1654,13 +1748,23 @@ export const appRouter = router({
           actor: "user",
           eventType: "message",
           status: "succeeded",
-          content: userContent,
+          content: redactTokenLikeValues(userContent),
           metadataJson: serializeJson({
             queued: false,
             routeMode: selectedRoute,
             forcedByTag: override.forcedByTag,
+            tokenValueRedacted: containsTokenLikeValue(userContent),
           }),
         });
+
+        const handledByArchitect = await appendArchitectTurn({
+          task,
+          ownerUserId: ctx.user.id,
+          userContent,
+        });
+        if (handledByArchitect) {
+          return getTaskThread(task.id, ctx.user.id);
+        }
 
         await runGenerationTurn({
           task,
@@ -1912,6 +2016,45 @@ export const appRouter = router({
           input.blocked ? "blocked" : "error"
         );
         return { success: true } as const;
+      }),
+  }),
+  architect: router({
+    prompts: protectedProcedure.query(async () => ({
+      systemPrompt: loadArchitectSystemPrompt(),
+      intentPrompt: loadArchitectIntentPrompt(),
+    })),
+    detectIntent: protectedProcedure
+      .input(z.object({ message: z.string().trim().min(1).max(20000) }))
+      .query(async ({ input }) => {
+        const decision = detectArchitectIntent(input.message);
+        return {
+          ...decision,
+          tokenValueRejected: containsTokenLikeValue(input.message),
+          sanitizedMessage: redactTokenLikeValues(input.message),
+        };
+      }),
+  }),
+  projectMemory: router({
+    list: protectedProcedure
+      .input(
+        z.object({
+          buildTargetId: z.number().int().positive(),
+          limit: z.number().int().min(1).max(100).default(50),
+        })
+      )
+      .query(async ({ ctx, input }) => {
+        const target = await getBuildTargetForOwner(
+          input.buildTargetId,
+          ctx.user.id
+        );
+        if (!target) {
+          throw new Error("Project not found or not owned by the authenticated user");
+        }
+        return listProjectMemoryForTarget(
+          ctx.user.id,
+          input.buildTargetId,
+          input.limit
+        );
       }),
   }),
   memory: router({

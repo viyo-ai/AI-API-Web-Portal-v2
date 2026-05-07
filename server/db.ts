@@ -6,12 +6,14 @@ import {
   wizardSessions,
   credentialStatusSnapshots,
   globalMemory,
+  projectMemory,
   globalFiles,
   InsertBuildBranch,
   InsertBuildTarget,
   InsertWizardSession,
   InsertCredentialStatusSnapshot,
   InsertGlobalMemory,
+  InsertProjectMemory,
   InsertGlobalFile,
   InsertTaskGlobalFileLink,
   InsertOrchestrationTurn,
@@ -961,6 +963,93 @@ export async function linkMemoryToTask(
         eq(globalMemory.ownerUserId, ownerUserId)
       )
     );
+}
+
+export async function listProjectMemoryForTarget(
+  ownerUserId: number,
+  buildTargetId: number,
+  limit = 50
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for project memory");
+
+  return db
+    .select()
+    .from(projectMemory)
+    .where(
+      and(
+        eq(projectMemory.ownerUserId, ownerUserId),
+        eq(projectMemory.buildTargetId, buildTargetId)
+      )
+    )
+    .orderBy(desc(projectMemory.updatedAt))
+    .limit(limit);
+}
+
+export async function upsertProjectMemoryForTarget(values: {
+  ownerUserId: number;
+  buildTargetId: number;
+  key: string;
+  value: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for project memory");
+
+  const key = values.key.trim().slice(0, 160);
+  const value = values.value.trim();
+  if (!key) throw new Error("Project memory key is required");
+  if (!value) throw new Error("Project memory value is required");
+
+  const timestamp = nowMs();
+  const existing = await db
+    .select()
+    .from(projectMemory)
+    .where(
+      and(
+        eq(projectMemory.ownerUserId, values.ownerUserId),
+        eq(projectMemory.buildTargetId, values.buildTargetId),
+        eq(projectMemory.key, key)
+      )
+    )
+    .limit(1);
+
+  if (existing[0]) {
+    await db
+      .update(projectMemory)
+      .set({ value, updatedAt: timestamp })
+      .where(
+        and(
+          eq(projectMemory.ownerUserId, values.ownerUserId),
+          eq(projectMemory.buildTargetId, values.buildTargetId),
+          eq(projectMemory.key, key)
+        )
+      );
+  } else {
+    const insertValues: InsertProjectMemory = {
+      ownerUserId: values.ownerUserId,
+      buildTargetId: values.buildTargetId,
+      key,
+      value,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    await db.insert(projectMemory).values(insertValues);
+  }
+
+  const result = await db
+    .select()
+    .from(projectMemory)
+    .where(
+      and(
+        eq(projectMemory.ownerUserId, values.ownerUserId),
+        eq(projectMemory.buildTargetId, values.buildTargetId),
+        eq(projectMemory.key, key)
+      )
+    )
+    .limit(1);
+
+  if (!result[0]) throw new Error("Failed to save project memory");
+  return result[0];
 }
 
 export async function createTaskFile(

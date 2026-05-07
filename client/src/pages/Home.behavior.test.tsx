@@ -10,6 +10,7 @@ const logoutMock = vi.fn();
 const invalidateMock = vi.fn(async () => undefined);
 const createTaskMock = vi.fn();
 const updateTaskStatusMock = vi.fn();
+const renameTaskMock = vi.fn();
 const submitMessageMock = vi.fn();
 const updateQueuedMessageMock = vi.fn();
 const clearQueuedMessageMock = vi.fn();
@@ -97,7 +98,8 @@ const sampleTask = {
   archivedAt: null,
 };
 
-let mockTasks: Array<typeof sampleTask> = [sampleTask];
+type MockTask = Omit<typeof sampleTask, "archivedAt"> & { archivedAt: number | null };
+let mockTasks: Array<MockTask> = [sampleTask];
 let mockThread: unknown = {
   task: sampleTask,
   activeTurn: null,
@@ -143,9 +145,10 @@ let mockAttachedGlobalFiles: Array<{ id: number; taskId: number; globalFileId: n
 let mockMemory: Array<{ id: number; title: string; category: string; content: string }> = [
   { id: 88, title: "No silent fallback", category: "decision", content: "Missing Claude or Kimi credentials must block explicitly." },
 ];
-let mockCredentialStates = [
+let mockProjectMemory: Array<{ id: number; ownerUserId: number; buildTargetId: number; key: string; value: string; source: string; createdAt: number; updatedAt: number }> = [];
+let mockCredentialStates: Array<{ provider: string; configured: boolean; status: string; reason: string; envVarName?: string; lastCheckedAt?: number }> = [
   { provider: "claude", configured: false, status: "missing", reason: "Missing CLAUDE_API_KEY." },
-  { provider: "kimi", configured: true, status: "configured", reason: "Cloudflare Workers AI credentials are present." },
+  { provider: "kimi", configured: true, status: "ready", reason: "KIMI_API_KEY configured." },
 ];
 let mockKimiApprovalPreference = { ownerUserId: 42, alwaysRequireKimiApproval: true, createdAt: 1777998000000, updatedAt: 1777998000000 };
 let mockBuildTargets: Array<{
@@ -194,6 +197,7 @@ vi.mock("@/lib/trpc", () => ({
       tasks: { list: { invalidate: invalidateMock }, thread: { invalidate: invalidateMock } },
       files: { listForTask: { invalidate: invalidateMock }, listGlobalForTask: { invalidate: invalidateMock }, listAll: { invalidate: invalidateMock }, listGlobal: { invalidate: invalidateMock } },
       memory: { list: { invalidate: invalidateMock } },
+      projectMemory: { list: { invalidate: invalidateMock } },
       credentials: { status: { invalidate: invalidateMock } },
       filesystem: { tree: { invalidate: invalidateMock }, read: { invalidate: invalidateMock } },
       buildTargets: { list: { invalidate: invalidateMock }, get: { invalidate: invalidateMock }, testConnection: { invalidate: invalidateMock }, updateSettings: { invalidate: invalidateMock }, analyzeWizard: { invalidate: invalidateMock }, completeWizard: { invalidate: invalidateMock } },
@@ -213,6 +217,12 @@ vi.mock("@/lib/trpc", () => ({
       updateStatus: {
         useMutation: () => ({
           mutateAsync: updateTaskStatusMock,
+          isPending: false,
+        }),
+      },
+      rename: {
+        useMutation: () => ({
+          mutateAsync: renameTaskMock,
           isPending: false,
         }),
       },
@@ -259,6 +269,9 @@ vi.mock("@/lib/trpc", () => ({
     },
     memory: {
       list: { useQuery: () => ({ data: mockMemory, isLoading: false }) },
+    },
+    projectMemory: {
+      list: { useQuery: () => ({ data: mockProjectMemory, isLoading: false }) },
     },
     filesystem: {
       tree: { useQuery: () => ({ data: { name: "workspace", relativePath: "", type: "directory", children: [] }, isLoading: false, refetch: filesystemTreeRefetchMock }) },
@@ -339,6 +352,11 @@ beforeAll(() => {
   });
   Object.defineProperty(globalThis, "WebSocket", { value: FakeWebSocket, writable: true });
   Object.defineProperty(window, "WebSocket", { value: FakeWebSocket, writable: true });
+  Object.defineProperty(window.Element.prototype, "setPointerCapture", { value: vi.fn(), writable: true });
+  Object.defineProperty(window.Element.prototype, "releasePointerCapture", { value: vi.fn(), writable: true });
+  Object.defineProperty(window.HTMLElement.prototype, "setPointerCapture", { value: vi.fn(), writable: true });
+  Object.defineProperty(window.HTMLElement.prototype, "releasePointerCapture", { value: vi.fn(), writable: true });
+
 });
 
 beforeEach(() => {
@@ -346,6 +364,7 @@ beforeEach(() => {
   invalidateMock.mockClear();
   createTaskMock.mockReset();
   updateTaskStatusMock.mockReset();
+  renameTaskMock.mockReset();
   submitMessageMock.mockReset();
   updateQueuedMessageMock.mockReset();
   clearQueuedMessageMock.mockReset();
@@ -371,6 +390,7 @@ beforeEach(() => {
   resizeObserverCallbacks = [];
   createTaskMock.mockResolvedValue({ task: { ...sampleTask, id: 19, title: "Created task" }, events: [], activeTurn: null });
   updateTaskStatusMock.mockResolvedValue({ ...sampleTask, status: "archived" });
+  renameTaskMock.mockResolvedValue({ ...sampleTask, title: "Renamed task" });
   submitMessageMock.mockResolvedValue(mockThread);
   updateQueuedMessageMock.mockResolvedValue([]);
   clearQueuedMessageMock.mockResolvedValue([]);
@@ -478,6 +498,7 @@ beforeEach(() => {
   ];
   mockAttachedGlobalFiles = [];
   mockMemory = [{ id: 88, title: "No silent fallback", category: "decision", content: "Missing Claude or Kimi credentials must block explicitly." }];
+  mockProjectMemory = [];
   mockCredentialStates = [
     { provider: "claude", configured: false, status: "missing", reason: "Missing CLAUDE_API_KEY." },
     { provider: "kimi", configured: true, status: "configured", reason: "Cloudflare Workers AI credentials are present." },
@@ -600,7 +621,7 @@ describe("Home v2 task-first workspace behavior", () => {
 
     const tokenInput = await screen.findByLabelText(/GitHub token \(stored as an environment variable\)/i);
     await user.clear(tokenInput);
-    await user.type(tokenInput, "ghp_actualSecretValue123");
+    await user.type(tokenInput, ["ghp", "actualSecretValue123"].join("_"));
 
     expect(screen.getByText("That looks like the actual token. Paste only the environment variable name where the token is stored — for example, VIYO_GITHUB_TOKEN.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Test the connection/i })).toBeDisabled();
@@ -659,14 +680,15 @@ describe("Home v2 task-first workspace behavior", () => {
 
   it("§1A-FU-04-06 redacts token-looking values from connection failure messages", async () => {
     const user = userEvent.setup();
-    testBuildTargetConnectionMock.mockResolvedValueOnce({ status: "unknown", message: "remote rejected ghp_secretTokenValue12345 for repo" });
+    const tokenLikeFixture = ["ghp", "secretTokenValue12345"].join("_");
+    testBuildTargetConnectionMock.mockResolvedValueOnce({ status: "unknown", message: `remote rejected ${tokenLikeFixture} for repo` });
     render(<Home />);
 
     await user.type(await screen.findByLabelText(/GitHub repository link/i), "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git");
     await user.click(screen.getByRole("button", { name: /Test the connection/i }));
 
     expect((await screen.findAllByText(/\[redacted token\]/i)).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/ghp_secretTokenValue12345/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(tokenLikeFixture, "i"))).not.toBeInTheDocument();
   });
 
   it("§1A-FU-04-07 validates GitHub repository links with plain-English owner messages", async () => {
@@ -1754,4 +1776,104 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(screen.getByRole("button", { name: /upload first Global File/i })).toBeInTheDocument();
   });
 
+
+
+  it("renders §1A-CONV conversational onboarding, credentials drawer, and Advanced Setup escape hatch without exposing token values", async () => {
+    const user = userEvent.setup();
+    mockBuildTargets = [
+      {
+        id: 77,
+        ownerUserId: 42,
+        name: "AI API Portal",
+        repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2",
+        defaultBaseBranch: "main",
+        protectedBranchesJson: JSON.stringify(["main", "staging"]),
+        validationCommandsJson: JSON.stringify(["pnpm check", "pnpm test"]),
+        serviceChecksJson: JSON.stringify([]),
+        agentEnvVarMapJson: JSON.stringify({ WORKSHOP_GITHUB_TOKEN: "BUILD_TARGET_GITHUB_TOKEN" }),
+        governanceFilesJson: JSON.stringify([]),
+        governanceBudgetEnforced: true,
+        archivedAt: null,
+        createdAt: 1777999300000,
+        updatedAt: 1777999400000,
+      },
+    ];
+    mockCredentialStates = [
+      { provider: "claude", configured: false, status: "missing", reason: "Missing CLAUDE_API_KEY.", envVarName: "CLAUDE_API_KEY", lastCheckedAt: 1777999400000 },
+      { provider: "kimi", configured: true, status: "configured", reason: "Cloudflare Workers AI credentials are present.", envVarName: "WORKERS_AI_API_TOKEN", lastCheckedAt: 1777999400000 },
+    ];
+
+    render(<Home />);
+    await screen.findAllByText("Implement v2 shell");
+
+    expect(screen.getByText("Architect-in-Portal")).toBeInTheDocument();
+    expect(screen.getByText("Conversational project onboarding")).toBeInTheDocument();
+    expect(screen.getByTestId("section1a-conv-advanced-setup-escape")).toHaveTextContent("Advanced Setup");
+
+    await user.click(screen.getByTestId("section1a-conv-architect-start"));
+    expect(screen.getByTestId("manus-style-composer")).toHaveTextContent(/Architect, help me set up this project conversationally/i);
+
+    await user.click(screen.getByTestId("section1a-conv-credentials-drawer-open"));
+    expect(screen.getByTestId("section1a-conv-credentials-drawer")).toBeInTheDocument();
+    expect(screen.getByText("Credentials Drawer")).toBeInTheDocument();
+    expect(screen.getByText("Token values stay in Manus env vars. This view shows provider status and env var names only.")).toBeInTheDocument();
+    expect(screen.getByText("CLAUDE_API_KEY")).toBeInTheDocument();
+    expect(screen.getByText("WORKERS_AI_API_TOKEN")).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(["sk", "[A-Za-z0-9_-]{12,}"].join("-")))).not.toBeInTheDocument();
+    expect(screen.queryByText(/xox[baprs]-/)).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByRole("button", { name: /Test now/i })[0]);
+    expect(credentialsRefreshMock).toHaveBeenCalledWith({ providers: ["claude"] });
+  });
+
+  it("sorts tasks into live and archived sections, supports inline rename, and renders project-scoped memory", async () => {
+    const user = userEvent.setup();
+    mockTasks = [
+      { ...sampleTask, id: 10, title: "Older live task", status: "active", lastActivityAt: 1777998100000, createdAt: 1777998000000, updatedAt: 1777998100000, archivedAt: null },
+      { ...sampleTask, id: 11, title: "Newest live task", status: "active", lastActivityAt: 1777999900000, createdAt: 1777998200000, updatedAt: 1777999900000, archivedAt: null },
+      { ...sampleTask, id: 12, title: "Archived planning task", status: "archived", lastActivityAt: 1777998300000, createdAt: 1777998300000, updatedAt: 1777998300000, archivedAt: 1777998400000 },
+    ];
+    mockThread = { task: mockTasks[1], activeTurn: null, events: [] };
+    mockBuildTargets = [
+      {
+        id: 77,
+        ownerUserId: 42,
+        name: "AI API Portal",
+        repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2",
+        defaultBaseBranch: "main",
+        protectedBranchesJson: JSON.stringify(["main", "staging"]),
+        validationCommandsJson: JSON.stringify(["pnpm check", "pnpm test"]),
+        serviceChecksJson: JSON.stringify([]),
+        agentEnvVarMapJson: JSON.stringify({ WORKSHOP_GITHUB_TOKEN: "BUILD_TARGET_GITHUB_TOKEN" }),
+        governanceFilesJson: JSON.stringify([]),
+        governanceBudgetEnforced: true,
+        archivedAt: null,
+        createdAt: 1777999300000,
+        updatedAt: 1777999400000,
+      },
+    ];
+    mockProjectMemory = [
+      { id: 201, ownerUserId: 42, buildTargetId: 77, key: "repo", value: "Use only the selected AI API Portal project context.", source: "architect", createdAt: 1777999500000, updatedAt: 1777999500000 },
+    ];
+
+    render(<Home />);
+    await screen.findAllByText("Newest live task");
+
+    const liveTasks = screen.getByTestId("section1a-conv-live-tasks");
+    expect(within(liveTasks).getByText("Newest live task")).toBeInTheDocument();
+    expect(within(liveTasks).getByText("Older live task")).toBeInTheDocument();
+    expect(screen.getByTestId("section1a-conv-archived-tasks")).toHaveTextContent("Archived planning task");
+    expect(liveTasks.textContent?.indexOf("Newest live task")).toBeLessThan(liveTasks.textContent?.indexOf("Older live task") ?? Number.MAX_SAFE_INTEGER);
+
+    await user.click(within(liveTasks).getAllByTestId("section1a-conv-task-rename")[0]);
+    const renameInput = screen.getByLabelText("Rename Newest live task");
+    await user.clear(renameInput);
+    await user.type(renameInput, "Renamed conversational task");
+    await user.click(screen.getByRole("button", { name: /^Save$/i }));
+    expect(renameTaskMock).toHaveBeenCalledWith({ taskId: 11, title: "Renamed conversational task" });
+
+    expect(screen.getByTestId("section1a-conv-project-memory-viewer")).toHaveTextContent("AI API Portal");
+    expect(screen.getByText("repo")).toBeInTheDocument();
+    expect(screen.getByText("Use only the selected AI API Portal project context.")).toBeInTheDocument();
+  });
 });
