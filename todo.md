@@ -312,4 +312,12 @@
 
 - [x] §1A-FU resume: verify current FU-01/FU-02/FU-03 implementation state, complete required validation gates, push one `[PORTAL-P2-S1A-FU-01]` commit, and stop before §4.
 - [x] §1A-FU validation hardening: make the live provider credential smoke-test retry transient network exceptions such as Anthropic TLS ECONNRESET without changing product behavior.
-- [ ] Fresh Manus publish checkpoint: save a current checkpoint for the validated §1A follow-up work so the user has an up-to-date publish point without starting §4.
+- [x] Fresh Manus publish checkpoint: save a current checkpoint for the validated §1A follow-up work so the user has an up-to-date publish point without starting §4.
+
+- [x] PORTAL-P3-S9-FU-01: Implement 24-hour auto-timeout cleanup for abandoned awaiting_approval turns with behavioral server coverage.
+- [x] PORTAL-P3-S9-FU-01: Add INV-S9-10 owner-facing forbidden-vocabulary behavioral test without silently renaming existing copy.
+- [x] PORTAL-P3-S9-FU-01: Enforce five-request revision cap in requestKimiHandoffRevision with behavioral server coverage.
+- [x] PORTAL-P3-S9-FU-01: Remove tasks.create boilerplate system event at source and add regression coverage.
+
+- [x] Create a Manus managed project checkpoint to enable the Publish button for the current AI Coding Workshop portal state.
+- [x] Sync validated FU-01 commit `0bccee6a890b029484c4f9573a7a2d87e94b7a11` from `agent-work/s4-5-prep-inputs` into the managed Manus project before checkpointing for publish.

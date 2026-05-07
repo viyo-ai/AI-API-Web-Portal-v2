@@ -1,4 +1,4 @@
-import { and, desc, eq, like, or } from "drizzle-orm";
+import { and, desc, eq, like, lt, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   buildBranches,
@@ -20,6 +20,7 @@ import {
   InsertTaskFile,
   InsertTaskMessageQueueItem,
   InsertUser,
+  InsertUserPreference,
   InsertSkill,
   Skill,
   Task,
@@ -33,6 +34,7 @@ import {
   taskMessageQueue,
   taskSkillSelections,
   tasks,
+  userPreferences,
   users,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
@@ -59,6 +61,7 @@ export type TurnState =
   | "credential_check"
   | "context_assembly"
   | "model_calling"
+  | "awaiting_approval"
   | "model_review"
   | "persisting_output"
   | "completed"
@@ -84,8 +87,21 @@ export type BuildBranchPushState =
 export type WizardSessionStatus = "cached" | "failed";
 export type AgentEnvVarMap = Record<string, string>;
 export type { GovernanceFileConfig } from "./buildRunner/loadGovernance";
+export type ApprovalStatus =
+  | "not_required"
+  | "awaiting_owner"
+  | "approved"
+  | "revision_requested"
+  | "cancelled";
 export type QueuedMessageState = "queued" | "processing" | "sent" | "cleared";
+export type TaskGlobalFileLinkSource = "root_default" | "project" | "manual";
 export const MAX_QUEUED_MESSAGES_PER_TASK = 5;
+export const ROOT_GOVERNANCE_FILE_PATHS = [
+  "CLAUDE.md",
+  "FOUNDATION_LOCK.md",
+  "BULLET_1_DIRECTIVE.md",
+  "CURRENT_BULLET.txt",
+] as const;
 
 export function nowMs() {
   return Date.now();
@@ -173,6 +189,57 @@ export async function getUserByOpenId(openId: string) {
   return result[0];
 }
 
+export async function getUserPreference(ownerUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for user preferences");
+
+  const existing = await db
+    .select()
+    .from(userPreferences)
+    .where(eq(userPreferences.ownerUserId, ownerUserId))
+    .limit(1);
+  if (existing[0]) return existing[0];
+
+  const timestamp = nowMs();
+  const insertValues: InsertUserPreference = {
+    ownerUserId,
+    alwaysRequireKimiApproval: true,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  await db.insert(userPreferences).values(insertValues);
+  const created = await db
+    .select()
+    .from(userPreferences)
+    .where(eq(userPreferences.ownerUserId, ownerUserId))
+    .limit(1);
+  if (!created[0]) throw new Error("Failed to create user preferences");
+  return created[0];
+}
+
+export async function updateUserPreference(values: {
+  ownerUserId: number;
+  alwaysRequireKimiApproval: boolean;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for user preferences");
+
+  const timestamp = nowMs();
+  const insertValues: InsertUserPreference = {
+    ownerUserId: values.ownerUserId,
+    alwaysRequireKimiApproval: values.alwaysRequireKimiApproval,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  await db.insert(userPreferences).values(insertValues).onDuplicateKeyUpdate({
+    set: {
+      alwaysRequireKimiApproval: values.alwaysRequireKimiApproval,
+      updatedAt: timestamp,
+    },
+  });
+  return getUserPreference(values.ownerUserId);
+}
+
 export function sanitizeTaskTitle(input: string) {
   const normalized = input.replace(/\s+/g, " ").trim();
   if (!normalized) return "Untitled task";
@@ -200,6 +267,7 @@ export async function createTask(values: {
   title: string;
   summary?: string | null;
   routeMode?: RouteMode;
+  buildTargetId?: number | null;
   buildBranchId?: number | null;
 }) {
   const db = await getDb();
@@ -211,6 +279,7 @@ export async function createTask(values: {
     title: sanitizeTaskTitle(values.title),
     summary: values.summary ?? null,
     routeMode: values.routeMode ?? "auto",
+    buildTargetId: values.buildTargetId ?? null,
     buildBranchId: values.buildBranchId ?? null,
     status: "active",
     createdAt: timestamp,
@@ -651,6 +720,75 @@ export async function updateTurnState(
     );
 }
 
+export async function updateTurnApprovalState(values: {
+  turnId: number;
+  ownerUserId: number;
+  state: TurnState;
+  approvalStatus: ApprovalStatus;
+  approvalPlanContent?: string | null;
+  approvalDecisionMessage?: string | null;
+  approvalRequestedAt?: number | null;
+  approvalResolvedAt?: number | null;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for orchestration turns");
+
+  await db
+    .update(orchestrationTurns)
+    .set({
+      state: values.state,
+      approvalStatus: values.approvalStatus,
+      approvalPlanContent: values.approvalPlanContent,
+      approvalDecisionMessage: values.approvalDecisionMessage,
+      approvalRequestedAt: values.approvalRequestedAt,
+      approvalResolvedAt: values.approvalResolvedAt,
+    })
+    .where(
+      and(
+        eq(orchestrationTurns.id, values.turnId),
+        eq(orchestrationTurns.ownerUserId, values.ownerUserId)
+      )
+    );
+}
+
+export async function getTurnForOwner(turnId: number, ownerUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for orchestration turns");
+
+  const result = await db
+    .select()
+    .from(orchestrationTurns)
+    .where(
+      and(
+        eq(orchestrationTurns.id, turnId),
+        eq(orchestrationTurns.ownerUserId, ownerUserId)
+      )
+    )
+    .limit(1);
+  return result[0];
+}
+
+export async function listExpiredAwaitingApprovalTurns(
+  approvalRequestedBefore: number,
+  limit = 100
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for orchestration turns");
+
+  return db
+    .select()
+    .from(orchestrationTurns)
+    .where(
+      and(
+        eq(orchestrationTurns.state, "awaiting_approval"),
+        eq(orchestrationTurns.approvalStatus, "awaiting_owner"),
+        lt(orchestrationTurns.approvalRequestedAt, approvalRequestedBefore)
+      )
+    )
+    .orderBy(desc(orchestrationTurns.approvalRequestedAt))
+    .limit(limit);
+}
+
 export async function completeTurn(turnId: number, ownerUserId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database is required for orchestration turns");
@@ -968,8 +1106,13 @@ export async function getGlobalFileForOwner(
 export async function attachGlobalFileToTask(
   values: Omit<
     InsertTaskGlobalFileLink,
-    "attachedLabel" | "createdAt" | "updatedAt"
-  > & { attachedLabel?: string | null; createdAt?: number; updatedAt?: number }
+    "attachedLabel" | "source" | "createdAt" | "updatedAt"
+  > & {
+    attachedLabel?: string | null;
+    source?: TaskGlobalFileLinkSource;
+    createdAt?: number;
+    updatedAt?: number;
+  }
 ) {
   const task = await getTaskForOwner(values.taskId, values.ownerUserId);
   if (!task) throw new Error("Task not found");
@@ -988,6 +1131,7 @@ export async function attachGlobalFileToTask(
       ...values,
       attachedLabel:
         values.attachedLabel?.trim().slice(0, 220) || file.displayName,
+      source: values.source ?? "manual",
       createdAt: timestamp,
       updatedAt: values.updatedAt ?? timestamp,
     })
@@ -995,6 +1139,7 @@ export async function attachGlobalFileToTask(
       set: {
         attachedLabel:
           values.attachedLabel?.trim().slice(0, 220) || file.displayName,
+        source: values.source ?? "manual",
         updatedAt: timestamp,
       },
     });
@@ -1014,6 +1159,104 @@ export async function attachGlobalFileToTask(
     .limit(1);
   if (!result[0]) throw new Error("Failed to attach global file to task");
   return { ...result[0], file };
+}
+
+export async function autoAttachRootGlobalFiles(taskId: number, ownerUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for root Global File auto-attachment");
+  const files = await db
+    .select()
+    .from(globalFiles)
+    .where(
+      and(
+        eq(globalFiles.ownerUserId, ownerUserId),
+        or(...ROOT_GOVERNANCE_FILE_PATHS.map(relativePath => eq(globalFiles.relativePath, relativePath)))
+      )
+    );
+
+  const byPath = new Map(files.map(file => [file.relativePath, file]));
+  const attached = [];
+  const missing: string[] = [];
+  for (const relativePath of ROOT_GOVERNANCE_FILE_PATHS) {
+    const file = byPath.get(relativePath);
+    if (!file) {
+      missing.push(relativePath);
+      continue;
+    }
+    attached.push(
+      await attachGlobalFileToTask({
+        taskId,
+        ownerUserId,
+        globalFileId: file.id,
+        attachedLabel: file.displayName,
+        source: "root_default",
+      })
+    );
+  }
+  return { attached, missing };
+}
+
+export async function listRootGovernanceGlobalFilesForOwner(ownerUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for root Global Files");
+  const files = await db
+    .select()
+    .from(globalFiles)
+    .where(
+      and(
+        eq(globalFiles.ownerUserId, ownerUserId),
+        or(...ROOT_GOVERNANCE_FILE_PATHS.map(relativePath => eq(globalFiles.relativePath, relativePath)))
+      )
+    );
+  const byPath = new Map(files.map(file => [file.relativePath, file]));
+  return ROOT_GOVERNANCE_FILE_PATHS.map(relativePath => byPath.get(relativePath)).filter(
+    (file): file is NonNullable<(typeof files)[number]> => Boolean(file)
+  );
+}
+
+export const PROJECT_GLOBAL_FILE_DETACH_ERROR =
+  "This file is attached from your Project. To remove it, change your Project's settings — not this task.";
+
+export async function detachOrDeleteGlobalFileFromTask(
+  taskId: number,
+  globalFileId: number,
+  ownerUserId: number
+) {
+  const task = await getTaskForOwner(taskId, ownerUserId);
+  if (!task) throw new Error("Task not found");
+
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for global file links");
+
+  const result = await db
+    .select()
+    .from(taskGlobalFileLinks)
+    .where(
+      and(
+        eq(taskGlobalFileLinks.taskId, taskId),
+        eq(taskGlobalFileLinks.globalFileId, globalFileId),
+        eq(taskGlobalFileLinks.ownerUserId, ownerUserId)
+      )
+    )
+    .limit(1);
+  const link = result[0];
+  if (!link) throw new Error("Global file link not found");
+  if (link.source === "project" || link.source === "root_default") {
+    throw new Error(PROJECT_GLOBAL_FILE_DETACH_ERROR);
+  }
+
+  await db
+    .delete(taskGlobalFileLinks)
+    .where(
+      and(
+        eq(taskGlobalFileLinks.id, link.id),
+        eq(taskGlobalFileLinks.taskId, taskId),
+        eq(taskGlobalFileLinks.globalFileId, globalFileId),
+        eq(taskGlobalFileLinks.ownerUserId, ownerUserId)
+      )
+    );
+  await touchTask(taskId, ownerUserId);
+  return { success: true, deleted: link } as const;
 }
 
 export async function listGlobalFileLinksForTask(
@@ -2170,6 +2413,21 @@ export async function deleteBuildBranch(branchId: number, ownerUserId: number) {
         eq(buildBranches.ownerUserId, ownerUserId)
       )
     );
+}
+
+export async function linkTaskToBuildTarget(
+  taskId: number,
+  ownerUserId: number,
+  buildTargetId: number | null
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for Project task links");
+  const timestamp = nowMs();
+  await db
+    .update(tasks)
+    .set({ buildTargetId, updatedAt: timestamp, lastActivityAt: timestamp })
+    .where(and(eq(tasks.id, taskId), eq(tasks.ownerUserId, ownerUserId)));
+  return getTaskForOwner(taskId, ownerUserId);
 }
 
 export async function linkTaskToBuildBranch(

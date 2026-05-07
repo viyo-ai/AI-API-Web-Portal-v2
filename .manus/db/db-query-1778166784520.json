@@ -1,0 +1,90 @@
+{
+  "query": "SHOW COLUMNS FROM orchestration_turns;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3aAiEZGvt2NNVee.ae03d21acc17 --database 5KVWo4UoTpTyEXqmynzSfU --execute SHOW COLUMNS FROM orchestration_turns;",
+  "rows": [
+    {
+      "Field": "id",
+      "Type": "int",
+      "Null": "NO",
+      "Key": "PRI",
+      "Default": "NULL",
+      "Extra": "auto_increment"
+    },
+    {
+      "Field": "taskId",
+      "Type": "int",
+      "Null": "NO",
+      "Key": "MUL",
+      "Default": "NULL",
+      "Extra": ""
+    },
+    {
+      "Field": "ownerUserId",
+      "Type": "int",
+      "Null": "NO",
+      "Key": "MUL",
+      "Default": "NULL",
+      "Extra": ""
+    },
+    {
+      "Field": "route",
+      "Type": "enum('auto','claude','kimi','dual','blocked')",
+      "Null": "NO",
+      "Key": "",
+      "Default": "auto",
+      "Extra": ""
+    },
+    {
+      "Field": "state",
+      "Type": "enum('received','routing','credential_check','context_assembly','model_calling','model_review','persisting_output','completed','blocked','failed','stopped')",
+      "Null": "NO",
+      "Key": "",
+      "Default": "received",
+      "Extra": ""
+    },
+    {
+      "Field": "credentialStateJson",
+      "Type": "longtext",
+      "Null": "YES",
+      "Key": "",
+      "Default": "NULL",
+      "Extra": ""
+    },
+    {
+      "Field": "startedAt",
+      "Type": "bigint",
+      "Null": "NO",
+      "Key": "",
+      "Default": "NULL",
+      "Extra": ""
+    },
+    {
+      "Field": "completedAt",
+      "Type": "bigint",
+      "Null": "YES",
+      "Key": "",
+      "Default": "NULL",
+      "Extra": ""
+    },
+    {
+      "Field": "errorCode",
+      "Type": "varchar(96)",
+      "Null": "YES",
+      "Key": "",
+      "Default": "NULL",
+      "Extra": ""
+    },
+    {
+      "Field": "errorMessage",
+      "Type": "longtext",
+      "Null": "YES",
+      "Key": "",
+      "Default": "NULL",
+      "Extra": ""
+    }
+  ],
+  "messages": [],
+  "stdout": "Field\tType\tNull\tKey\tDefault\tExtra\nid\tint\tNO\tPRI\tNULL\tauto_increment\ntaskId\tint\tNO\tMUL\tNULL\t\nownerUserId\tint\tNO\tMUL\tNULL\t\nroute\tenum('auto','claude','kimi','dual','blocked')\tNO\t\tauto\t\nstate\tenum('received','routing','credential_check','context_assembly','model_calling','model_review','persisting_output','completed','blocked','failed','stopped')\tNO\t\treceived\t\ncredentialStateJson\tlongtext\tYES\t\tNULL\t\nstartedAt\tbigint\tNO\t\tNULL\t\ncompletedAt\tbigint\tYES\t\tNULL\t\nerrorCode\tvarchar(96)\tYES\t\tNULL\t\nerrorMessage\tlongtext\tYES\t\tNULL\t\n",
+  "stderr": "",
+  "execution_time_ms": 56
+}

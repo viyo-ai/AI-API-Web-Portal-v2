@@ -14,6 +14,10 @@ const submitMessageMock = vi.fn();
 const updateQueuedMessageMock = vi.fn();
 const clearQueuedMessageMock = vi.fn();
 const stopGenerationMock = vi.fn();
+const updateKimiApprovalPreferenceMock = vi.fn();
+const approveKimiHandoffMock = vi.fn();
+const requestKimiHandoffRevisionMock = vi.fn();
+const cancelKimiHandoffMock = vi.fn();
 const createFileMetadataMock = vi.fn();
 const uploadWorkspaceFileMock = vi.fn();
 const attachGlobalToTaskMock = vi.fn();
@@ -134,7 +138,7 @@ let mockGlobalFiles: Array<{ id: number; taskId: null; scope: "global"; displayN
     createdAt: 1777999300000,
   },
 ];
-let mockAttachedGlobalFiles: Array<{ id: number; taskId: number; globalFileId: number; attachedLabel: string; file: (typeof mockGlobalFiles)[number] }> = [];
+let mockAttachedGlobalFiles: Array<{ id: number; taskId: number; globalFileId: number; attachedLabel: string; source: "root_default" | "project" | "manual"; file: (typeof mockGlobalFiles)[number] }> = [];
 let mockMemory: Array<{ id: number; title: string; category: string; content: string }> = [
   { id: 88, title: "No silent fallback", category: "decision", content: "Missing Claude or Kimi credentials must block explicitly." },
 ];
@@ -142,6 +146,7 @@ let mockCredentialStates = [
   { provider: "claude", configured: false, status: "missing", reason: "Missing CLAUDE_API_KEY." },
   { provider: "kimi", configured: true, status: "configured", reason: "Cloudflare Workers AI credentials are present." },
 ];
+let mockKimiApprovalPreference = { ownerUserId: 42, alwaysRequireKimiApproval: true, createdAt: 1777998000000, updatedAt: 1777998000000 };
 let mockBuildTargets: Array<{
   id: number;
   ownerUserId: number;
@@ -193,6 +198,7 @@ vi.mock("@/lib/trpc", () => ({
       buildTargets: { list: { invalidate: invalidateMock }, get: { invalidate: invalidateMock }, testConnection: { invalidate: invalidateMock }, updateSettings: { invalidate: invalidateMock }, analyzeWizard: { invalidate: invalidateMock }, completeWizard: { invalidate: invalidateMock } },
       buildBranch: { list: { invalidate: invalidateMock }, getStatus: { invalidate: invalidateMock } },
       buildBranches: { list: { invalidate: invalidateMock }, status: { invalidate: invalidateMock }, push: { invalidate: invalidateMock } },
+      orchestration: { kimiApprovalPreference: { invalidate: invalidateMock } },
     }),
     tasks: {
       list: { useQuery: () => ({ data: mockTasks, isLoading: false }) },
@@ -226,6 +232,11 @@ vi.mock("@/lib/trpc", () => ({
       stopGeneration: {
         useMutation: () => ({ mutateAsync: stopGenerationMock, isPending: false }),
       },
+      kimiApprovalPreference: { useQuery: () => ({ data: mockKimiApprovalPreference, isLoading: false }) },
+      updateKimiApprovalPreference: { useMutation: () => ({ mutateAsync: updateKimiApprovalPreferenceMock, isPending: false }) },
+      approveKimiHandoff: { useMutation: () => ({ mutateAsync: approveKimiHandoffMock, isPending: false }) },
+      requestKimiHandoffRevision: { useMutation: () => ({ mutateAsync: requestKimiHandoffRevisionMock, isPending: false }) },
+      cancelKimiHandoff: { useMutation: () => ({ mutateAsync: cancelKimiHandoffMock, isPending: false }) },
     },
     files: {
       listForTask: { useQuery: () => ({ data: mockTaskFiles, isLoading: false }) },
@@ -338,6 +349,10 @@ beforeEach(() => {
   updateQueuedMessageMock.mockReset();
   clearQueuedMessageMock.mockReset();
   stopGenerationMock.mockReset();
+  updateKimiApprovalPreferenceMock.mockReset();
+  approveKimiHandoffMock.mockReset();
+  requestKimiHandoffRevisionMock.mockReset();
+  cancelKimiHandoffMock.mockReset();
   createFileMetadataMock.mockReset();
   uploadWorkspaceFileMock.mockReset();
   attachGlobalToTaskMock.mockReset();
@@ -358,6 +373,10 @@ beforeEach(() => {
   updateQueuedMessageMock.mockResolvedValue([]);
   clearQueuedMessageMock.mockResolvedValue([]);
   stopGenerationMock.mockResolvedValue({ stopped: true, stop: { destructiveOperation: false, boundary: "before_next_generation_step" } });
+  updateKimiApprovalPreferenceMock.mockResolvedValue({ ownerUserId: 42, alwaysRequireKimiApproval: false, createdAt: 1777998000000, updatedAt: 1777999500000 });
+  approveKimiHandoffMock.mockResolvedValue(mockThread);
+  requestKimiHandoffRevisionMock.mockResolvedValue(mockThread);
+  cancelKimiHandoffMock.mockResolvedValue(mockThread);
   createFileMetadataMock.mockResolvedValue(mockTaskFiles[0]);
   attachGlobalToTaskMock.mockResolvedValue({ id: 501, taskId: 7, globalFileId: 56, attachedLabel: "Owner playbook.pdf", file: mockGlobalFiles[0] });
   createBuildBranchMock.mockResolvedValue({ id: 301, branchName: "agent-work/plain-language", state: "clean", pushState: "never_pushed", workspacePath: "/tmp/plain-language", taskId: 7 });
@@ -460,6 +479,7 @@ beforeEach(() => {
     { provider: "claude", configured: false, status: "missing", reason: "Missing CLAUDE_API_KEY." },
     { provider: "kimi", configured: true, status: "configured", reason: "Cloudflare Workers AI credentials are present." },
   ];
+  mockKimiApprovalPreference = { ownerUserId: 42, alwaysRequireKimiApproval: true, createdAt: 1777998000000, updatedAt: 1777998000000 };
   mockBuildTargets = [];
 } );
 
@@ -713,7 +733,8 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(screen.getAllByTestId("chat-bubble-ai").length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("chat-bubble-user").length).toBeGreaterThan(0);
 
-    await user.click(screen.getByRole("button", { name: /show technical details/i }));
+    await user.click(screen.getByRole("tab", { name: /AI Activity/i }));
+    await user.click(screen.getByRole("button", { name: /show activity details/i }));
     expect(screen.getAllByText("Route AUTO selected dual Claude and Kimi initialization.").length).toBeGreaterThan(0);
   });
 
@@ -753,8 +774,142 @@ describe("Home v2 task-first workspace behavior", () => {
     expect((await screen.findAllByText(/Kimi did not return usable text/i)).length).toBeGreaterThan(0);
     expect(screen.queryByText("Kimi returned an empty response.")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /show technical details/i }));
+    await user.click(screen.getByRole("tab", { name: /AI Activity/i }));
+    await user.click(screen.getByRole("button", { name: /show activity details/i }));
     expect(screen.getAllByText("Kimi returned an empty response.").length).toBeGreaterThan(0);
+  });
+
+  it("renders the §9 owner approval card, keeps Kimi paused, and wires approve revise cancel decisions", async () => {
+    const user = userEvent.setup();
+    mockThread = {
+      task: sampleTask,
+      activeTurn: {
+        id: 46,
+        taskId: 7,
+        ownerUserId: 42,
+        routeMode: "dual",
+        route: "dual",
+        state: "awaiting_approval",
+        approvalStatus: "awaiting_owner",
+        approvalPlanContent: "Claude plan: inspect the repository, then let Kimi implement the safe patch.",
+        approvalRequestedAt: 1777999400000,
+        approvalResolvedAt: null,
+        startedAt: 1777999200000,
+        completedAt: null,
+        errorMessage: null,
+      },
+      queuedMessages: [],
+      events: [
+        { id: 401, taskId: 7, ownerUserId: 42, actor: "user", eventType: "message", status: "completed", content: "Please implement the next portal section.", metadataJson: "{}", createdAt: 1777999100000 },
+      ],
+    };
+
+    render(<Home />);
+
+    expect(await screen.findByTestId("section9-kimi-approval-card")).toHaveTextContent(/Review Claude's plan before Kimi runs/i);
+    expect(screen.getByTestId("section9-kimi-approval-card")).toHaveTextContent(/Kimi has not run/i);
+    expect(screen.getByTestId("section9-approval-diagnostics")).toHaveTextContent(/waiting for owner approval/i);
+    await user.click(screen.getByTestId("section9-approve-kimi"));
+    expect(approveKimiHandoffMock).toHaveBeenCalledWith({ taskId: 7, turnId: 46 });
+
+    await user.type(screen.getByTestId("section9-approval-revision-input"), "Add a rollback note before implementation.");
+    await user.click(screen.getByTestId("section9-request-revision"));
+    expect(requestKimiHandoffRevisionMock).toHaveBeenCalledWith({ taskId: 7, turnId: 46, revisionMessage: "Add a rollback note before implementation." });
+
+    await user.click(screen.getByTestId("section9-cancel-kimi"));
+    expect(cancelKimiHandoffMock).toHaveBeenCalledWith({ taskId: 7, turnId: 46 });
+  });
+
+  it("keeps §9 forbidden technical vocabulary out of owner-facing approval text", async () => {
+    mockThread = {
+      task: sampleTask,
+      activeTurn: {
+        id: 46,
+        taskId: 7,
+        ownerUserId: 42,
+        routeMode: "dual",
+        route: "dual",
+        state: "awaiting_approval",
+        approvalStatus: "awaiting_owner",
+        approvalPlanContent: "Claude plan: inspect the repository, then let Kimi implement the safe patch.",
+        approvalRequestedAt: 1777999400000,
+        approvalResolvedAt: null,
+        startedAt: 1777999200000,
+        completedAt: null,
+        errorMessage: null,
+      },
+      queuedMessages: [],
+      events: [
+        { id: 401, taskId: 7, ownerUserId: 42, actor: "user", eventType: "message", status: "completed", content: "Please implement the next portal section.", metadataJson: "{}", createdAt: 1777999100000 },
+      ],
+    };
+
+    render(<Home />);
+    expect(await screen.findByTestId("section9-kimi-approval-card")).toBeInTheDocument();
+
+    const ownerFacingBody = document.body.cloneNode(true) as HTMLElement;
+    ownerFacingBody.querySelectorAll('[role="tabpanel"]').forEach(panel => {
+      const labelledBy = panel.getAttribute("aria-labelledby") ?? "";
+      const panelText = panel.textContent ?? "";
+      if (/diagnostics/i.test(labelledBy) || /Diagnostics are intentionally opt-in/i.test(panelText)) {
+        panel.remove();
+      }
+    });
+    const ownerFacingText = ownerFacingBody.textContent ?? "";
+
+    [
+      "verified handoff",
+      "approval gate",
+      "wrapper turn",
+      "dual-path",
+      "route_decision",
+      "awaiting_approval",
+      "model_calling",
+      "claudePlan",
+      "kimiResult",
+      "claudeReview",
+      "finalAnswer",
+    ].forEach(term => {
+      expect(ownerFacingText).not.toMatch(new RegExp(term, "i"));
+    });
+  });
+
+  it("defaults §9 Kimi approval checks on and persists owner preference changes", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    expect(await screen.findByTestId("section9-kimi-approval-preference")).toHaveTextContent(/Always check before Kimi runs: On/i);
+    await user.click(screen.getByTestId("section9-kimi-approval-preference"));
+
+    expect(updateKimiApprovalPreferenceMock).toHaveBeenCalledWith({ alwaysRequireKimiApproval: false });
+    await waitFor(() => expect(invalidateMock).toHaveBeenCalled());
+  });
+
+  it("removes §9 technical-noise events from the owner chat while retaining them in AI Activity details", async () => {
+    const user = userEvent.setup();
+    mockThread = {
+      task: sampleTask,
+      activeTurn: null,
+      events: [
+        { id: 501, taskId: 7, ownerUserId: 42, actor: "system", eventType: "task_created", status: "completed", content: "Task record created from sidebar action.", metadataJson: "{}", createdAt: 1777999000000 },
+        { id: 502, taskId: 7, ownerUserId: 42, actor: "wrapper", eventType: "route_decision", status: "completed", content: "Route AUTO selected dual Claude and Kimi initialization.", metadataJson: "{}", createdAt: 1777999100000 },
+        { id: 503, taskId: 7, ownerUserId: 42, actor: "user", eventType: "message", status: "completed", content: "Owner-visible request", metadataJson: "{}", createdAt: 1777999200000 },
+        { id: 504, taskId: 7, ownerUserId: 42, actor: "kimi", eventType: "model_result", status: "completed", content: "Owner-visible implementation summary", metadataJson: "{}", createdAt: 1777999300000 },
+      ],
+    };
+
+    render(<Home />);
+
+    expect(await screen.findByText("Owner-visible request")).toBeInTheDocument();
+    expect(screen.getByText("Owner-visible implementation summary")).toBeInTheDocument();
+    expect(screen.queryByText("Task record created from sidebar action.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Route AUTO selected dual Claude and Kimi initialization.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Technical history/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /AI Activity/i }));
+    await user.click(screen.getByRole("button", { name: /show activity details/i }));
+    expect(screen.getAllByText("Task record created from sidebar action.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Route AUTO selected dual Claude and Kimi initialization.").length).toBeGreaterThan(0);
   });
 
   it("submits the selected task message with Enter and respects the explicit Kimi route selector", async () => {
@@ -1082,24 +1237,70 @@ describe("Home v2 task-first workspace behavior", () => {
       socket.readyState = FakeWebSocket.OPEN;
       socket.dispatch("open", {});
     });
-    await waitFor(() => expect(screen.getAllByText(/connected/i).length).toBeGreaterThan(0));
-
-    await act(async () => {
-      socket.dispatchJson({
-        type: "ready",
-        sessionKey: "test-session",
-        tmuxSessionName: "ai-workshop-test",
-        tmuxEnabled: true,
-        terminalMode: "pty",
-        cwd: "/workspace/task-7",
-      });
+    socket.dispatchJson({
+      type: "ready",
+      sessionKey: "user-42",
+      tmuxSessionName: "aicw-user-42",
+      tmuxEnabled: true,
+      terminalMode: "pty",
+      cwd: "/tmp/ai-coding-workshop-workspaces/user-42",
     });
+    socket.dispatchJson({ type: "status", status: "Authenticated node-pty terminal connected to a persistent tmux session." });
 
-    expect(screen.getByText(/tmux PTY terminal/i)).toBeInTheDocument();
-    expect(screen.getByText(/tmux · ai-workshop-test · \/workspace\/task-7/i)).toBeInTheDocument();
+    expect(await screen.findByText("connected", { selector: "span" })).toBeInTheDocument();
+    expect(screen.getByText("tmux PTY terminal")).toBeInTheDocument();
+    expect(screen.getByText(/tmux · aicw-user-42 · \/tmp\/ai-coding-workshop-workspaces\/user-42/i)).toBeInTheDocument();
   });
 
-  it("throttles terminal ResizeObserver fitting through requestAnimationFrame", async () => {
+  it("keeps diagnostics terminal in the Personal workspace by default and switches to Project Build Branch only after the explicit toggle", async () => {
+    const user = userEvent.setup();
+    mockBuildTargets = [
+      {
+        id: 77,
+        ownerUserId: 42,
+        name: "AI API Portal",
+        repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2",
+        defaultBaseBranch: "main",
+        protectedBranchesJson: JSON.stringify(["main", "staging"]),
+        validationCommandsJson: JSON.stringify(["pnpm check", "pnpm test"]),
+        serviceChecksJson: JSON.stringify([]),
+        agentEnvVarMapJson: JSON.stringify({ WORKSHOP_GITHUB_TOKEN: "BUILD_TARGET_GITHUB_TOKEN" }),
+        governanceFilesJson: JSON.stringify([]),
+        governanceBudgetEnforced: true,
+        archivedAt: null,
+        createdAt: 1777999300000,
+        updatedAt: 1777999400000,
+      },
+    ];
+    const buildBranchPath = "/tmp/ai-coding-workshop-build-targets/owner-42/target-77/branch-301-agent-work-plain-language";
+    createBuildBranchMock.mockResolvedValueOnce({ id: 301, branchName: "agent-work/plain-language", state: "clean", pushState: "never_pushed", workspacePath: buildBranchPath, taskId: 7 });
+
+    render(<Home />);
+    await screen.findAllByText("Implement v2 shell");
+    await user.type(screen.getByPlaceholderText(/agent-work\/portal-task/i), "agent-work/plain-language");
+    await user.click(screen.getByRole("button", { name: /^Open$/i }));
+    expect(await screen.findByText(/Branch: agent-work\/plain-language/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /diagnostics/i }));
+    await user.click(screen.getByRole("button", { name: /show developer diagnostics/i }));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    expect(FakeWebSocket.instances[FakeWebSocket.instances.length - 1].url).toMatch(/^ws:\/\/localhost(?::\d+)?\/api\/terminal$/);
+    expect(screen.getByTestId("diagnostics-workspace-toggle")).toHaveTextContent(/Current diagnostics terminal: Personal workspace/i);
+
+    await user.click(screen.getByRole("button", { name: /Use Project Build Branch/i }));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(1));
+    const buildBranchSocketUrl = new URL(FakeWebSocket.instances[FakeWebSocket.instances.length - 1].url);
+    expect(buildBranchSocketUrl.pathname).toBe("/api/terminal");
+    expect(buildBranchSocketUrl.searchParams.get("cwd")).toBe(buildBranchPath);
+    expect(screen.getByTestId("diagnostics-workspace-toggle")).toHaveTextContent(/Current diagnostics terminal: Project Build Branch/i);
+
+    await user.click(screen.getByRole("button", { name: /Use Personal workspace/i }));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(2));
+    expect(FakeWebSocket.instances[FakeWebSocket.instances.length - 1].url).toMatch(/^ws:\/\/localhost(?::\d+)?\/api\/terminal$/);
+    expect(screen.getByTestId("diagnostics-workspace-toggle")).toHaveTextContent(/Current diagnostics terminal: Personal workspace/i);
+  });
+
+  it("debounces resize observer terminal refits to avoid ResizeObserver loop noise", async () => {
     const rafCallbacks: FrameRequestCallback[] = [];
     const requestAnimationFrameMock = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
       rafCallbacks.push(callback);
