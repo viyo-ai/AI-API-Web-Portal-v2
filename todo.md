@@ -345,3 +345,21 @@
 - [x] PORTAL-P3-S9-FU-01: Add INV-S9-10 owner-facing forbidden-vocabulary behavioral test without silently renaming existing copy.
 - [x] PORTAL-P3-S9-FU-01: Enforce five-request revision cap in requestKimiHandoffRevision with behavioral server coverage.
 - [x] PORTAL-P3-S9-FU-01: Remove tasks.create boilerplate system event at source and add regression coverage.
+
+- [x] §1A-FU-04: Produce directive ingestion evidence at `.taskmaster/docs/ingestion-evidence/PORTAL_PHASE_3_DIRECTIVE-S1A-FU-04-ingestion.md` before code changes.
+- [x] §1A-FU-04: Implement Project Setup Wizard plain-English polish and PAT-only private repository verification against all ten INV-S1A-FU-04 invariants.
+- [x] §1A-FU-04: Run required validation gates (`pnpm check`, focused tests, `pnpm test --run`, `pnpm build`) before any push.
+- [x] §1A-FU-04: Create conventional commits with `[PORTAL-P3-S1A-FU-04-XX]` prefixes and stop for Product Owner approval on any out-of-scope proposal.
+- [ ] §1A-FU-04: Provide a Manus Project local publish gate and hold for Product Owner sign-off without beginning §8.
+
+- [x] §1A-FU-04 T01: Replace Project Setup Wizard owner-facing copy with directive-approved plain-English vocabulary and remove forbidden wizard vocabulary outside Diagnostics.
+- [x] §1A-FU-04 T02: Reject token-looking pasted values in the GitHub token environment-variable-name field with the exact required correction message.
+- [x] §1A-FU-04 T03: Wire the wizard's Test the connection step to the existing PAT-backed buildTargets.testConnection procedure and display success/failure results.
+- [x] §1A-FU-04 T04: Disable Save Project until the current wizard session has a successful connection test and reset that success after any relevant field edit.
+- [x] §1A-FU-04 T05: Map env-var-not-set, 401, and 404 connection-test failures to actionable plain-English owner messages.
+- [x] §1A-FU-04 T06: Ensure token values are never displayed or logged by connection-test UI/error paths; only env var names may be referenced.
+- [x] §1A-FU-04 T07: Add plain-English repository-link validation for empty and non-GitHub-link inputs.
+- [x] §1A-FU-04 T08: Preserve existing repo analysis plus advanced env-var map, governance file list, and protected branch editors behind accessible optional advanced settings.
+- [x] §1A-FU-04 T09: Preserve wizard keyboard accessibility for logical tab order, Enter activation, and Escape disclosure handling.
+- [x] §1A-FU-04 T10: Show the exact plain-English Project-connected success confirmation without internal IDs.
+- [x] §1A-FU-04 validation: Add behavioral tests for all ten invariants and run pnpm check, focused Home behavior tests, focused section1 contract tests, full pnpm test --run, and pnpm build before push.
