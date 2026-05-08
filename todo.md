@@ -400,4 +400,6 @@
 - [x] §1A-CONV: Add focused behavioral and contract tests for all ten invariants without modifying locked functional tests
 - [x] §1A-CONV: Run all seven validation gates, generate closeout proofs, commit with `[PORTAL-P3-S1A-CONV-XX]`, push, and create a Manus Project publish gate
 
-- [ ] §1A-CONV follow-up: Verify repo/local parity and whether auto setup via chat is actually wired beyond display; fix any display-only chat onboarding gap if confirmed.
+- [x] §1A-CONV follow-up: Verify repo/local parity and whether auto setup via chat is actually wired beyond display; fix any display-only chat onboarding gap if confirmed.
+
+- [x] New uploaded directive: Fully ingest `/home/ubuntu/upload/pasted_content_2.txt`, extract authorized scope and acceptance gates, then follow only the directives it contains without exceeding Product Owner approval.

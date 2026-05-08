@@ -1060,14 +1060,24 @@ export default function Home() {
     const taskId = selectedTaskId ?? (await createTaskRecordOnly());
     if (!taskId) return;
     const queued = hasActiveGeneration;
-    await submitMessage.mutateAsync({
+    const response = await submitMessage.mutateAsync({
       taskId,
       message: cleanMessage,
       routeMode,
       buildTargetId: selectedBuildTargetId ?? selectedTask?.buildTargetId ?? undefined,
     });
+    const createdBuildTargetId = response && "architectSetupCreatedBuildTargetId" in response ? response.architectSetupCreatedBuildTargetId : undefined;
+    if (typeof createdBuildTargetId === "number") {
+      setSelectedBuildTargetId(createdBuildTargetId);
+    }
     setComposerText("");
-    setWorkspaceNotice(queued ? "Message queued. It will be sent automatically after the current turn finishes." : "Message sent to the task.");
+    setWorkspaceNotice(
+      typeof createdBuildTargetId === "number"
+        ? "Project created from chat and selected in the sidebar."
+        : queued
+          ? "Message queued. It will be sent automatically after the current turn finishes."
+          : "Message sent to the task."
+    );
     setQueuePanelOpen(true);
     await refreshWorkspace();
   }

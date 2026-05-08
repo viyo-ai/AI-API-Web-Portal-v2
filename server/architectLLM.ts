@@ -54,32 +54,49 @@ export function detectArchitectIntent(message: string): ArchitectIntentDecision 
   const setupSignals = [
     "connect project",
     "connect repo",
+    "connect repository",
     "add project",
+    "create project",
+    "save project",
     "set up project",
     "setup project",
+    "set up repo",
+    "setup repo",
     "onboard project",
     "onboarding",
     "configure repository",
     "project setup",
+    "project details",
     "github repo",
+    "github repository",
   ];
   const credentialSignals = [
     "token changed",
     "rotate token",
     "credential",
-    "env var",
-    "environment variable",
-    "github token",
+    "env var changed",
+    "token env var changed",
     "test connection",
     "credentials drawer",
     "missing token",
+    "update token",
+    "replace token",
+  ];
+  const setupMetadataSignals = [
+    "env var",
+    "environment variable",
+    "github token env",
+    "token environment variable",
+    "default base branch",
+    "base branch",
+    "repo url",
+    "repository url",
   ];
   const buildSignals = [
     "implement",
-    "build",
     "fix bug",
     "ship",
-    "code",
+    "write code",
     "refactor",
     "test failing",
     "deploy",
@@ -88,15 +105,34 @@ export function detectArchitectIntent(message: string): ArchitectIntentDecision 
 
   const hasSetup = setupSignals.some(signal => normalized.includes(signal));
   const hasCredential = credentialSignals.some(signal => normalized.includes(signal));
+  const hasSetupMetadata = setupMetadataSignals.some(signal => normalized.includes(signal));
   const hasBuild = buildSignals.some(signal => normalized.includes(signal));
 
-  if ((hasSetup || hasCredential) && hasBuild) {
+  if (hasSetup) {
+    return {
+      intent: "setup",
+      shouldRouteToArchitect: true,
+      confidence: hasSetupMetadata || hasCredential ? "high" : "high",
+      reason: "Project setup or onboarding language was detected, so setup wins over env-var metadata while collecting Project details.",
+    };
+  }
+
+  if (hasSetupMetadata && !hasCredential) {
+    return {
+      intent: "setup",
+      shouldRouteToArchitect: true,
+      confidence: "medium",
+      reason: "Project setup field metadata was detected without token-rotation language.",
+    };
+  }
+
+  if (hasCredential && hasBuild) {
     return {
       intent: "ambiguous",
       shouldRouteToArchitect: true,
       confidence: "low",
       reason:
-        "The message mixes setup or credential language with build-work language, so Architect should ask the owner to choose the safe setup path or continue as a build turn.",
+        "The message mixes credential language with build-work language, so Architect should ask the owner to choose the safe setup path or continue as a build turn.",
     };
   }
 
@@ -105,16 +141,7 @@ export function detectArchitectIntent(message: string): ArchitectIntentDecision 
       intent: "credentials",
       shouldRouteToArchitect: true,
       confidence: "high",
-      reason: "Credential or env-var management language was detected.",
-    };
-  }
-
-  if (hasSetup) {
-    return {
-      intent: "setup",
-      shouldRouteToArchitect: true,
-      confidence: "high",
-      reason: "Project setup or onboarding language was detected.",
+      reason: "Credential management language was detected without Project setup intent.",
     };
   }
 

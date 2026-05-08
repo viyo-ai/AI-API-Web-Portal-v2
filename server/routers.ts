@@ -139,6 +139,21 @@ import {
   loadArchitectSystemPrompt,
   redactTokenLikeValues,
 } from "./architectLLM";
+import {
+  assertCompleteArchitectSetupFields,
+  clearArchitectSetupState,
+  clearArchitectSetupStatesForTask,
+  extractArchitectSetupFields,
+  formatArchitectSetupSummary,
+  formatMissingArchitectSetupFields,
+  getArchitectSetupState,
+  hasArchitectSetupState,
+  isArchitectSetupCancellation,
+  isArchitectSetupConfirmation,
+  missingArchitectSetupFields,
+  upsertArchitectSetupState,
+  validateArchitectSetupFields,
+} from "./architectSetup";
 import { requestTurnStop } from "./wrapperLLM/stop-registry";
 import {
   loadGovernanceForTask,
@@ -1100,12 +1115,38 @@ async function appendArchitectTurn(params: {
   task: OwnedTask;
   ownerUserId: number;
   userContent: string;
-}) {
+}): Promise<{ handled: boolean; createdBuildTargetId?: number }> {
   const intent = detectArchitectIntent(params.userContent);
-  if (!intent.shouldRouteToArchitect) return false;
+  const setupStateExists = hasArchitectSetupState(
+    params.ownerUserId,
+    params.task.id
+  );
+
+  if (setupStateExists && intent.intent === "build" && !intent.shouldRouteToArchitect) {
+    clearArchitectSetupState(params.ownerUserId, params.task.id);
+    await appendTaskEvent({
+      taskId: params.task.id,
+      ownerUserId: params.ownerUserId,
+      actor: "system",
+      eventType: "route_decision",
+      status: "informational",
+      content:
+        "Architect setup draft was abandoned because the owner switched back to build-work language.",
+      metadataJson: serializeJson({
+        architectRole: "Claude Opus 4.7",
+        routedToArchitect: false,
+        architectSetupAbandoned: true,
+        intent,
+      }),
+    });
+    return { handled: false };
+  }
+
+  if (!intent.shouldRouteToArchitect && !setupStateExists) return { handled: false };
 
   const safeUserContent = redactTokenLikeValues(params.userContent);
   if (safeUserContent !== params.userContent) {
+    clearArchitectSetupState(params.ownerUserId, params.task.id);
     await appendTaskEvent({
       taskId: params.task.id,
       ownerUserId: params.ownerUserId,
@@ -1118,28 +1159,182 @@ async function appendArchitectTurn(params: {
         architectRole: "Claude Opus 4.7",
         intent,
         tokenValueRejected: true,
+        architectSetupCleared: true,
       }),
     });
   }
 
-  const reply = buildArchitectReply({
+  let reply = buildArchitectReply({
     message: params.userContent,
     intent,
     hasBuildTarget: Boolean(params.task.buildTargetId),
   });
+  let routeStatus: "succeeded" | "blocked" = "succeeded";
+  let createdBuildTargetId: number | undefined;
+  let architectSetupMetadata: Record<string, unknown> | undefined;
+
+  if (!containsTokenLikeValue(params.userContent) && (intent.intent === "setup" || intent.intent === "onboarding" || setupStateExists)) {
+    const existingState = getArchitectSetupState(params.ownerUserId, params.task.id);
+
+    if (existingState?.awaitingConfirmation) {
+      if (isArchitectSetupCancellation(params.userContent)) {
+        clearArchitectSetupState(params.ownerUserId, params.task.id);
+        reply = "Cancelled the conversational Project setup draft. Nothing was saved. You can restart setup from chat or open Advanced Setup.";
+        architectSetupMetadata = { architectSetupState: "cancelled" };
+      } else if (!isArchitectSetupConfirmation(params.userContent)) {
+        const completeFields = assertCompleteArchitectSetupFields(existingState.fields);
+        reply = [
+          "The Project setup draft is ready, but I need explicit confirmation before saving it.",
+          "Reply `confirm save project` to create the Project, or `cancel setup` to discard it.",
+          "",
+          formatArchitectSetupSummary(completeFields),
+        ].join("\n");
+        architectSetupMetadata = { architectSetupState: "awaiting_confirmation" };
+      } else {
+        const completeFields = assertCompleteArchitectSetupFields(existingState.fields);
+        const connection = await testBuildTargetConnection({
+          repoUrl: completeFields.repoUrl,
+          githubTokenEnvVar: completeFields.githubTokenEnvVar,
+          defaultBaseBranch: completeFields.defaultBaseBranch,
+        });
+        if (connection.status !== "ok") {
+          upsertArchitectSetupState({
+            ownerUserId: params.ownerUserId,
+            taskId: params.task.id,
+            fields: completeFields,
+            connectionStatus: "failed",
+            connectionMessage: connection.message,
+            awaitingConfirmation: false,
+          });
+          routeStatus = "blocked";
+          reply = [
+            "I re-tested the Project connection before saving, and the connection is not ready. Nothing was saved.",
+            connection.message,
+            "Update the env var or repository details, then send the corrected Project details again.",
+          ].join("\n\n");
+          architectSetupMetadata = {
+            architectSetupState: "connection_failed_before_save",
+            connectionStatus: connection.status,
+          };
+        } else {
+          const created = await createBuildTarget({
+            ownerUserId: params.ownerUserId,
+            name: completeFields.displayName,
+            repoUrl: completeFields.repoUrl,
+            githubTokenEnvVar: completeFields.githubTokenEnvVar,
+            defaultBaseBranch: completeFields.defaultBaseBranch,
+          });
+          createdBuildTargetId = created.id;
+          clearArchitectSetupState(params.ownerUserId, params.task.id);
+          reply = [
+            `Project created for ${created.name}.`,
+            "The connection was tested immediately before save, and no token value was stored or repeated in chat.",
+            "You can now select this Project from the sidebar and continue build work.",
+          ].join("\n\n");
+          architectSetupMetadata = {
+            architectSetupState: "saved",
+            createdBuildTargetId: created.id,
+            createdBuildTargetName: created.name,
+            connectionStatus: connection.status,
+          };
+        }
+      }
+    } else {
+      const extractedFields = extractArchitectSetupFields(params.userContent);
+      const state = upsertArchitectSetupState({
+        ownerUserId: params.ownerUserId,
+        taskId: params.task.id,
+        fields: extractedFields,
+        connectionStatus: "untested",
+        awaitingConfirmation: false,
+      });
+      const validationErrors = validateArchitectSetupFields(state.fields);
+      if (validationErrors.length > 0) {
+        routeStatus = "blocked";
+        reply = [
+          "I found Project setup details, but one or more fields need correction before I can test the connection.",
+          validationErrors.join("\n"),
+        ].join("\n\n");
+        architectSetupMetadata = {
+          architectSetupState: "needs_correction",
+          validationErrors,
+        };
+      } else {
+        const missing = missingArchitectSetupFields(state.fields);
+        if (missing.length > 0) {
+          reply = [
+            "I can connect this Project through chat, but I still need the remaining setup fields before testing anything.",
+            `Please send: ${formatMissingArchitectSetupFields(missing)}.`,
+            "I will test the connection before save and ask for explicit confirmation before creating the Project.",
+          ].join("\n\n");
+          architectSetupMetadata = {
+            architectSetupState: "collecting",
+            missingFields: missing,
+          };
+        } else {
+          const completeFields = assertCompleteArchitectSetupFields(state.fields);
+          const connection = await testBuildTargetConnection({
+            repoUrl: completeFields.repoUrl,
+            githubTokenEnvVar: completeFields.githubTokenEnvVar,
+            defaultBaseBranch: completeFields.defaultBaseBranch,
+          });
+          if (connection.status !== "ok") {
+            upsertArchitectSetupState({
+              ownerUserId: params.ownerUserId,
+              taskId: params.task.id,
+              fields: completeFields,
+              connectionStatus: "failed",
+              connectionMessage: connection.message,
+              awaitingConfirmation: false,
+            });
+            routeStatus = "blocked";
+            reply = [
+              "I tested the Project connection before save, and the connection is not ready. Nothing was saved.",
+              connection.message,
+              "Update the repository details or env var, then send the corrected Project setup fields again.",
+            ].join("\n\n");
+            architectSetupMetadata = {
+              architectSetupState: "connection_failed",
+              connectionStatus: connection.status,
+            };
+          } else {
+            upsertArchitectSetupState({
+              ownerUserId: params.ownerUserId,
+              taskId: params.task.id,
+              fields: completeFields,
+              connectionStatus: "ok",
+              connectionMessage: connection.message,
+              awaitingConfirmation: true,
+            });
+            reply = [
+              "I tested the Project connection successfully. Nothing has been saved yet.",
+              "Reply `confirm save project` to create the Project, or `cancel setup` to discard this draft.",
+              "",
+              formatArchitectSetupSummary(completeFields),
+            ].join("\n");
+            architectSetupMetadata = {
+              architectSetupState: "awaiting_confirmation",
+              connectionStatus: connection.status,
+            };
+          }
+        }
+      }
+    }
+  }
 
   await appendTaskEvent({
     taskId: params.task.id,
     ownerUserId: params.ownerUserId,
     actor: "system",
     eventType: "route_decision",
-    status: "succeeded",
+    status: routeStatus,
     content: intent.reason,
     metadataJson: serializeJson({
       architectRole: "Claude Opus 4.7",
       routedToArchitect: true,
       intent,
       tokenValueRejected: containsTokenLikeValue(params.userContent),
+      ...(architectSetupMetadata ? { architectSetup: architectSetupMetadata } : {}),
     }),
   });
 
@@ -1148,7 +1343,7 @@ async function appendArchitectTurn(params: {
     ownerUserId: params.ownerUserId,
     actor: "system",
     eventType: "message",
-    status: "succeeded",
+    status: routeStatus,
     content: reply,
     metadataJson: serializeJson({
       architectRole: "Claude Opus 4.7",
@@ -1156,6 +1351,7 @@ async function appendArchitectTurn(params: {
       intent,
       systemPromptPath: "server/prompts/architect.system.md",
       intentPromptPath: "server/prompts/architect.intent.md",
+      ...(architectSetupMetadata ? { architectSetup: architectSetupMetadata } : {}),
     }),
   });
 
@@ -1177,7 +1373,7 @@ async function appendArchitectTurn(params: {
     });
   }
 
-  return true;
+  return { handled: true, createdBuildTargetId };
 }
 
 async function requireOwnedTask(taskId: number, ownerUserId: number) {
@@ -1686,6 +1882,9 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         await requireOwnedTask(input.taskId, ctx.user.id);
+        if (input.status === "completed" || input.status === "archived") {
+          clearArchitectSetupStatesForTask(ctx.user.id, input.taskId);
+        }
         await updateTaskStatus(input.taskId, ctx.user.id, input.status);
         await appendTaskEvent({
           taskId: input.taskId,
@@ -1757,13 +1956,20 @@ export const appRouter = router({
           }),
         });
 
-        const handledByArchitect = await appendArchitectTurn({
+        const architectResult = await appendArchitectTurn({
           task,
           ownerUserId: ctx.user.id,
           userContent,
         });
-        if (handledByArchitect) {
-          return getTaskThread(task.id, ctx.user.id);
+        if (architectResult.handled) {
+          const thread = await getTaskThread(task.id, ctx.user.id);
+          if (architectResult.createdBuildTargetId) {
+            return {
+              ...thread,
+              architectSetupCreatedBuildTargetId: architectResult.createdBuildTargetId,
+            };
+          }
+          return thread;
         }
 
         await runGenerationTurn({

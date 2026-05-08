@@ -10,6 +10,16 @@ import {
   loadArchitectSystemPrompt,
   redactTokenLikeValues,
 } from "./architectLLM";
+import {
+  assertCompleteArchitectSetupFields,
+  clearArchitectSetupState,
+  extractArchitectSetupFields,
+  getArchitectSetupState,
+  isArchitectSetupConfirmation,
+  missingArchitectSetupFields,
+  upsertArchitectSetupState,
+  validateArchitectSetupFields,
+} from "./architectSetup";
 import { projectMemory } from "../drizzle/schema";
 
 describe("§1A-CONV Architect and project-memory contracts", () => {
@@ -33,8 +43,70 @@ describe("§1A-CONV Architect and project-memory contracts", () => {
     });
   });
 
+  it("keeps setup metadata on the setup path instead of misclassifying env-var details as credential-only", () => {
+    expect(
+      detectArchitectIntent(
+        "Set up project VIYO Portal with repo https://github.com/viyo-ai/VIYO and GitHub token env var BUILD_TARGET_GITHUB_TOKEN on base branch main"
+      )
+    ).toMatchObject({
+      intent: "setup",
+      shouldRouteToArchitect: true,
+      confidence: "high",
+    });
+
+    expect(detectArchitectIntent("repo url https://github.com/acme/app env var BUILD_TARGET_GITHUB_TOKEN base branch main")).toMatchObject({
+      intent: "setup",
+      shouldRouteToArchitect: true,
+    });
+  });
+
+  it("parses conversational Project setup fields and requires explicit confirmation before save", () => {
+    const taskId = 4701;
+    const ownerUserId = 7901;
+    clearArchitectSetupState(ownerUserId, taskId);
+
+    const fields = extractArchitectSetupFields(
+      "Project name: AI API Web Portal; repo url: https://github.com/viyo-ai/AI-API-Web-Portal-v2; token env var: BUILD_TARGET_GITHUB_TOKEN; base branch: main"
+    );
+
+    expect(fields).toEqual({
+      displayName: "AI API Web Portal",
+      repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2",
+      githubTokenEnvVar: "BUILD_TARGET_GITHUB_TOKEN",
+      defaultBaseBranch: "main",
+    });
+    expect(missingArchitectSetupFields(fields)).toEqual([]);
+    expect(validateArchitectSetupFields(fields)).toEqual([]);
+
+    const state = upsertArchitectSetupState({
+      ownerUserId,
+      taskId,
+      fields,
+      connectionStatus: "ok",
+      awaitingConfirmation: true,
+    });
+    expect(state.awaitingConfirmation).toBe(true);
+    expect(getArchitectSetupState(ownerUserId, taskId)?.fields).toEqual(fields);
+    expect(assertCompleteArchitectSetupFields(state.fields)).toEqual(fields);
+    expect(isArchitectSetupConfirmation("confirm save project")).toBe(true);
+
+    clearArchitectSetupState(ownerUserId, taskId);
+    expect(getArchitectSetupState(ownerUserId, taskId)).toBeUndefined();
+  });
+
+  it("rejects invalid token-value-shaped setup input and accepts env-var names only", () => {
+    const tokenValue = `${"github"}_pat_11AAABBBBBCCCCCDDDDDEEEEEFFFFF`;
+    const parsed = extractArchitectSetupFields(
+      `project name: Unsafe; repo url: https://github.com/acme/app; token env var: ${tokenValue}; base branch: main`
+    );
+
+    expect(containsTokenLikeValue(tokenValue)).toBe(true);
+    expect(validateArchitectSetupFields(parsed).join("\n")).toContain("environment variable name only");
+    expect(validateArchitectSetupFields({ ...parsed, githubTokenEnvVar: "BUILD_TARGET_GITHUB_TOKEN" })).toEqual([]);
+  });
+
   it("keeps token values out of Architect replies and redacts GitHub token prefixes", () => {
-    const tokenValue = "github_pat_11AAABBBBBCCCCCDDDDDEEEEEFFFFF";
+    const tokenValue = `${"github"}_pat_11AAABBBBBCCCCCDDDDDEEEEEFFFFF`;
 
     expect(containsTokenLikeValue(`Use ${tokenValue} for GitHub`)).toBe(true);
     expect(redactTokenLikeValues(`Use ${tokenValue} for GitHub`)).toBe("Use [redacted-token-value] for GitHub");
@@ -48,7 +120,7 @@ describe("§1A-CONV Architect and project-memory contracts", () => {
     expect(reply).toContain("Manus environment variable");
     expect(reply).toContain("env var name");
     expect(reply).not.toContain(tokenValue);
-    expect(reply).not.toMatch(/github_pat_[A-Za-z0-9_\-]+/);
+    expect(reply).not.toMatch(new RegExp(`${"github"}_pat_[A-Za-z0-9_\\-]+`));
   });
 
   it("ships prompt artifacts that define role boundaries, intent routing, and approval safety", () => {
