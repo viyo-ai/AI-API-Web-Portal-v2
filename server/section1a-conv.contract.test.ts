@@ -22,39 +22,69 @@ import {
 } from "./architectSetup";
 import { projectMemory } from "../drizzle/schema";
 
+type MockIntent = {
+  intent: "setup" | "credentials" | "onboarding" | "build" | "ambiguous" | "other";
+  shouldRouteToArchitect: boolean;
+  confidence?: "high" | "medium" | "low";
+  reason?: string;
+  tokenRedactionRequired?: boolean;
+};
+
+const mockIntentInvoke = (decision: MockIntent) => async () => ({
+  id: "mock-architect-intent",
+  created: 0,
+  model: "mock-classifier",
+  choices: [
+    {
+      index: 0,
+      message: {
+        role: "assistant" as const,
+        content: JSON.stringify({
+          confidence: "high",
+          reason: "Mocked semantic classifier decision.",
+          tokenRedactionRequired: false,
+          ...decision,
+        }),
+      },
+      finish_reason: "stop",
+    },
+  ],
+});
+
 describe("§1A-CONV Architect and project-memory contracts", () => {
-  it("routes setup and credential intents to Architect while keeping build turns on the existing route", () => {
-    expect(detectArchitectIntent("Please connect repo https://github.com/acme/app for project setup")).toMatchObject({
+  it("routes setup and credential intents to Architect while keeping build turns on the existing route", async () => {
+    await expect(detectArchitectIntent("Please connect repo https://github.com/acme/app for project setup", { invoke: mockIntentInvoke({ intent: "setup", shouldRouteToArchitect: true }) })).resolves.toMatchObject({
       intent: "setup",
       shouldRouteToArchitect: true,
       confidence: "high",
     });
 
-    expect(detectArchitectIntent("The GitHub token env var changed; please test connection")).toMatchObject({
+    await expect(detectArchitectIntent("The GitHub token env var changed; please test connection", { invoke: mockIntentInvoke({ intent: "credentials", shouldRouteToArchitect: true }) })).resolves.toMatchObject({
       intent: "credentials",
       shouldRouteToArchitect: true,
       confidence: "high",
     });
 
-    expect(detectArchitectIntent("Implement the composer queue acceptance polish")).toMatchObject({
+    await expect(detectArchitectIntent("Implement the composer queue acceptance polish", { invoke: mockIntentInvoke({ intent: "build", shouldRouteToArchitect: false }) })).resolves.toMatchObject({
       intent: "build",
       shouldRouteToArchitect: false,
       confidence: "high",
     });
   });
 
-  it("keeps setup metadata on the setup path instead of misclassifying env-var details as credential-only", () => {
-    expect(
+  it("keeps setup metadata on the setup path instead of misclassifying env-var details as credential-only", async () => {
+    await expect(
       detectArchitectIntent(
-        "Set up project VIYO Portal with repo https://github.com/viyo-ai/VIYO and GitHub token env var BUILD_TARGET_GITHUB_TOKEN on base branch main"
+        "Set up project VIYO Portal with repo https://github.com/viyo-ai/VIYO and GitHub token env var BUILD_TARGET_GITHUB_TOKEN on base branch main",
+        { invoke: mockIntentInvoke({ intent: "setup", shouldRouteToArchitect: true }) }
       )
-    ).toMatchObject({
+    ).resolves.toMatchObject({
       intent: "setup",
       shouldRouteToArchitect: true,
       confidence: "high",
     });
 
-    expect(detectArchitectIntent("repo url https://github.com/acme/app env var BUILD_TARGET_GITHUB_TOKEN base branch main")).toMatchObject({
+    await expect(detectArchitectIntent("repo url https://github.com/acme/app env var BUILD_TARGET_GITHUB_TOKEN base branch main", { invoke: mockIntentInvoke({ intent: "setup", shouldRouteToArchitect: true }) })).resolves.toMatchObject({
       intent: "setup",
       shouldRouteToArchitect: true,
     });
@@ -105,7 +135,7 @@ describe("§1A-CONV Architect and project-memory contracts", () => {
     expect(validateArchitectSetupFields({ ...parsed, githubTokenEnvVar: "BUILD_TARGET_GITHUB_TOKEN" })).toEqual([]);
   });
 
-  it("keeps token values out of Architect replies and redacts GitHub token prefixes", () => {
+  it("keeps token values out of Architect replies and redacts GitHub token prefixes", async () => {
     const tokenValue = `${"github"}_pat_11AAABBBBBCCCCCDDDDDEEEEEFFFFF`;
 
     expect(containsTokenLikeValue(`Use ${tokenValue} for GitHub`)).toBe(true);
@@ -113,7 +143,7 @@ describe("§1A-CONV Architect and project-memory contracts", () => {
 
     const reply = buildArchitectReply({
       message: `My token is ${tokenValue}`,
-      intent: detectArchitectIntent("token changed"),
+      intent: await detectArchitectIntent("token changed", { invoke: mockIntentInvoke({ intent: "credentials", shouldRouteToArchitect: true }) }),
       hasBuildTarget: true,
     });
 

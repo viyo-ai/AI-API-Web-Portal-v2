@@ -403,3 +403,9 @@
 - [x] §1A-CONV follow-up: Verify repo/local parity and whether auto setup via chat is actually wired beyond display; fix any display-only chat onboarding gap if confirmed.
 
 - [x] New uploaded directive: Fully ingest `/home/ubuntu/upload/pasted_content_2.txt`, extract authorized scope and acceptance gates, then follow only the directives it contains without exceeding Product Owner approval.
+
+- [x] §1A-CONV-FU-02: Produce directive ingestion evidence at `.taskmaster/docs/ingestion-evidence/PORTAL_PHASE_3_DIRECTIVE-S1A-CONV-FU-02-ingestion.md` before code changes with HR IDs, invariant map, and conservative verdict.
+- [x] §1A-CONV-FU-02: Replace keyword-based `detectArchitectIntent` with LLM-first classification using existing Manus OpenAI router, prompt-loaded `architect.intent.md`, timeout fallback, token-redaction marker, and per-thread retry cache.
+- [x] §1A-CONV-FU-02: Add focused contract tests for INV-FU-02-01 through INV-FU-02-05 while preserving INV-FU-01-01 through INV-FU-01-10 tests unchanged.
+- [x] §1A-CONV-FU-02: Run required validation gates: `pnpm check`, `pnpm vitest run server/architect.intent.contract.test.ts`, `pnpm vitest run server/section1a-conv.contract.test.ts`, `pnpm test --run`, `pnpm build`, and token-prefix diff grep.
+- [x] §1A-CONV-FU-02: Provide mandatory single inline PO closeout covering FU-01 and FU-02 with commit URLs, validation table, prompt text, classifier diff, grep result, test delta, FU-01 record-proof, required answers, and boundary statement.

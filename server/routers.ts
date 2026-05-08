@@ -1116,7 +1116,9 @@ async function appendArchitectTurn(params: {
   ownerUserId: number;
   userContent: string;
 }): Promise<{ handled: boolean; createdBuildTargetId?: number }> {
-  const intent = detectArchitectIntent(params.userContent);
+  const intent = await detectArchitectIntent(params.userContent, {
+    taskThreadId: params.task.id,
+  });
   const setupStateExists = hasArchitectSetupState(
     params.ownerUserId,
     params.task.id
@@ -2232,7 +2234,7 @@ export const appRouter = router({
     detectIntent: protectedProcedure
       .input(z.object({ message: z.string().trim().min(1).max(20000) }))
       .query(async ({ input }) => {
-        const decision = detectArchitectIntent(input.message);
+        const decision = await detectArchitectIntent(input.message);
         return {
           ...decision,
           tokenValueRejected: containsTokenLikeValue(input.message),
