@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { invokeLLM, type InvokeResult } from "./_core/llm";
 
 export type ArchitectIntent =
   | "setup"
@@ -14,9 +16,47 @@ export type ArchitectIntentDecision = {
   shouldRouteToArchitect: boolean;
   confidence: "high" | "medium" | "low";
   reason: string;
+  tokenRedactionRequired: boolean;
+  classifierSource: "llm" | "fallback" | "token_guard";
+  classifierModel?: string;
 };
 
-const TOKEN_PREFIX_PATTERN = /\b(?:ghp_|github_pat_|gho_|ghu_|ghs_|ghr_)[A-Za-z0-9_\-]+\b/i;
+type RouterIntentResponse = {
+  intent?: unknown;
+  shouldRouteToArchitect?: unknown;
+  reason?: unknown;
+  confidence?: unknown;
+  tokenRedactionRequired?: unknown;
+};
+
+export type ArchitectIntentClassifierOptions = {
+  taskThreadId?: string | number;
+  timeoutMs?: number;
+  invoke?: typeof invokeLLM;
+};
+
+const GITHUB_TOKEN_PREFIXES = [
+  `g${"hp_"}`,
+  `${"github"}_pat_`,
+  `g${"ho_"}`,
+  `g${"hu_"}`,
+  `g${"hs_"}`,
+  `g${"hr_"}`,
+];
+const TOKEN_PREFIX_PATTERN = new RegExp(
+  `\\b(?:${GITHUB_TOKEN_PREFIXES.join("|")})[A-Za-z0-9_\\-]+\\b`,
+  "i"
+);
+const VALID_INTENTS: ReadonlySet<ArchitectIntent> = new Set<ArchitectIntent>([
+  "setup",
+  "credentials",
+  "onboarding",
+  "build",
+  "ambiguous",
+  "other",
+]);
+const DEFAULT_CLASSIFIER_TIMEOUT_MS = 3500;
+const threadClassificationCache = new Map<string, ArchitectIntentDecision>();
 
 export const ARCHITECT_SYSTEM_PROMPT_PATH = path.join(
   process.cwd(),
@@ -44,122 +84,155 @@ export function redactTokenLikeValues(message: string) {
   return message.replace(TOKEN_PREFIX_PATTERN, "[redacted-token-value]");
 }
 
-export function detectArchitectIntent(message: string): ArchitectIntentDecision {
-  const normalized = message
-    .toLowerCase()
-    .replace(/[^a-z0-9_\s.-]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+export function resetArchitectIntentCacheForTests() {
+  threadClassificationCache.clear();
+}
 
-  const setupSignals = [
-    "connect project",
-    "connect repo",
-    "connect repository",
-    "add project",
-    "create project",
-    "save project",
-    "set up project",
-    "setup project",
-    "set up repo",
-    "setup repo",
-    "onboard project",
-    "onboarding",
-    "configure repository",
-    "project setup",
-    "project details",
-    "github repo",
-    "github repository",
-  ];
-  const credentialSignals = [
-    "token changed",
-    "rotate token",
-    "credential",
-    "env var changed",
-    "token env var changed",
-    "test connection",
-    "credentials drawer",
-    "missing token",
-    "update token",
-    "replace token",
-  ];
-  const setupMetadataSignals = [
-    "env var",
-    "environment variable",
-    "github token env",
-    "token environment variable",
-    "default base branch",
-    "base branch",
-    "repo url",
-    "repository url",
-  ];
-  const buildSignals = [
-    "implement",
-    "fix bug",
-    "ship",
-    "write code",
-    "refactor",
-    "test failing",
-    "deploy",
-    "acceptance",
-  ];
+function normalizeConfidence(value: unknown): ArchitectIntentDecision["confidence"] {
+  return value === "high" || value === "medium" || value === "low" ? value : "medium";
+}
 
-  const hasSetup = setupSignals.some(signal => normalized.includes(signal));
-  const hasCredential = credentialSignals.some(signal => normalized.includes(signal));
-  const hasSetupMetadata = setupMetadataSignals.some(signal => normalized.includes(signal));
-  const hasBuild = buildSignals.some(signal => normalized.includes(signal));
+function fallbackAmbiguousDecision(reason = "Classifier unavailable, asking owner to clarify."): ArchitectIntentDecision {
+  return {
+    intent: "ambiguous",
+    shouldRouteToArchitect: true,
+    confidence: "low",
+    reason,
+    tokenRedactionRequired: false,
+    classifierSource: "fallback",
+  };
+}
 
-  if (hasSetup) {
-    return {
-      intent: "setup",
-      shouldRouteToArchitect: true,
-      confidence: hasSetupMetadata || hasCredential ? "high" : "high",
-      reason: "Project setup or onboarding language was detected, so setup wins over env-var metadata while collecting Project details.",
-    };
+function tokenGuardDecision(): ArchitectIntentDecision {
+  return {
+    intent: "credentials",
+    shouldRouteToArchitect: true,
+    confidence: "high",
+    reason: "A token-like value was detected and redacted; Architect can only use Manus environment variable names.",
+    tokenRedactionRequired: true,
+    classifierSource: "token_guard",
+  };
+}
+
+function parseRouterIntentResponse(result: InvokeResult): ArchitectIntentDecision {
+  const content = result.choices[0]?.message.content;
+  const raw = typeof content === "string" ? content : JSON.stringify(content ?? {});
+  let parsed: RouterIntentResponse;
+  try {
+    parsed = JSON.parse(raw) as RouterIntentResponse;
+  } catch {
+    return fallbackAmbiguousDecision("Classifier returned an unreadable decision, asking owner to clarify.");
   }
 
-  if (hasSetupMetadata && !hasCredential) {
-    return {
-      intent: "setup",
-      shouldRouteToArchitect: true,
-      confidence: "medium",
-      reason: "Project setup field metadata was detected without token-rotation language.",
-    };
-  }
-
-  if (hasCredential && hasBuild) {
-    return {
-      intent: "ambiguous",
-      shouldRouteToArchitect: true,
-      confidence: "low",
-      reason:
-        "The message mixes credential language with build-work language, so Architect should ask the owner to choose the safe setup path or continue as a build turn.",
-    };
-  }
-
-  if (hasCredential) {
-    return {
-      intent: "credentials",
-      shouldRouteToArchitect: true,
-      confidence: "high",
-      reason: "Credential management language was detected without Project setup intent.",
-    };
-  }
-
-  if (hasBuild) {
-    return {
-      intent: "build",
-      shouldRouteToArchitect: false,
-      confidence: "high",
-      reason: "Build-work language should continue through the existing Kimi/Reviewer routing.",
-    };
-  }
+  const intent = typeof parsed.intent === "string" && VALID_INTENTS.has(parsed.intent as ArchitectIntent)
+    ? (parsed.intent as ArchitectIntent)
+    : "ambiguous";
+  const shouldRouteToArchitect = typeof parsed.shouldRouteToArchitect === "boolean"
+    ? parsed.shouldRouteToArchitect
+    : intent !== "build" && intent !== "other";
+  const reason = typeof parsed.reason === "string" && parsed.reason.trim().length > 0
+    ? parsed.reason.trim().replace(/\s+/g, " ").split(/[\r\n]/)[0].slice(0, 300)
+    : "Classifier produced a structured intent decision.";
 
   return {
-    intent: "other",
-    shouldRouteToArchitect: false,
-    confidence: "medium",
-    reason: "No setup, onboarding, or credential-management intent was detected.",
+    intent,
+    shouldRouteToArchitect,
+    confidence: normalizeConfidence(parsed.confidence),
+    reason,
+    tokenRedactionRequired: parsed.tokenRedactionRequired === true,
+    classifierSource: "llm",
+    classifierModel: result.model,
   };
+}
+
+function cacheKeyFor(taskThreadId: string | number | undefined, safeMessage: string) {
+  if (taskThreadId === undefined || taskThreadId === null || String(taskThreadId).trim().length === 0) {
+    return undefined;
+  }
+  const messageHash = createHash("sha256").update(safeMessage).digest("hex");
+  return `${String(taskThreadId)}:${messageHash}`;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("Architect intent classifier timed out")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+export async function detectArchitectIntent(
+  message: string,
+  options: ArchitectIntentClassifierOptions = {}
+): Promise<ArchitectIntentDecision> {
+  const safeMessage = redactTokenLikeValues(message);
+  const tokenRedactionRequired = safeMessage !== message;
+  const cacheKey = cacheKeyFor(options.taskThreadId, safeMessage);
+  const cached = cacheKey ? threadClassificationCache.get(cacheKey) : undefined;
+  if (cached) return cached;
+
+  if (tokenRedactionRequired) {
+    const decision = tokenGuardDecision();
+    if (cacheKey) threadClassificationCache.set(cacheKey, decision);
+    return decision;
+  }
+
+  const invoke = options.invoke ?? invokeLLM;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_CLASSIFIER_TIMEOUT_MS;
+
+  try {
+    const result = await withTimeout(
+      invoke({
+        messages: [
+          {
+            role: "system",
+            content: loadArchitectIntentPrompt(),
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              ownerMessage: safeMessage,
+              tokenRedactionRequired,
+            }),
+          },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "architect_intent_decision",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                intent: { type: "string", enum: ["setup", "credentials", "onboarding", "build", "ambiguous", "other"] },
+                shouldRouteToArchitect: { type: "boolean" },
+                confidence: { type: "string", enum: ["high", "medium", "low"] },
+                reason: { type: "string" },
+                tokenRedactionRequired: { type: "boolean" },
+              },
+              required: ["intent", "shouldRouteToArchitect", "confidence", "reason", "tokenRedactionRequired"],
+              additionalProperties: false,
+            },
+          },
+        },
+      }),
+      timeoutMs
+    );
+
+    const decision = parseRouterIntentResponse(result);
+    if (cacheKey) threadClassificationCache.set(cacheKey, decision);
+    return decision;
+  } catch {
+    const decision = fallbackAmbiguousDecision();
+    if (cacheKey) threadClassificationCache.set(cacheKey, decision);
+    return decision;
+  }
 }
 
 export function buildArchitectReply(params: {
@@ -167,7 +240,7 @@ export function buildArchitectReply(params: {
   intent: ArchitectIntentDecision;
   hasBuildTarget: boolean;
 }) {
-  if (containsTokenLikeValue(params.message)) {
+  if (params.intent.tokenRedactionRequired || containsTokenLikeValue(params.message)) {
     return [
       "I can’t accept or repeat token values in chat. Please update the token in the relevant Manus environment variable, then use the project connection test so I can verify the configured env var name without seeing the secret.",
       "If you want the form-based path, open Advanced Setup.",
