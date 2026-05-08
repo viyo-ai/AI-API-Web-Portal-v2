@@ -1502,8 +1502,8 @@ export default function Home() {
   }
 
   return (
-    <main className="grid h-screen w-full min-w-0 overflow-hidden overflow-x-hidden bg-[#f7f6f2] text-[#242420] lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)_390px]">
-      <aside className="flex h-screen min-h-0 min-w-0 flex-col overflow-hidden border-r border-[#d9d8d1] bg-[#f0efeb]">
+    <main data-testid="workspace-shell" className="grid h-screen w-full min-w-0 overflow-hidden overflow-x-hidden bg-[#f7f6f2] text-[#242420] lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)_380px] 2xl:grid-cols-[340px_minmax(0,1fr)_420px]">
+      <aside data-testid="left-navigation-rail" className="flex h-screen min-h-0 min-w-0 flex-col overflow-hidden border-r border-[#d9d8d1] bg-[#f0efeb]">
         <div className="border-b border-[#d9d8d1] p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2 text-lg font-semibold tracking-[-0.03em] text-[#1f1f1f]">
@@ -1739,14 +1739,14 @@ export default function Home() {
                     <p className="line-clamp-2 text-xs leading-5 text-[#66665f]">{ownerFacingText(task.summary) || "No summary recorded yet."}</p>
                     <p className="mt-2 truncate text-[11px] text-[#9a998f]">Updated {compactDate(task.updatedAt)}</p>
                   </button>
-                  <div className="mt-3 flex min-w-0 flex-wrap justify-end gap-2">
+                  <div className="mt-3 grid min-w-0 grid-cols-2 gap-2">
                     {editingTaskId === task.id ? (
                       <>
-                        <Button type="button" variant="outline" size="sm" onClick={() => void handleRenameTask(task.id)} disabled={renameTaskMutation.isPending} className="h-8 rounded-full border-emerald-200 bg-emerald-50 px-3 text-[11px] text-emerald-900">Save</Button>
-                        <Button type="button" variant="outline" size="sm" onClick={() => { setEditingTaskId(null); setEditingTaskTitle(""); }} className="h-8 rounded-full border-[#d9d8d1] bg-white px-3 text-[11px] text-[#66665f]">Cancel</Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => void handleRenameTask(task.id)} disabled={renameTaskMutation.isPending} className="h-8 w-full rounded-full border-emerald-200 bg-emerald-50 px-2 text-[11px] text-emerald-900">Save</Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => { setEditingTaskId(null); setEditingTaskTitle(""); }} className="h-8 w-full rounded-full border-[#d9d8d1] bg-white px-2 text-[11px] text-[#66665f]">Cancel</Button>
                       </>
                     ) : (
-                      <Button type="button" variant="outline" size="sm" onClick={() => beginTaskRename(task)} className="h-8 rounded-full border-[#d9d8d1] bg-white px-3 text-[11px] text-[#66665f] hover:text-[#2c2c28]" data-testid="section1a-conv-task-rename">Rename</Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => beginTaskRename(task)} className="h-8 w-full rounded-full border-[#d9d8d1] bg-white px-2 text-[11px] text-[#66665f] hover:text-[#2c2c28]" data-testid="section1a-conv-task-rename">Rename</Button>
                     )}
                     <Button
                       type="button"
@@ -1755,7 +1755,7 @@ export default function Home() {
                       onClick={() => handleArchiveTask(task.id, task.title)}
                       disabled={updateTaskStatus.isPending}
                       aria-label={`Archive task ${task.title}`}
-                      className="h-8 rounded-full border-[#d9d8d1] bg-white px-3 text-[11px] text-[#66665f] hover:text-[#2c2c28]"
+                      className="h-8 w-full rounded-full border-[#d9d8d1] bg-white px-2 text-[11px] text-[#66665f] hover:text-[#2c2c28]"
                     >
                       <Archive className="mr-1.5 h-3.5 w-3.5" /> Archive
                     </Button>
@@ -2292,18 +2292,18 @@ export default function Home() {
         )}
       </section>
 
-      <aside className="flex h-screen min-h-0 min-w-0 flex-col overflow-hidden border-l border-[#d9d8d1] bg-[#f0efeb] lg:col-span-2 xl:col-span-1">
+      <aside data-testid="right-task-inspector-rail" className="flex h-screen min-h-0 min-w-0 flex-col overflow-hidden border-l border-[#d9d8d1] bg-[#f0efeb] lg:col-span-2 xl:col-span-1">
         <Tabs defaultValue="files" className="flex h-full min-h-0 flex-col" data-testid="task-inspector-tabs">
           <div className="border-b border-[#d9d8d1] p-4">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#77766e]">
               <PanelRight className="h-4 w-4" /> Task inspector
             </div>
-            <h2 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#20201d]">Files and activity, context, and diagnostics</h2>
-            <TabsList className="mt-4 grid w-full grid-cols-4 rounded-2xl border border-[#deded8] bg-white p-1">
-              <TabsTrigger value="files" className="rounded-xl px-2 text-[11px] data-[state=active]:bg-[#1f1f1f] data-[state=active]:text-white">Files</TabsTrigger>
-              <TabsTrigger value="activity" className="rounded-xl px-2 text-[11px] data-[state=active]:bg-[#1f1f1f] data-[state=active]:text-white">AI Activity</TabsTrigger>
-              <TabsTrigger value="context" className="rounded-xl px-2 text-[11px] data-[state=active]:bg-[#1f1f1f] data-[state=active]:text-white">Context</TabsTrigger>
-              <TabsTrigger value="diagnostics" className="rounded-xl px-2 text-[11px] data-[state=active]:bg-[#1f1f1f] data-[state=active]:text-white">Diagnostics</TabsTrigger>
+            <h2 className="mt-1 text-lg font-semibold leading-6 tracking-[-0.03em] text-[#20201d] 2xl:text-xl">Files and activity, context, and diagnostics</h2>
+            <TabsList className="mt-4 grid h-auto w-full grid-cols-2 gap-1 rounded-2xl border border-[#deded8] bg-white p-1 2xl:grid-cols-4">
+              <TabsTrigger value="files" className="min-h-9 rounded-xl px-2 text-[11px] data-[state=active]:bg-[#1f1f1f] data-[state=active]:text-white">Files</TabsTrigger>
+              <TabsTrigger value="activity" className="min-h-9 rounded-xl px-2 text-[11px] data-[state=active]:bg-[#1f1f1f] data-[state=active]:text-white">AI Activity</TabsTrigger>
+              <TabsTrigger value="context" className="min-h-9 rounded-xl px-2 text-[11px] data-[state=active]:bg-[#1f1f1f] data-[state=active]:text-white">Context</TabsTrigger>
+              <TabsTrigger value="diagnostics" className="min-h-9 rounded-xl px-2 text-[11px] data-[state=active]:bg-[#1f1f1f] data-[state=active]:text-white">Diagnostics</TabsTrigger>
             </TabsList>
           </div>
 

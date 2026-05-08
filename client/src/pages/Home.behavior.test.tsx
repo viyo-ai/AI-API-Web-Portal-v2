@@ -1763,12 +1763,15 @@ describe("Home v2 task-first workspace behavior", () => {
     render(<Home />);
 
     await screen.findAllByText("Implement v2 shell");
+    expect(screen.getByTestId("workspace-shell")).toHaveClass("lg:grid-cols-[320px_minmax(0,1fr)]", "xl:grid-cols-[320px_minmax(0,1fr)_380px]", "2xl:grid-cols-[340px_minmax(0,1fr)_420px]");
+    expect(screen.getByTestId("left-navigation-rail")).toBeInTheDocument();
     const taskCard = screen.getByTestId("left-nav-task-card");
     expect(taskCard).toHaveClass("max-w-full", "overflow-hidden");
     const taskTitleButton = screen.getAllByText("Implement v2 shell").find((element) => element.closest("button"))?.closest("button");
     expect(taskTitleButton).toHaveClass("min-w-0", "overflow-hidden");
     expect(within(taskCard).getByText("active")).toHaveClass("max-w-[96px]", "truncate", "shrink-0");
-    expect(screen.getByRole("button", { name: /archive task implement v2 shell/i })).toHaveClass("h-8", "rounded-full");
+    expect(screen.getByTestId("section1a-conv-task-rename")).toHaveClass("w-full");
+    expect(screen.getByRole("button", { name: /archive task implement v2 shell/i })).toHaveClass("h-8", "w-full", "rounded-full");
   });
 
   it("writes and creates authenticated workspace filesystem entries from the real filesystem panel", async () => {
@@ -1939,8 +1942,9 @@ describe("Home v2 task-first workspace behavior", () => {
     await screen.findAllByText("Implement v2 shell");
 
     expect(screen.getByTestId("task-inspector-tabs")).toBeInTheDocument();
+    expect(screen.getByTestId("right-task-inspector-rail")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /files/i })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: /AI Activity/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /AI Activity/i })).toHaveClass("min-h-9");
     expect(screen.getByRole("tab", { name: /context/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /diagnostics/i })).toBeInTheDocument();
     expect(screen.getByTestId("windows-file-manager")).toBeInTheDocument();

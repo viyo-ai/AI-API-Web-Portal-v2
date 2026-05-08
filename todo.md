@@ -500,3 +500,5 @@
 - [x] §PORTAL-FIX-02: add behavioral test proving pending submit disables send and renders a queryable Stop control.
 - [x] §PORTAL-FIX-02: add behavioral test proving clicking Stop calls the abort endpoint, clears pending UI state, and re-enables send.
 - [x] §PORTAL-FIX-02: add behavioral test proving natural turn completion hides Stop and re-enables send.
+
+- [x] §PORTAL-UX-NAV-01: reduce cramped left navigation and right task-inspector layout by widening/spacing navigation areas, improving text truncation, and preserving responsive behavior shown in the supplied screenshot.

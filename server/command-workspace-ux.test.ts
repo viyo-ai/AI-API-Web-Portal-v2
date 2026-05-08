@@ -59,7 +59,10 @@ describe("v2 task-first workspace production regressions", () => {
     const source = readProjectFile("client/src/pages/Home.tsx");
 
     expect(source).toContain("overflow-x-hidden");
-    expect(source).toContain("xl:grid-cols-[320px_minmax(0,1fr)_390px]");
+    expect(source).toContain("lg:grid-cols-[320px_minmax(0,1fr)]");
+    expect(source).toContain("xl:grid-cols-[320px_minmax(0,1fr)_380px]");
+    expect(source).toContain("2xl:grid-cols-[340px_minmax(0,1fr)_420px]");
+    expect(source).toContain("grid h-auto w-full grid-cols-2 gap-1");
     expect(source).toContain("flex h-screen min-h-0 min-w-0 flex-col overflow-hidden border-l");
     expect(source).toContain("lg:col-span-2 xl:col-span-1");
     expect(source).toContain("Task folder");
