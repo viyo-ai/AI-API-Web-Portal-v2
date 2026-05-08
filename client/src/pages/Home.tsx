@@ -513,6 +513,7 @@ export default function Home() {
   const [cancelledQueueItemIds, setCancelledQueueItemIds] = useState<number[]>([]);
   const [editedQueueContentById, setEditedQueueContentById] = useState<Record<number, string>>({});
   const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
+  const [pendingSubmitStopRequested, setPendingSubmitStopRequested] = useState(false);
   const [approvalRevisionText, setApprovalRevisionText] = useState("");
   const [isFileDragActive, setIsFileDragActive] = useState(false);
   const [isGlobalFileDragActive, setIsGlobalFileDragActive] = useState(false);
@@ -578,11 +579,17 @@ export default function Home() {
   const queuedMessages = ((selectedThread?.queuedMessages ?? []) as QueuedComposerMessage[]);
   const isWaitingForKimiApproval = isAwaitingOwnerApproval(activeTurn);
   const hasActiveGeneration = isActiveTurnState(activeTurn);
+  const isSubmitTurnPending = submitMessage.isPending && !pendingSubmitStopRequested;
+  const hasStoppableGeneration = hasActiveGeneration || isSubmitTurnPending;
   const visibleQueuedMessages = queuedMessages.filter((queueItem) => !cancelledQueueItemIds.includes(queueItem.id));
   const queueCount = Math.min(visibleQueuedMessages.length, MAX_QUEUED_MESSAGES_PER_TASK_UI);
   const isQueueFull = hasActiveGeneration && queueCount >= MAX_QUEUED_MESSAGES_PER_TASK_UI;
+  const isComposerSendDisabled = isSubmitTurnPending || !composerText.trim() || isQueueFull;
   const queueCountLabel = `${queueCount} of ${MAX_QUEUED_MESSAGES_PER_TASK_UI} queued${isQueueFull ? " (full)" : ""}`;
   const stopButtonLabel = isWaitingForKimiApproval ? "Stop and discard plan" : "Stop";
+  useEffect(() => {
+    if (!submitMessage.isPending) setPendingSubmitStopRequested(false);
+  }, [submitMessage.isPending]);
   const events = ((selectedThread?.events ?? []) as ThreadEvent[]);
   const ownerVisibleEvents = useMemo(() => events.filter(isOwnerVisibleEvent).sort(oldestFirst), [events]);
   const technicalEvents = useMemo(() => events.filter((event) => !isOwnerVisibleEvent(event)).sort(newestFirst), [events]);
@@ -1134,6 +1141,7 @@ export default function Home() {
     const taskId = selectedTaskId ?? (await createTaskRecordOnly());
     if (!taskId) return;
     const queued = hasActiveGeneration;
+    setPendingSubmitStopRequested(false);
     const response = await submitMessage.mutateAsync({
       taskId,
       message: cleanMessage,
@@ -1194,8 +1202,20 @@ export default function Home() {
   }
 
   async function handleStopGeneration() {
-    if (!selectedTaskId || !activeTurn?.id) return;
-    await stopGenerationMutation.mutateAsync({ taskId: selectedTaskId, turnId: activeTurn.id, activeOperation: activeTurn.state ?? null });
+    if (!selectedTaskId) return;
+    let turnToStop = activeTurn;
+    if (!turnToStop?.id && submitMessage.isPending) {
+      const refreshedThread = await threadQuery.refetch();
+      turnToStop = refreshedThread.data?.activeTurn as ActiveTurnRecord | null | undefined;
+    }
+    if (!turnToStop?.id) {
+      setPendingSubmitStopRequested(true);
+      setWorkspaceNotice("Stop requested. Waiting for the active turn to surface before aborting.");
+      setStopConfirmOpen(false);
+      return;
+    }
+    await stopGenerationMutation.mutateAsync({ taskId: selectedTaskId, turnId: turnToStop.id, activeOperation: turnToStop.state ?? null });
+    setPendingSubmitStopRequested(true);
     setWorkspaceNotice("Stopped. Send a new message when you’re ready.");
     setStopConfirmOpen(false);
     await refreshWorkspace();
@@ -2172,8 +2192,8 @@ export default function Home() {
                   Always check before Kimi runs: {alwaysRequireKimiApproval ? "On" : "Off"}
                 </button>
                 <span className="hidden sm:inline">{hasActiveGeneration ? "Enter queues · Shift+Enter adds a line" : "Enter sends · Shift+Enter adds a line"}</span>
-                {hasActiveGeneration ? (
-                  <Button type="button" variant="outline" onClick={handleStopButtonClick} disabled={!activeTurn?.id || stopGenerationMutation.isPending} className="h-7 rounded-full border-rose-200 bg-white px-2.5 text-[11px] text-rose-700" data-testid="section8-stop-generation">
+                {hasStoppableGeneration ? (
+                  <Button type="button" variant="outline" onClick={handleStopButtonClick} disabled={(!activeTurn?.id && !submitMessage.isPending) || stopGenerationMutation.isPending} className="h-7 rounded-full border-rose-200 bg-white px-2.5 text-[11px] text-rose-700" data-testid="section8-stop-generation">
                     {stopGenerationMutation.isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <CircleAlert className="mr-1.5 h-3 w-3" />}
                     {stopButtonLabel}
                   </Button>
@@ -2217,7 +2237,7 @@ export default function Home() {
                 className="max-h-36 min-h-11 flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm leading-6 shadow-none focus-visible:ring-0"
               />
               <p id="task-composer-send-help" className="sr-only">Press Enter in the task message composer or activate the stable send button to submit the current task message. Press Shift and Enter to add a line break.</p>
-              <Button type="button" id="section8-send-or-queue-button" onClick={handleSendMessage} disabled={submitMessage.isPending || !composerText.trim() || isQueueFull} className={`mb-1 h-9 shrink-0 rounded-full px-3 text-white hover:bg-black ${hasActiveGeneration ? "w-auto bg-sky-700 hover:bg-sky-800" : "w-9 bg-[#1f1f1f] p-0"}`} aria-label={hasActiveGeneration ? "Queue message for task" : "Send message to task"} aria-controls="task-message-composer" aria-describedby="task-composer-send-help" aria-keyshortcuts="Enter" data-testid="section8-send-or-queue-button">
+              <Button type="button" id="section8-send-or-queue-button" onClick={handleSendMessage} disabled={isComposerSendDisabled} className={`mb-1 h-9 shrink-0 rounded-full px-3 text-white hover:bg-black ${hasActiveGeneration ? "w-auto bg-sky-700 hover:bg-sky-800" : "w-9 bg-[#1f1f1f] p-0"}`} aria-label={hasActiveGeneration ? "Queue message for task" : "Send message to task"} aria-controls="task-message-composer" aria-describedby="task-composer-send-help" aria-keyshortcuts="Enter" data-testid="section8-send-or-queue-button">
                 {submitMessage.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : hasActiveGeneration ? <span className="text-xs font-semibold">Queue</span> : <SendHorizontal className="h-4 w-4" />}
               </Button>
             </div>

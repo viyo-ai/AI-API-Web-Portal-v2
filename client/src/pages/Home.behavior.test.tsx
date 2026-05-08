@@ -8,6 +8,7 @@ import Home from "./Home";
 
 const logoutMock = vi.fn();
 const invalidateMock = vi.fn(async () => undefined);
+const threadRefetchMock = vi.fn(async () => ({ data: mockThread }));
 const createTaskMock = vi.fn();
 const updateTaskStatusMock = vi.fn();
 const renameTaskMock = vi.fn();
@@ -100,6 +101,7 @@ const sampleTask = {
 
 type MockTask = Omit<typeof sampleTask, "archivedAt"> & { archivedAt: number | null };
 let mockTasks: Array<MockTask> = [sampleTask];
+let submitMessagePending = false;
 let mockThread: unknown = {
   task: sampleTask,
   activeTurn: null,
@@ -207,7 +209,7 @@ vi.mock("@/lib/trpc", () => ({
     }),
     tasks: {
       list: { useQuery: () => ({ data: mockTasks, isLoading: false }) },
-      thread: { useQuery: () => ({ data: mockThread, isLoading: false }) },
+      thread: { useQuery: () => ({ data: mockThread, isLoading: false, refetch: threadRefetchMock }) },
       create: {
         useMutation: () => ({
           mutateAsync: createTaskMock,
@@ -231,7 +233,7 @@ vi.mock("@/lib/trpc", () => ({
       submitMessage: {
         useMutation: () => ({
           mutateAsync: submitMessageMock,
-          isPending: false,
+          isPending: submitMessagePending,
         }),
       },
       updateQueuedMessage: {
@@ -362,6 +364,7 @@ beforeAll(() => {
 beforeEach(() => {
   logoutMock.mockReset();
   invalidateMock.mockClear();
+  threadRefetchMock.mockReset();
   createTaskMock.mockReset();
   updateTaskStatusMock.mockReset();
   renameTaskMock.mockReset();
@@ -391,6 +394,8 @@ beforeEach(() => {
   createTaskMock.mockResolvedValue({ task: { ...sampleTask, id: 19, title: "Created task" }, events: [], activeTurn: null });
   updateTaskStatusMock.mockResolvedValue({ ...sampleTask, status: "archived" });
   renameTaskMock.mockResolvedValue({ ...sampleTask, title: "Renamed task" });
+  submitMessagePending = false;
+  threadRefetchMock.mockResolvedValue({ data: mockThread });
   submitMessageMock.mockResolvedValue(mockThread);
   updateQueuedMessageMock.mockResolvedValue([]);
   clearQueuedMessageMock.mockResolvedValue([]);
@@ -1384,6 +1389,68 @@ describe("Home v2 task-first workspace behavior", () => {
 
     expect(stopGenerationMock).toHaveBeenCalledWith({ taskId: 7, turnId: 71, activeOperation: "awaiting_approval" });
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Stopped. Send a new message when you’re ready."));
+  });
+
+  it("PORTAL-FIX-02-01 shows a queryable Stop control while submitMessage is pending and send is disabled", async () => {
+    const user = userEvent.setup();
+    mockThread = { task: sampleTask, activeTurn: null, queuedMessages: [], events: [] };
+    const { rerender } = render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    await user.type(screen.getByLabelText(/Task message/i), "Run a long generation for Stop visibility");
+    expect(screen.getByTestId("section8-send-or-queue-button")).toBeEnabled();
+
+    submitMessagePending = true;
+    rerender(<Home />);
+
+    expect(screen.getByTestId("section8-send-or-queue-button")).toBeDisabled();
+    expect(screen.getByTestId("section8-stop-generation")).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Stop$/i })).toBeInTheDocument();
+  });
+
+  it("PORTAL-FIX-02-02 clicking pending-submit Stop calls the abort endpoint, clears pending UI state, and re-enables send", async () => {
+    const user = userEvent.setup();
+    mockThread = { task: sampleTask, activeTurn: null, queuedMessages: [], events: [] };
+    threadRefetchMock.mockResolvedValue({
+      data: {
+        task: sampleTask,
+        activeTurn: { id: 88, taskId: 7, ownerUserId: 42, routeMode: "auto", state: "model_calling", startedAt: 1777999200000, completedAt: null, errorMessage: null },
+        queuedMessages: [],
+        events: [],
+      },
+    });
+    const { rerender } = render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    await user.type(screen.getByLabelText(/Task message/i), "Run a long generation and then stop it");
+    submitMessagePending = true;
+    rerender(<Home />);
+
+    await user.click(screen.getByTestId("section8-stop-generation"));
+
+    await waitFor(() => expect(stopGenerationMock).toHaveBeenCalledWith({ taskId: 7, turnId: 88, activeOperation: "model_calling" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Stopped. Send a new message when you’re ready."));
+    expect(screen.queryByTestId("section8-stop-generation")).not.toBeInTheDocument();
+    expect(screen.getByTestId("section8-send-or-queue-button")).toBeEnabled();
+  });
+
+  it("PORTAL-FIX-02-03 hides Stop and re-enables send after natural pending-turn completion", async () => {
+    const user = userEvent.setup();
+    mockThread = { task: sampleTask, activeTurn: null, queuedMessages: [], events: [] };
+    const { rerender } = render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    await user.type(screen.getByLabelText(/Task message/i), "Run a long generation that completes naturally");
+    submitMessagePending = true;
+    rerender(<Home />);
+    expect(screen.getByTestId("section8-send-or-queue-button")).toBeDisabled();
+    expect(screen.getByTestId("section8-stop-generation")).toBeVisible();
+
+    submitMessagePending = false;
+    rerender(<Home />);
+
+    expect(screen.queryByTestId("section8-stop-generation")).not.toBeInTheDocument();
+    expect(screen.getByTestId("section8-send-or-queue-button")).toBeEnabled();
   });
 
   it("INV-S8-08 reflects FIFO queue flush as normal owner messages and empties the queue UI", async () => {
