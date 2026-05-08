@@ -601,6 +601,43 @@ describe("Home v2 task-first workspace behavior", () => {
     await waitFor(() => expect(screen.getAllByText(/Your Project is connected\. You can start a new task whenever you’re ready\./i).length).toBeGreaterThan(0));
   });
 
+  it("§1A-CONV-FU-05 normalizes partial AI review output into safe Project completion defaults", async () => {
+    const user = userEvent.setup();
+    analyzeWizardMock.mockResolvedValueOnce({
+      status: "ok",
+      connection: { status: "ok", message: "Connected. Read access confirmed." },
+      recommendation: {
+        defaultBaseBranch: { value: "main", confidence: "high", rationale: "Detected from the GitHub default branch." },
+        branchStrategy: { value: { initialBuildBranch: "portal-wizard-setup", protectedBranches: [] }, confidence: "low", rationale: "The AI review returned a branch name without the required safety prefix and no protected branch list." },
+        validationCommands: { value: [], confidence: "low", rationale: "The AI review did not identify package validation commands." },
+        serviceChecks: { value: [], confidence: "low", rationale: "No service check was detected." },
+        projectRuleBooks: { value: [], confidence: "low", rationale: "No authoritative Project rule books were detected." },
+        environmentVariables: { value: {}, confidence: "low", rationale: "No extra environment variables were detected." },
+      },
+      fallbackMessage: null,
+    });
+    render(<Home />);
+
+    await user.type(await screen.findByLabelText(/GitHub repository link/i), "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git");
+    await user.click(screen.getByRole("button", { name: /Test the connection/i }));
+    expect((await screen.findAllByText("Connected. Read access confirmed.")).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: /Review recommended setup/i }));
+    expect(await screen.findByText(/Review AI recommendations/i)).toBeInTheDocument();
+    expect(screen.getByDisplayValue("agent-work/portal-wizard-setup")).toBeInTheDocument();
+    expect(screen.getAllByDisplayValue("main").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByDisplayValue(/pnpm check/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Save Project/i }));
+
+    await waitFor(() => expect(completeWizardMock).toHaveBeenCalledWith(expect.objectContaining({
+      repoUrl: "https://github.com/viyo-ai/AI-API-Web-Portal-v2.git",
+      defaultBaseBranch: "main",
+      initialBuildBranch: "agent-work/portal-wizard-setup",
+      protectedBranches: ["main"],
+      validationCommands: ["pnpm check", "pnpm test", "pnpm build"],
+    })));
+  });
+
   it("§1A-FU-04-01 presents the owner wizard in plain English without forbidden technical vocabulary", async () => {
     render(<Home />);
 
@@ -961,6 +998,59 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(screen.getAllByText("Kimi returned an empty response.").length).toBeGreaterThan(0);
   });
 
+  it("§1A-CONV-FU-05 suppresses stale provider recovery notes after a later successful same-turn answer", async () => {
+    const user = userEvent.setup();
+    mockThread = {
+      task: sampleTask,
+      activeTurn: null,
+      events: [
+        {
+          id: 311,
+          taskId: 7,
+          ownerUserId: 42,
+          actor: "user",
+          eventType: "message",
+          status: "completed",
+          content: "Use Kimi for a short QA acknowledgement.",
+          metadataJson: "{\"turnId\":52}",
+          createdAt: 1777999100000,
+        },
+        {
+          id: 312,
+          taskId: 7,
+          ownerUserId: 42,
+          actor: "wrapper",
+          eventType: "error",
+          status: "failed",
+          content: "Kimi returned an empty response.",
+          metadataJson: "{\"turnId\":52}",
+          createdAt: 1777999200000,
+        },
+        {
+          id: 313,
+          taskId: 7,
+          ownerUserId: 42,
+          actor: "kimi",
+          eventType: "model_result",
+          status: "completed",
+          content: "Kimi route QA acknowledged.",
+          metadataJson: "{\"turnId\":52}",
+          createdAt: 1777999300000,
+        },
+      ],
+    };
+
+    render(<Home />);
+
+    expect(await screen.findByText("Kimi route QA acknowledged.")).toBeInTheDocument();
+    expect(screen.queryByTestId("owner-provider-recovery")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Kimi did not return usable text/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /AI Activity/i }));
+    await user.click(screen.getByRole("button", { name: /show activity details/i }));
+    expect(screen.getAllByText("Kimi returned an empty response.").length).toBeGreaterThan(0);
+  });
+
   it("renders the §9 owner approval card, keeps Kimi paused, and wires approve revise cancel decisions", async () => {
     const user = userEvent.setup();
     mockThread = {
@@ -1108,6 +1198,34 @@ describe("Home v2 task-first workspace behavior", () => {
       routeMode: "kimi",
     });
     await waitFor(() => expect(invalidateMock).toHaveBeenCalled());
+  });
+
+  it("§1A-CONV-FU-05 keeps the task composer send target stable and accessible beside diagnostics controls", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await screen.findAllByText("Implement v2 shell");
+    await user.click(screen.getByRole("tab", { name: /AI Activity/i }));
+    await user.click(screen.getByRole("button", { name: /show activity details/i }));
+
+    const composer = screen.getByTestId("section8-task-message-composer");
+    const sendButton = screen.getByTestId("section8-send-or-queue-button");
+    expect(composer).toHaveAttribute("id", "task-message-composer");
+    expect(composer).toHaveAttribute("aria-controls", "section8-send-or-queue-button");
+    expect(composer).toHaveAttribute("aria-describedby", "task-composer-send-help");
+    expect(sendButton).toHaveAttribute("id", "section8-send-or-queue-button");
+    expect(sendButton).toHaveAccessibleName(/Send message to task/i);
+    expect(sendButton).toHaveAttribute("aria-controls", "task-message-composer");
+    expect(sendButton).toHaveAttribute("aria-keyshortcuts", "Enter");
+
+    await user.type(composer, "Stable composer send target");
+    await user.click(sendButton);
+
+    expect(submitMessageMock).toHaveBeenCalledWith({
+      taskId: 7,
+      message: "Stable composer send target",
+      routeMode: "auto",
+    });
   });
 
   it("INV-S8-01 queues composer submissions during an active turn and shows the queue indicator plus dropdown content", async () => {
