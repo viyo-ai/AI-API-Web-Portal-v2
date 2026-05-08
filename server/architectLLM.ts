@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { invokeLLM, type InvokeResult } from "./_core/llm";
+import type { ArchitectSetupDraft, ArchitectSetupState } from "./architectSetup";
 
 export type ArchitectIntent =
   | "setup"
@@ -35,6 +36,41 @@ export type ArchitectIntentClassifierOptions = {
   invoke?: typeof invokeLLM;
 };
 
+export type ArchitectReplyCallTool = {
+  name:
+    | "buildTargets.testConnection"
+    | "buildTargets.create"
+    | "projectMemory.list"
+    | "projectMemory.set";
+  args: Record<string, unknown>;
+};
+
+export type ArchitectReplyDecision = {
+  reply: string;
+  requiresConfirmation: boolean;
+  callTool?: ArchitectReplyCallTool;
+};
+
+export type ArchitectReplyOperationalState = {
+  status?: string;
+  missingFields?: Array<keyof ArchitectSetupDraft>;
+  validationErrors?: string[];
+  connectionStatus?: ArchitectSetupState["connectionStatus"] | "not_applicable";
+  connectionMessage?: string;
+  createdBuildTargetName?: string;
+  hasBuildTarget?: boolean;
+  nextAction?: string;
+};
+
+export type ArchitectReplyGeneratorOptions = {
+  setupState?: ArchitectSetupState;
+  lastUserMessage: string;
+  intentDecision: ArchitectIntentDecision;
+  operationalState?: ArchitectReplyOperationalState;
+  timeoutMs?: number;
+  invoke?: typeof invokeLLM;
+};
+
 const GITHUB_TOKEN_PREFIXES = [
   `g${"hp_"}`,
   `${"github"}_pat_`,
@@ -55,7 +91,15 @@ const VALID_INTENTS: ReadonlySet<ArchitectIntent> = new Set<ArchitectIntent>([
   "ambiguous",
   "other",
 ]);
+const ALLOWED_ARCHITECT_TOOL_NAMES = new Set<ArchitectReplyCallTool["name"]>([
+  "buildTargets.testConnection",
+  "buildTargets.create",
+  "projectMemory.list",
+  "projectMemory.set",
+]);
 const DEFAULT_CLASSIFIER_TIMEOUT_MS = 3500;
+const DEFAULT_REPLY_TIMEOUT_MS = 3500;
+export const ARCHITECT_REPLY_FALLBACK = "I'm having trouble composing a reply right now. Please try again, or open Advanced Setup.";
 const threadClassificationCache = new Map<string, ArchitectIntentDecision>();
 
 export const ARCHITECT_SYSTEM_PROMPT_PATH = path.join(
@@ -68,12 +112,21 @@ export const ARCHITECT_INTENT_PROMPT_PATH = path.join(
   "server/prompts/architect.intent.md"
 );
 
+export const ARCHITECT_CONTEXT_PROMPT_PATH = path.join(
+  process.cwd(),
+  "server/prompts/architect.context.md"
+);
+
 export function loadArchitectSystemPrompt() {
   return readFileSync(ARCHITECT_SYSTEM_PROMPT_PATH, "utf8");
 }
 
 export function loadArchitectIntentPrompt() {
   return readFileSync(ARCHITECT_INTENT_PROMPT_PATH, "utf8");
+}
+
+export function loadArchitectContextPrompt() {
+  return readFileSync(ARCHITECT_CONTEXT_PROMPT_PATH, "utf8");
 }
 
 export function containsTokenLikeValue(message: string) {
@@ -159,7 +212,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
     return await Promise.race([
       promise,
       new Promise<T>((_, reject) => {
-        timeout = setTimeout(() => reject(new Error("Architect intent classifier timed out")), timeoutMs);
+        timeout = setTimeout(() => reject(new Error("Architect LLM operation timed out")), timeoutMs);
       }),
     ]);
   } finally {
@@ -235,36 +288,157 @@ export async function detectArchitectIntent(
   }
 }
 
+function collectedSetupFields(fields: ArchitectSetupDraft | undefined) {
+  return {
+    displayName: Boolean(fields?.displayName?.trim()),
+    repoUrl: Boolean(fields?.repoUrl?.trim()),
+    githubTokenEnvVar: Boolean(fields?.githubTokenEnvVar?.trim()),
+    defaultBaseBranch: Boolean(fields?.defaultBaseBranch?.trim()),
+  };
+}
+
+function sanitizedSetupFields(fields: ArchitectSetupDraft | undefined) {
+  return {
+    displayName: fields?.displayName?.trim() || null,
+    repoUrl: fields?.repoUrl?.trim() || null,
+    githubTokenEnvVar: fields?.githubTokenEnvVar?.trim() || null,
+    defaultBaseBranch: fields?.defaultBaseBranch?.trim() || null,
+  };
+}
+
+function buildReplyPayload(options: ArchitectReplyGeneratorOptions) {
+  const safeLastUserMessage = redactTokenLikeValues(options.lastUserMessage);
+  const fields = options.setupState?.fields;
+  return {
+    setupState: {
+      exists: Boolean(options.setupState),
+      fieldsCollected: collectedSetupFields(fields),
+      fields: sanitizedSetupFields(fields),
+      awaitingConfirmation: options.setupState?.awaitingConfirmation === true,
+      connectionStatus: options.setupState?.connectionStatus ?? "untested",
+      connectionMessage: options.setupState?.connectionMessage ?? null,
+      updatedAt: options.setupState?.updatedAt ?? null,
+    },
+    operationalState: options.operationalState ?? {},
+    lastUserMessage: safeLastUserMessage,
+    tokenRedactionRequired:
+      options.intentDecision.tokenRedactionRequired || safeLastUserMessage !== options.lastUserMessage,
+    intentDecision: options.intentDecision,
+    replyInstructions: {
+      composeNaturally: true,
+      doNotEchoTokenValues: true,
+      doNotClaimASaveBeforeExplicitConfirmation: true,
+      askForMissingSetupInformationWhenNeeded: true,
+      respectAllowedToolsOnly: Array.from(ALLOWED_ARCHITECT_TOOL_NAMES),
+      recoveryFallbackIfUnableToCompose: ARCHITECT_REPLY_FALLBACK,
+    },
+  };
+}
+
+function parseArchitectReplyResponse(result: InvokeResult): ArchitectReplyDecision | undefined {
+  const content = result.choices[0]?.message.content;
+  const raw = typeof content === "string" ? content : JSON.stringify(content ?? {});
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object") return undefined;
+  const candidate = parsed as Partial<ArchitectReplyDecision>;
+  if (typeof candidate.reply !== "string" || candidate.reply.trim().length === 0) return undefined;
+  if (containsTokenLikeValue(candidate.reply)) return undefined;
+  const decision: ArchitectReplyDecision = {
+    reply: candidate.reply.trim(),
+    requiresConfirmation: candidate.requiresConfirmation === true,
+  };
+  const callTool = candidate.callTool as ArchitectReplyCallTool | undefined;
+  if (callTool) {
+    if (!ALLOWED_ARCHITECT_TOOL_NAMES.has(callTool.name)) return undefined;
+    decision.callTool = {
+      name: callTool.name,
+      args: typeof callTool.args === "object" && callTool.args !== null ? callTool.args : {},
+    };
+  }
+  return decision;
+}
+
 export function buildArchitectReply(params: {
   message: string;
   intent: ArchitectIntentDecision;
-  hasBuildTarget: boolean;
+  hasBuildTarget?: boolean;
 }) {
   if (params.intent.tokenRedactionRequired || containsTokenLikeValue(params.message)) {
-    return [
-      "I can’t accept or repeat token values in chat. Please update the token in the relevant Manus environment variable, then use the project connection test so I can verify the configured env var name without seeing the secret.",
-      "If you want the form-based path, open Advanced Setup.",
-    ].join("\n\n");
+    return "I can help with credentials, but token values must stay in a Manus environment variable. Please provide only the env var name so I can continue safely.";
+  }
+  return ARCHITECT_REPLY_FALLBACK;
+}
+
+export async function generateArchitectReply(
+  options: ArchitectReplyGeneratorOptions
+): Promise<ArchitectReplyDecision> {
+  const invoke = options.invoke ?? invokeLLM;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_REPLY_TIMEOUT_MS;
+  const payload = buildReplyPayload(options);
+
+  try {
+    const result = await withTimeout(
+      invoke({
+        messages: [
+          {
+            role: "system",
+            content: [loadArchitectSystemPrompt(), loadArchitectContextPrompt()].join("\n\n---\n\n"),
+          },
+          {
+            role: "user",
+            content: JSON.stringify(payload, null, 2),
+          },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "architect_reply_generation",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                reply: { type: "string" },
+                requiresConfirmation: { type: "boolean" },
+                callTool: {
+                  type: "object",
+                  properties: {
+                    name: {
+                      type: "string",
+                      enum: [
+                        "buildTargets.testConnection",
+                        "buildTargets.create",
+                        "projectMemory.list",
+                        "projectMemory.set",
+                      ],
+                    },
+                    args: { type: "object", additionalProperties: true },
+                  },
+                  required: ["name", "args"],
+                  additionalProperties: false,
+                },
+              },
+              required: ["reply", "requiresConfirmation"],
+              additionalProperties: false,
+            },
+          },
+        },
+      }),
+      timeoutMs
+    );
+
+    const decision = parseArchitectReplyResponse(result);
+    if (decision) return decision;
+  } catch {
+    // Recovery path only; normal Architect replies are composed by the LLM router.
   }
 
-  if (params.intent.intent === "ambiguous") {
-    return [
-      "This could be setup work or a build request. For setup, reply with the project name, GitHub repository URL, GitHub token environment variable name, and default base branch. For build work, resend the message with #kimi or #claude so it stays on the existing build route.",
-      "If you prefer the form-based path, open Advanced Setup.",
-    ].join("\n\n");
-  }
-
-  if (params.intent.intent === "credentials") {
-    return [
-      params.hasBuildTarget
-        ? "I can help verify credential status for the selected project by env var name only. If a token changed, update it in Manus environment variables first, then run Test now in the Credentials Drawer."
-        : "I can help verify credential status once you select or connect a project. Token values must stay in Manus environment variables; I only use env var names.",
-      "If the credential mapping itself needs to change, open Advanced Setup after the new env var exists.",
-    ].join("\n\n");
-  }
-
-  return [
-    "Let’s connect the project conversationally. Please provide the project display name, GitHub repository URL, GitHub token environment variable name, and default base branch. I will test the connection before anything is saved, and I will ask for explicit confirmation before writing the project record.",
-    "If you prefer the form-based path, open Advanced Setup.",
-  ].join("\n\n");
+  return {
+    reply: ARCHITECT_REPLY_FALLBACK,
+    requiresConfirmation: false,
+  };
 }
