@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Drawer, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -381,16 +381,32 @@ function ownerEventBody(event: ThreadEvent) {
   return ownerFacingText(event.content);
 }
 
-function eventTurnId(event: ThreadEvent | undefined) {
+function eventMetadata(event: ThreadEvent | undefined) {
   if (!event?.metadataJson) return null;
   try {
-    const metadata = JSON.parse(event.metadataJson) as { turnId?: unknown; turn_id?: unknown };
-    const rawTurnId = metadata.turnId ?? metadata.turn_id;
-    const numericTurnId = typeof rawTurnId === "number" ? rawTurnId : Number(rawTurnId);
-    return Number.isFinite(numericTurnId) ? numericTurnId : null;
+    return JSON.parse(event.metadataJson) as Record<string, unknown>;
   } catch {
     return null;
   }
+}
+
+function eventTurnId(event: ThreadEvent | undefined) {
+  const metadata = eventMetadata(event) as { turnId?: unknown; turn_id?: unknown } | null;
+  const rawTurnId = metadata?.turnId ?? metadata?.turn_id;
+  const numericTurnId = typeof rawTurnId === "number" ? rawTurnId : Number(rawTurnId);
+  return Number.isFinite(numericTurnId) ? numericTurnId : null;
+}
+
+type ProviderFailureMetadata = {
+  provider?: "anthropic" | "kimi";
+  kind?: "quota_exceeded" | "rate_limited" | "auth_failed" | "provider_unavailable" | "network_timeout" | "unknown";
+  retryAfterSec?: number;
+  providerMessage?: string;
+};
+
+function providerFailureFromEvent(event: ThreadEvent | undefined) {
+  const metadata = eventMetadata(event) as { providerFailure?: ProviderFailureMetadata } | null;
+  return metadata?.providerFailure ?? null;
 }
 
 function hasLaterSuccessfulProviderEventForSameTurn(event: ThreadEvent, events: ThreadEvent[]) {
@@ -415,6 +431,22 @@ function latestActionableProviderFailure(events: ThreadEvent[]) {
 
 function ownerProviderFailureMessage(event: ThreadEvent | undefined) {
   if (!event) return null;
+  const failure = providerFailureFromEvent(event);
+  if (failure?.provider === "anthropic" && failure.kind === "quota_exceeded") {
+    return "Anthropic monthly spend cap reached. Architect and Reviewer are paused until next billing cycle, or until the cap is raised in the Anthropic console. Build turns through Kimi continue to work.";
+  }
+  if (failure?.provider === "kimi" && failure.kind === "auth_failed") {
+    return "Kimi paused — credentials. Check CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in Manus environment variables, then retry.";
+  }
+  if (failure?.provider === "anthropic" && failure.kind === "auth_failed") {
+    return "Architect paused — credentials. Check CLAUDE_API_KEY or ANTHROPIC_API_KEY in Manus environment variables, then retry.";
+  }
+  if (failure?.provider === "kimi" && failure.kind === "rate_limited") {
+    return failure.retryAfterSec
+      ? `Kimi is rate-limited. Retrying in ${failure.retryAfterSec} seconds.`
+      : "Kimi remains rate-limited. Try again in a minute, or switch the composer to Claude Opus 4.7 for this turn.";
+  }
+
   const content = event.content.toLowerCase();
   if (content.includes("missing credentials") || content.includes("credential") || content.includes("not connected")) {
     return "This task can’t start yet because Claude or Kimi is not connected. Open the owner credentials dashboard or update the project secrets, then retry the message.";
@@ -1226,7 +1258,7 @@ export default function Home() {
       return `${current.trimEnd()}\n\n${message}`;
     });
     setWorkspaceNotice(notice);
-    composerTextareaRef.current?.focus();
+    requestAnimationFrame(() => composerTextareaRef.current?.focus());
   }
 
   async function handleArchiveTask(taskId: number, title: string) {
@@ -1234,6 +1266,13 @@ export default function Home() {
     if (!confirmed) return;
     await updateTaskStatus.mutateAsync({ taskId, status: "archived" });
     if (selectedTaskId === taskId) setSelectedTaskId(null);
+    await refreshWorkspace();
+  }
+
+  async function handleRestoreTask(taskId: number, title: string) {
+    await updateTaskStatus.mutateAsync({ taskId, status: "active" });
+    setSelectedTaskId(taskId);
+    setWorkspaceNotice(`Restored "${title}" to the live task list.`);
     await refreshWorkspace();
   }
 
@@ -1711,15 +1750,31 @@ export default function Home() {
               <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white/70 p-3 text-xs leading-5 text-[#6d6d65]">No archived tasks match this search.</div>
             ) : (
               archivedTasks.map((task) => (
-                <button key={task.id} type="button" onClick={() => setSelectedTaskId(task.id)} className="w-full rounded-2xl border border-transparent bg-white/40 p-3 text-left opacity-80 hover:bg-white/70">
-                  <div className="flex min-w-0 items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-[#2c2c28]">{task.title}</p>
-                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#66665f]">{ownerFacingText(task.summary) || "No summary recorded yet."}</p>
+                <article key={task.id} className="w-full rounded-2xl border border-transparent bg-white/40 p-3 opacity-80 hover:bg-white/70">
+                  <button type="button" onClick={() => setSelectedTaskId(task.id)} className="w-full text-left" aria-label={`Open archived task ${task.title}`}>
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-[#2c2c28]">{task.title}</p>
+                        <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#66665f]">{ownerFacingText(task.summary) || "No summary recorded yet."}</p>
+                      </div>
+                      <Badge variant="outline" className={`max-w-[96px] shrink-0 truncate rounded-full text-[10px] ${statusTone[task.status] ?? statusTone.archived}`}>{task.status}</Badge>
                     </div>
-                    <Badge variant="outline" className={`max-w-[96px] shrink-0 truncate rounded-full text-[10px] ${statusTone[task.status] ?? statusTone.archived}`}>{task.status}</Badge>
+                  </button>
+                  <div className="mt-2 flex justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleRestoreTask(task.id, task.title)}
+                      disabled={updateTaskStatus.isPending}
+                      aria-label={`Restore archived task ${task.title}`}
+                      className="h-7 rounded-full border-emerald-200 bg-emerald-50 px-2.5 text-[11px] text-emerald-900 hover:bg-emerald-100"
+                      data-testid="section1a-conv-task-restore"
+                    >
+                      <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Restore
+                    </Button>
                   </div>
-                </button>
+                </article>
               ))
             )}
           </div>
@@ -1928,7 +1983,7 @@ export default function Home() {
             ) : threadQuery.isLoading ? (
               <div className="rounded-2xl border border-[#deded8] bg-white p-5 text-sm text-[#6d6d65]">Loading task thread...</div>
             ) : events.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white p-8 text-center text-sm leading-6 text-[#6d6d65]">This task has no owner messages yet. Creating it only made the task record; send the first message to initialize Claude Opus 4.7 and Kimi K2.6 through the coordinator.<Button type="button" onClick={() => setComposerText((value) => value || "Please plan the first implementation step for this task.")} className="mt-4 rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">Draft first message</Button></div>
+              <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white p-8 text-center text-sm leading-6 text-[#6d6d65]">This task has no owner messages yet. Creating it only made the task record; send the first message to initialize Claude Opus 4.7 and Kimi K2.6 through the coordinator.<Button type="button" onClick={() => draftComposerMessage("Please plan the first implementation step for this task.", "Draft inserted. The send button is ready when you want to submit it.")} className="mt-4 rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">Draft first message</Button></div>
             ) : (
               <div className="space-y-4">
                 {ownerVisibleEvents.length === 0 && !providerFailureCopy && !isWaitingForKimiApproval ? (
@@ -2166,12 +2221,12 @@ export default function Home() {
                 {submitMessage.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : hasActiveGeneration ? <span className="text-xs font-semibold">Queue</span> : <SendHorizontal className="h-4 w-4" />}
               </Button>
             </div>
-            <Drawer open={credentialsDrawerOpen} onOpenChange={setCredentialsDrawerOpen} direction="right">
-        <DrawerContent className="bg-[#fbfaf7] text-[#30302b]" data-testid="section1a-conv-credentials-drawer">
-          <DrawerHeader>
-            <DrawerTitle>Credentials Drawer</DrawerTitle>
-            <DrawerDescription>Token values stay in Manus env vars. This view shows provider status and env var names only.</DrawerDescription>
-          </DrawerHeader>
+            <Sheet open={credentialsDrawerOpen} onOpenChange={setCredentialsDrawerOpen}>
+        <SheetContent side="right" className="w-[min(92vw,28rem)] overflow-y-auto bg-[#fbfaf7] text-[#30302b] sm:max-w-[28rem]" data-testid="section1a-conv-credentials-drawer">
+          <SheetHeader>
+            <SheetTitle>Credentials Drawer</SheetTitle>
+            <SheetDescription>Token values stay in Manus env vars. This view shows provider status and env var names only.</SheetDescription>
+          </SheetHeader>
           <div className="flex-1 space-y-3 overflow-y-auto px-4 pb-4">
             {credentials.map((credential: { provider: string; configured: boolean; status: string; reason?: string; lastCheckedAt?: number | string | Date | null; envVarName?: string | null }) => (
               <div key={credential.provider} className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="section1a-conv-credential-row">
@@ -2191,12 +2246,12 @@ export default function Home() {
             ))}
             {credentials.length === 0 ? <p className="rounded-2xl border border-dashed border-[#cfcfc8] bg-white/70 p-3 text-xs leading-5 text-[#77766e]">No credential rows are available yet.</p> : null}
           </div>
-          <DrawerFooter>
+          <SheetFooter>
             <Button type="button" variant="outline" aria-label="Open form wizard from drawer" onClick={() => { setCredentialsDrawerOpen(false); setIsWizardMode(false); }} className="rounded-xl border-[#d9d8d1] bg-white text-xs">Advanced Setup</Button>
             <Button type="button" onClick={() => setCredentialsDrawerOpen(false)} className="rounded-xl bg-[#242420] text-xs text-white hover:bg-black">Close drawer</Button>
-          </DrawerFooter>
-        </DrawerContent>
-      </Drawer>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
 
       <AlertDialog open={stopConfirmOpen} onOpenChange={setStopConfirmOpen}>
               <AlertDialogContent>
@@ -2315,8 +2370,8 @@ export default function Home() {
                       <div className="mt-3 space-y-2">
                         <Input value={filePath} onChange={(event) => setFilePath(event.target.value)} className="h-9 rounded-xl bg-white text-xs" placeholder="relative/path.md" />
                         <Input value={fileUrl} onChange={(event) => setFileUrl(event.target.value)} className="h-9 rounded-xl bg-white text-xs" placeholder="/manus-storage/..." />
-                        <Button variant="outline" onClick={handleCreateFileMetadata} disabled={!selectedTaskId || !filePath.trim() || !fileUrl.trim() || createFileMetadata.isPending} className="w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
-                            <FileText className="mr-2 h-3.5 w-3.5" /> Add file to this task
+                        <Button variant="outline" aria-label="Add file to this task" onClick={handleCreateFileMetadata} disabled={!selectedTaskId || !filePath.trim() || !fileUrl.trim() || createFileMetadata.isPending} className="w-full rounded-xl border-[#d9d8d1] bg-white text-xs">
+                            <FileText className="mr-2 h-3.5 w-3.5" /> Attach storage link to task
                         </Button>
                         <p className="text-[11px] leading-4 text-[#77766e]">Advanced fields record an existing storage-backed file reference only; they do not create fake files or run workspace commands.</p>
                       </div>
@@ -2391,7 +2446,7 @@ export default function Home() {
                 <CardContent className="space-y-3">
                   <p className="rounded-2xl border border-emerald-100 bg-emerald-50/80 p-3 text-xs leading-5 text-[#4f6756]">This is a read-only activity feed for the AI coordinator, Claude, and Kimi. It does not run commands; terminal access remains a separate advanced diagnostic tool.</p>
                   {workerActivityItems.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">No worker activity has been recorded for this task yet. Send a message to start the first Claude or Kimi turn.<Button type="button" onClick={() => setComposerText((value) => value || "Start the first AI turn for this task.")} className="mt-3 w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">Draft first AI turn</Button></div>
+                    <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">No worker activity has been recorded for this task yet. Send a message to start the first Claude or Kimi turn.<Button type="button" onClick={() => draftComposerMessage("Start the first AI turn for this task.", "Draft inserted. The send button is ready when you want to submit it.")} className="mt-3 w-full rounded-xl bg-[#1f1f1f] text-xs text-white hover:bg-black">Draft first AI turn</Button></div>
                   ) : (
                     <div className="space-y-2">
                       {workerActivityItems.map((item) => (
@@ -2458,7 +2513,7 @@ export default function Home() {
                   {memories.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">
                       No saved memory records are available yet. Add a durable decision in the task thread, then it can appear here for future turns.
-                      <Button type="button" variant="outline" onClick={() => setComposerText((value) => value || "Record this decision as reusable context for future AI turns.")} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">Draft context note</Button>
+                      <Button type="button" variant="outline" onClick={() => draftComposerMessage("Record this decision as reusable context for future AI turns.", "Project Memory draft inserted. The send button is ready when you want to submit it.")} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">Draft context note</Button>
                     </div>
                   ) : (
                     <div className="space-y-2">

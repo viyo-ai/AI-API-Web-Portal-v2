@@ -439,3 +439,15 @@
 - [x] Re-run the FU-01 byte-equal proof or available equivalent and confirm the chat-path `buildTargets.create` record remains unchanged.
 - [x] Create a conventional commit on `agent-work/s1a-conv-fu-05`, save a Manus checkpoint, and deliver the mandated FU-05 closeout package with the full commit URL.
 - [x] FU-05 lean closeout: skip heavy closeout and deliver only commit URL, validation gate table, three short defect diff hunks, test count delta, FU-01 byte-equal proof rerun confirmation, and boundary statement.
+
+- [x] §PORTAL-FIX-01: create branch `agent-work/portal-fix-01` from FU-05 head `4cc66e6` and keep all boundaries intact.
+- [x] §PORTAL-FIX-01 Component 1: diagnose Credentials drawer open failure and fix only if root cause is not multi-layer.
+- [x] §PORTAL-FIX-01 Component 1: diagnose §9 Kimi approval gate controls; STOP if server-side awaiting-approval event does not fire.
+- [x] §PORTAL-FIX-01 Component 2: add manual storage-link submit action labeled `Attach storage link` wired to existing attach behavior.
+- [x] §PORTAL-FIX-01 Component 2: fix Project Memory draft injection so programmatic draft text enables composer send.
+- [x] §PORTAL-FIX-01 Component 2: add archived task Restore control wired to unarchive behavior or expose one if missing.
+- [x] §PORTAL-FIX-01 Component 2: wire visible Stop button during in-flight turns and clear it on completion.
+- [x] §PORTAL-FIX-01 Component 2: fix Build-with-AI skill creation persistence or skills-list invalidation.
+- [x] §PORTAL-FIX-01 Component 3: add wrapper-layer provider error mapping without schema, provider, dependency, prompt, buildTargets.create, or frozen Architect file changes.
+- [x] §PORTAL-FIX-01 tests: add required regression tests, provider mapping tests, composer notice test, Kimi rate-limit retry test, and run FU-01/FU-02/FU-04/FU-05 contracts unchanged.
+- [x] §PORTAL-FIX-01 closeout: rerun FU-01 byte-equal proof, commit with `[PORTAL-FIX-01-XX]` prefix, push, save Manus Project gate, and deliver required inline closeout.

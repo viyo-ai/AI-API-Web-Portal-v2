@@ -106,7 +106,7 @@ describe("Wrapper LLM v2 credential gates and fallback policy", () => {
     await expect(executeWrapperTurn(sampleExecutionInput("kimi"))).rejects.toThrow("Kimi credential is missing");
 
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(dbMocks.failTurn).toHaveBeenCalledWith(99, 7, "MODEL_EXECUTION_FAILED", expect.stringContaining("Kimi credential is missing"), "failed");
+    expect(dbMocks.failTurn).toHaveBeenCalledWith(99, 7, "MODEL_EXECUTION_FAILED", expect.stringContaining("CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN"), "failed");
     expect(dbMocks.updateTaskStatus).toHaveBeenCalledWith(10, 7, "error");
   });
 
@@ -123,16 +123,68 @@ describe("Wrapper LLM v2 credential gates and fallback policy", () => {
       99,
       7,
       "MODEL_EXECUTION_FAILED",
-      expect.stringContaining("Kimi did not return usable text"),
+      expect.stringContaining("Kimi call failed"),
       "failed",
     );
     expect(dbMocks.appendTaskEvent).toHaveBeenCalledWith(expect.objectContaining({
       actor: "wrapper",
       eventType: "error",
       status: "failed",
-      content: expect.stringContaining("Kimi did not return usable text"),
-      metadataJson: expect.stringContaining("Kimi returned an empty response"),
+      content: expect.stringContaining("Kimi call failed"),
+      metadataJson: expect.stringContaining("providerFailure"),
     }));
     expect(dbMocks.completeTurn).not.toHaveBeenCalled();
+  });
+
+  it("maps non-empty Cloudflare provider failures to owner-safe Kimi recovery guidance without silent fallback", async () => {
+    process.env.CLOUDFLARE_ACCOUNT_ID = "test-account";
+    process.env.CLOUDFLARE_API_TOKEN = "test-token";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ success: false, errors: [{ message: "upstream worker unavailable" }] }), { status: 503, headers: { "content-type": "application/json" } }),
+    );
+
+    await expect(executeWrapperTurn(sampleExecutionInput("kimi"))).rejects.toThrow("Kimi request failed");
+
+    expect(dbMocks.failTurn).toHaveBeenCalledWith(
+      99,
+      7,
+      "MODEL_EXECUTION_FAILED",
+      expect.stringContaining("Kimi call failed"),
+      "failed",
+    );
+    expect(dbMocks.appendTaskEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actor: "wrapper",
+      eventType: "error",
+      status: "failed",
+      content: expect.stringContaining("Kimi call failed"),
+      metadataJson: expect.stringContaining("providerFailure"),
+    }));
+    expect(dbMocks.completeTurn).not.toHaveBeenCalled();
+  });
+
+  it("auto-retries a Kimi rate-limit failure once and records the scheduled retry event", async () => {
+    process.env.CLOUDFLARE_ACCOUNT_ID = "test-account";
+    process.env.CLOUDFLARE_API_TOKEN = "test-token";
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: false, errors: [{ message: "429 rate limit retry-after: 1" }] }), { status: 429, headers: { "content-type": "application/json" } }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: true, result: { response: "Kimi retry succeeded." } }), { status: 200, headers: { "content-type": "application/json" } }),
+      );
+
+    const result = await executeWrapperTurn(sampleExecutionInput("kimi"));
+
+    expect(result.finalAnswer).toBe("Kimi retry succeeded.");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(dbMocks.appendTaskEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actor: "wrapper",
+      eventType: "status",
+      status: "blocked",
+      content: "Kimi is rate-limited. Retrying in 1 seconds.",
+      metadataJson: expect.stringContaining("retryScheduled"),
+    }));
+    expect(dbMocks.failTurn).not.toHaveBeenCalled();
+    expect(dbMocks.completeTurn).toHaveBeenCalledWith(99, 7);
   });
 });
