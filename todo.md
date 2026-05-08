@@ -426,7 +426,7 @@
 - [x] §1A-CONV-FU-04-XX: Delete unreachable `buildArchitectReply` from `server/architectLLM.ts` and confirm no production references remain.
 - [x] §1A-CONV-FU-04-XX: Run cleanup validation gates, commit with `[PORTAL-P3-S1A-CONV-FU-04-XX]` prefix, push the branch, save checkpoint, and deliver the short inline Product Owner summary.
 
-- [ ] Live QA pass: browser-test project Git connection, file-system/task folder behavior, multi-thread Kimi and Claude chat, skill creation/loading/usage, and report pass/fail findings.
+- [x] Live QA pass: browser-test project Git connection, file-system/task folder behavior, multi-thread Kimi and Claude chat, skill creation/loading/usage, and report pass/fail findings.
 - [x] Fix setup wizard completion so successful GitHub connection and review paths always send valid `initialBuildBranch`, `protectedBranches`, and validation-command defaults that satisfy backend contracts.
 - [x] Fix stale provider recovery-note rendering so an older failed/empty provider event does not remain visible under a later successful Kimi/Claude turn.
 - [x] Improve composer/send control accessibility stability so route tests, Architect prompts, and keyboard/assistive interactions do not target shifted Diagnostics controls.
