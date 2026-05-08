@@ -452,3 +452,51 @@
 - [x] §PORTAL-FIX-01 tests: add required regression tests, provider mapping tests, composer notice test, Kimi rate-limit retry test, and run FU-01/FU-02/FU-04/FU-05 contracts unchanged.
 - [x] §PORTAL-FIX-01 closeout: rerun FU-01 byte-equal proof, commit with `[PORTAL-FIX-01-XX]` prefix, push, save Manus Project gate, and deliver required inline closeout.
 - [x] Fix duplicate React key warning on `/?from_webdev=1` where two rendered children use key `1`, then validate the home page browser console is clean.
+
+- [ ] Execute forced-restart Visual+Click QA sweep from pasted_content_2.txt as a read-only audit with no code changes, commits, checkpoints, or publish actions.
+- [ ] Deliver a single inline QA report based only on the fully read new attachment instructions.
+
+
+- [ ] Execute §PORTAL-QA-03-RETRY final click sweep using stable selector strategy only: testid, visible text, aria-label, or role+text; never raw element index.
+- [ ] Include selector-strategy usage and retry count summary in the final §PORTAL-QA-03-RETRY inline report.
+
+
+- [x] Treat GitHub as the deployment source of truth for §PORTAL-FIX-01 and React-key fix, not checkpoint publish alone.
+- [x] Verify GitHub refs for `agent-work/portal-fix-01` and `agent-work/react-key-file-list-fix` are available to the Manus pull/deployment path.
+- [x] Confirm the live site includes the GitHub-pushed Sheet credentials drawer fix before rerunning §PORTAL-QA-03-RETRY.
+- [ ] Rerun §PORTAL-QA-03-RETRY against the confirmed-current live build and report final status.
+
+- [x] Inspect deployment chain for `ai.viyo.new`: target branch, auto-deploy trigger, and deployed HEAD alignment against `agent-work/portal-fix-01` and `agent-work/react-key-file-list-fix`.
+- [x] Report whether live deployment is pulling from GitHub, Manus checkpoint publish, or another configured deployment mechanism.
+
+- [x] §PORTAL-DEPLOY-RECONCILE: update GitHub `main` to include `439a7157b0d11a543371d61d00d97021d04f1f7d` via reconciliation merge commit without application code changes.
+- [x] §PORTAL-DEPLOY-RECONCILE: confirm GitHub `main` contains `439a7157b0d11a543371d61d00d97021d04f1f7d`, Manus `origin/main` remains at `439a7157b0d11a543371d61d00d97021d04f1f7d`, and local `HEAD` remains at `439a7157b0d11a543371d61d00d97021d04f1f7d`.
+- [x] §PORTAL-DEPLOY-RECONCILE: smoke-check `ai.viyo.new` read-only rendering before QA clicks.
+- [x] §PORTAL-QA-03-RETRY: execute Part A through DEFECT-07 and stop with evidence because DEFECT-07 remained still-broken.
+- [ ] §PORTAL-QA-03-RETRY: complete Part B and Part C coverage with selector strategy and retry counts. Blocked by Part A DEFECT-07 stop rule.
+- [x] §PORTAL-DEPLOY-RECONCILE: deliver single inline reconciliation plus QA report with required commit URLs.
+- [x] §PORTAL-QA-03-RETRY recovery: attempt embedded-browser recovery after live site returned to OAuth landing page and user reported nothing clickable.
+- [x] §PORTAL-QA-03-RETRY recovery: embedded recovery succeeded, so a recovery-failure continuation path was not needed; QA later halted on Part A DEFECT-07.
+- [x] §PORTAL-QA-03-RETRY recovery: test whether the user-requested Chrome-extension/local-browser bridge is exposed for OAuth recovery and QA continuation.
+- [x] §PORTAL-QA-03-RETRY-2: preserve accepted CLOSED verdicts for DEFECT-01, DEFECT-03, DEFECT-05, and DEFECT-06 without retesting them.
+- [x] §PORTAL-QA-03-RETRY-2: verify DEFECT-07 using the corrected §9 server-side gate trigger path with Auto dual route, Kimi check enabled, composer prompt, 60s DOM polling, and server-state distinction.
+- [x] §PORTAL-QA-03-RETRY-2: verify DEFECT-08 Stop button visibility and clean abort during a long-running turn.
+- [x] §PORTAL-QA-03-RETRY-2: verify DEFECT-09 Skill Libraries Add → Build with AI creation, persistence, and skill invocation evidence.
+- [x] §PORTAL-QA-03-RETRY-2: if all defects close, execute remaining Part B coverage checks with the same selector/evidence rule.
+- [x] §PORTAL-QA-03-RETRY-2: if all defects close, execute Part C provider error mapping live verification with the same selector/evidence rule.
+- [x] §PORTAL-QA-03-RETRY-2: deliver a single inline verdict report covering DEFECT-07, DEFECT-08, DEFECT-09, Parts B/C, new defects, and final phase status.
+- [x] §PORTAL-QA-03-RETRY-2: apply tightened DEFECT-08 rule — after more than two refreshed attempts without an in-flight Stop control, log STILL-BROKEN evidence and continue to DEFECT-09.
+- [x] §PORTAL-QA-03-RETRY-2: limit DEFECT-09 to skill creation persistence in the Skills library and record invocation testing as a coverage gap.
+- [x] §PORTAL-QA-03-RETRY-2: run Parts B and C with a two-selector-retry limit per check, logging tool-limited items and continuing instead of restarting.
+
+- [x] §PORTAL-FIX-02: create/use branch `agent-work/portal-fix-02` from `439a7157` and keep a single commit with prefix `[PORTAL-FIX-02-XX]`.
+- [x] §PORTAL-FIX-02: diagnose DEFECT-08 before code changes, distinguishing in-flight state-machine failure from pre-flight disabled-state guard failure.
+- [x] §PORTAL-FIX-02: report the one-line root cause finding before writing fix code, and stop if server-side or schema-touching scope is discovered.
+- [x] §PORTAL-FIX-02: apply a minimal client-side Stop-control visibility and disabled-state wiring fix without touching forbidden files or behaviors.
+- [x] §PORTAL-FIX-02: add a behavioral regression test for in-flight send-disabled plus queryable Stop control, clean Stop click, and send re-enable after stop.
+- [x] §PORTAL-FIX-02: run validation gates and browser verification for the fixed Stop-control flow.
+- [x] §PORTAL-FIX-02: push the branch to GitHub, save the Manus Project publish gate, and deliver closeout with commit URL, diff hunk, test name, gate results, and boundary statement.
+- [x] §PORTAL-FIX-02: implement accepted client-only fix by rendering the Stop control when `submitMessage.isPending` or an active turn is present.
+- [x] §PORTAL-FIX-02: add behavioral test proving pending submit disables send and renders a queryable Stop control.
+- [x] §PORTAL-FIX-02: add behavioral test proving clicking Stop calls the abort endpoint, clears pending UI state, and re-enables send.
+- [x] §PORTAL-FIX-02: add behavioral test proving natural turn completion hides Stop and re-enables send.
