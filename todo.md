@@ -420,3 +420,8 @@
 - [x] §1A-CONV-FU-04: Run validation gates: `pnpm check`, `pnpm vitest run server/architect.intent.contract.test.ts`, `pnpm vitest run server/architect.reply.contract.test.ts`, `pnpm vitest run server/section1a-conv.contract.test.ts`, `pnpm test --run`, `pnpm build`, token-prefix diff grep, and `architect.system.md` unchanged diff check.
 - [x] §1A-CONV-FU-04: Capture real production transcript proof for the verbatim FU-01 repro string in a fresh thread and verify it does not contain `remaining setup fields`.
 - [x] §1A-CONV-FU-04: Save managed checkpoint, commit with directive prefix, push `agent-work/s1a-conv-fu-04`, and deliver the mandatory single inline closeout package with publish gate.
+
+- [x] Package the §1A-CONV-FU-04 Product Owner closeout package into a downloadable Word document for review.
+
+- [x] §1A-CONV-FU-04-XX: Delete unreachable `buildArchitectReply` from `server/architectLLM.ts` and confirm no production references remain.
+- [x] §1A-CONV-FU-04-XX: Run cleanup validation gates, commit with `[PORTAL-P3-S1A-CONV-FU-04-XX]` prefix, push the branch, save checkpoint, and deliver the short inline Product Owner summary.
