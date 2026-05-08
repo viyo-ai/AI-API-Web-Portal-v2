@@ -132,9 +132,10 @@ import {
   resolveEffectiveRoute,
 } from "./wrapperLLM";
 import {
-  buildArchitectReply,
   containsTokenLikeValue,
+  generateArchitectReply,
   detectArchitectIntent,
+  loadArchitectContextPrompt,
   loadArchitectIntentPrompt,
   loadArchitectSystemPrompt,
   redactTokenLikeValues,
@@ -1166,14 +1167,11 @@ async function appendArchitectTurn(params: {
     });
   }
 
-  let reply = buildArchitectReply({
-    message: params.userContent,
-    intent,
-    hasBuildTarget: Boolean(params.task.buildTargetId),
-  });
+  let reply = "";
   let routeStatus: "succeeded" | "blocked" = "succeeded";
   let createdBuildTargetId: number | undefined;
   let architectSetupMetadata: Record<string, unknown> | undefined;
+  let architectReplyOperationalState: Record<string, unknown> | undefined;
 
   if (!containsTokenLikeValue(params.userContent) && (intent.intent === "setup" || intent.intent === "onboarding" || setupStateExists)) {
     const existingState = getArchitectSetupState(params.ownerUserId, params.task.id);
@@ -1181,16 +1179,18 @@ async function appendArchitectTurn(params: {
     if (existingState?.awaitingConfirmation) {
       if (isArchitectSetupCancellation(params.userContent)) {
         clearArchitectSetupState(params.ownerUserId, params.task.id);
-        reply = "Cancelled the conversational Project setup draft. Nothing was saved. You can restart setup from chat or open Advanced Setup.";
+        architectReplyOperationalState = {
+          status: "cancelled",
+          nextAction: "owner_may_restart_chat_setup_or_open_advanced_setup",
+        };
         architectSetupMetadata = { architectSetupState: "cancelled" };
       } else if (!isArchitectSetupConfirmation(params.userContent)) {
         const completeFields = assertCompleteArchitectSetupFields(existingState.fields);
-        reply = [
-          "The Project setup draft is ready, but I need explicit confirmation before saving it.",
-          "Reply `confirm save project` to create the Project, or `cancel setup` to discard it.",
-          "",
-          formatArchitectSetupSummary(completeFields),
-        ].join("\n");
+        architectReplyOperationalState = {
+          status: "awaiting_confirmation",
+          nextAction: "ask_owner_to_confirm_or_cancel_before_save",
+          setupSummary: formatArchitectSetupSummary(completeFields),
+        };
         architectSetupMetadata = { architectSetupState: "awaiting_confirmation" };
       } else {
         const completeFields = assertCompleteArchitectSetupFields(existingState.fields);
@@ -1209,11 +1209,12 @@ async function appendArchitectTurn(params: {
             awaitingConfirmation: false,
           });
           routeStatus = "blocked";
-          reply = [
-            "I re-tested the Project connection before saving, and the connection is not ready. Nothing was saved.",
-            connection.message,
-            "Update the env var or repository details, then send the corrected Project details again.",
-          ].join("\n\n");
+          architectReplyOperationalState = {
+            status: "connection_failed_before_save",
+            connectionStatus: connection.status,
+            connectionMessage: connection.message,
+            nextAction: "ask_owner_to_correct_env_var_or_repository_details",
+          };
           architectSetupMetadata = {
             architectSetupState: "connection_failed_before_save",
             connectionStatus: connection.status,
@@ -1228,11 +1229,12 @@ async function appendArchitectTurn(params: {
           });
           createdBuildTargetId = created.id;
           clearArchitectSetupState(params.ownerUserId, params.task.id);
-          reply = [
-            `Project created for ${created.name}.`,
-            "The connection was tested immediately before save, and no token value was stored or repeated in chat.",
-            "You can now select this Project from the sidebar and continue build work.",
-          ].join("\n\n");
+          architectReplyOperationalState = {
+            status: "saved",
+            createdBuildTargetName: created.name,
+            connectionStatus: connection.status,
+            nextAction: "tell_owner_project_is_available_in_sidebar_for_build_work",
+          };
           architectSetupMetadata = {
             architectSetupState: "saved",
             createdBuildTargetId: created.id,
@@ -1253,10 +1255,11 @@ async function appendArchitectTurn(params: {
       const validationErrors = validateArchitectSetupFields(state.fields);
       if (validationErrors.length > 0) {
         routeStatus = "blocked";
-        reply = [
-          "I found Project setup details, but one or more fields need correction before I can test the connection.",
-          validationErrors.join("\n"),
-        ].join("\n\n");
+        architectReplyOperationalState = {
+          status: "needs_correction",
+          validationErrors,
+          nextAction: "ask_owner_to_correct_invalid_project_setup_fields_before_test_connection",
+        };
         architectSetupMetadata = {
           architectSetupState: "needs_correction",
           validationErrors,
@@ -1264,11 +1267,12 @@ async function appendArchitectTurn(params: {
       } else {
         const missing = missingArchitectSetupFields(state.fields);
         if (missing.length > 0) {
-          reply = [
-            "I can connect this Project through chat, but I still need the remaining setup fields before testing anything.",
-            `Please send: ${formatMissingArchitectSetupFields(missing)}.`,
-            "I will test the connection before save and ask for explicit confirmation before creating the Project.",
-          ].join("\n\n");
+          architectReplyOperationalState = {
+            status: "collecting",
+            missingFields: missing,
+            missingFieldLabels: formatMissingArchitectSetupFields(missing),
+            nextAction: "ask_owner_for_missing_fields_before_test_connection",
+          };
           architectSetupMetadata = {
             architectSetupState: "collecting",
             missingFields: missing,
@@ -1290,11 +1294,12 @@ async function appendArchitectTurn(params: {
               awaitingConfirmation: false,
             });
             routeStatus = "blocked";
-            reply = [
-              "I tested the Project connection before save, and the connection is not ready. Nothing was saved.",
-              connection.message,
-              "Update the repository details or env var, then send the corrected Project setup fields again.",
-            ].join("\n\n");
+            architectReplyOperationalState = {
+              status: "connection_failed",
+              connectionStatus: connection.status,
+              connectionMessage: connection.message,
+              nextAction: "ask_owner_to_correct_repository_details_or_env_var",
+            };
             architectSetupMetadata = {
               architectSetupState: "connection_failed",
               connectionStatus: connection.status,
@@ -1308,12 +1313,12 @@ async function appendArchitectTurn(params: {
               connectionMessage: connection.message,
               awaitingConfirmation: true,
             });
-            reply = [
-              "I tested the Project connection successfully. Nothing has been saved yet.",
-              "Reply `confirm save project` to create the Project, or `cancel setup` to discard this draft.",
-              "",
-              formatArchitectSetupSummary(completeFields),
-            ].join("\n");
+            architectReplyOperationalState = {
+              status: "awaiting_confirmation",
+              connectionStatus: connection.status,
+              setupSummary: formatArchitectSetupSummary(completeFields),
+              nextAction: "ask_owner_for_explicit_confirmation_before_create",
+            };
             architectSetupMetadata = {
               architectSetupState: "awaiting_confirmation",
               connectionStatus: connection.status,
@@ -1323,6 +1328,17 @@ async function appendArchitectTurn(params: {
       }
     }
   }
+
+  const replyGeneration = await generateArchitectReply({
+    lastUserMessage: params.userContent,
+    intentDecision: intent,
+    setupState: getArchitectSetupState(params.ownerUserId, params.task.id),
+    operationalState: {
+      hasBuildTarget: Boolean(params.task.buildTargetId),
+      ...(architectReplyOperationalState ?? {}),
+    },
+  });
+  reply = replyGeneration.reply;
 
   await appendTaskEvent({
     taskId: params.task.id,
@@ -1353,6 +1369,7 @@ async function appendArchitectTurn(params: {
       intent,
       systemPromptPath: "server/prompts/architect.system.md",
       intentPromptPath: "server/prompts/architect.intent.md",
+      contextPromptPath: "server/prompts/architect.context.md",
       ...(architectSetupMetadata ? { architectSetup: architectSetupMetadata } : {}),
     }),
   });
@@ -2230,6 +2247,7 @@ export const appRouter = router({
     prompts: protectedProcedure.query(async () => ({
       systemPrompt: loadArchitectSystemPrompt(),
       intentPrompt: loadArchitectIntentPrompt(),
+      contextPrompt: loadArchitectContextPrompt(),
     })),
     detectIntent: protectedProcedure
       .input(z.object({ message: z.string().trim().min(1).max(20000) }))

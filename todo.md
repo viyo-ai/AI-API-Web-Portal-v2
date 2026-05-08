@@ -409,3 +409,14 @@
 - [x] §1A-CONV-FU-02: Add focused contract tests for INV-FU-02-01 through INV-FU-02-05 while preserving INV-FU-01-01 through INV-FU-01-10 tests unchanged.
 - [x] §1A-CONV-FU-02: Run required validation gates: `pnpm check`, `pnpm vitest run server/architect.intent.contract.test.ts`, `pnpm vitest run server/section1a-conv.contract.test.ts`, `pnpm test --run`, `pnpm build`, and token-prefix diff grep.
 - [x] §1A-CONV-FU-02: Provide mandatory single inline PO closeout covering FU-01 and FU-02 with commit URLs, validation table, prompt text, classifier diff, grep result, test delta, FU-01 record-proof, required answers, and boundary statement.
+
+- [x] §1A-CONV-FU-02 PO closeout blocker: Provide single inline response with full architect.intent.md, actual detectArchitectIntent before/after diff, FU-01 byte-equal record proof, directive-format test delta, answers to four PO questions, and verbatim boundary statement.
+
+- [x] §1A-CONV-FU-04: Produce directive ingestion evidence at `.taskmaster/docs/ingestion-evidence/PORTAL_PHASE_3_DIRECTIVE-S1A-CONV-FU-04-ingestion.md` before code changes with HR IDs, invariant map, and conservative verdict.
+- [x] §1A-CONV-FU-04: Create `server/prompts/architect.context.md` with the seven required sections in directive order and load it for every Architect reply-generation call.
+- [x] §1A-CONV-FU-04: Replace hardcoded Architect reply templates with LLM-first `generateArchitectReply` using the existing `invokeLLM` helper, strict JSON schema, sanitized prompt payload, and safe fallback only on recovery paths.
+- [x] §1A-CONV-FU-04: Preserve the existing form wizard and `buildTargets.completeWizard` path, §1A-FU-04 safety guarantees, FU-01 invariants, FU-02 invariants, and §9 approval boundaries.
+- [x] §1A-CONV-FU-04: Add `server/architect.reply.contract.test.ts` covering INV-FU-04-01 through INV-FU-04-08 and verify existing FU-01/FU-02 tests remain unmodified in purpose.
+- [x] §1A-CONV-FU-04: Run validation gates: `pnpm check`, `pnpm vitest run server/architect.intent.contract.test.ts`, `pnpm vitest run server/architect.reply.contract.test.ts`, `pnpm vitest run server/section1a-conv.contract.test.ts`, `pnpm test --run`, `pnpm build`, token-prefix diff grep, and `architect.system.md` unchanged diff check.
+- [x] §1A-CONV-FU-04: Capture real production transcript proof for the verbatim FU-01 repro string in a fresh thread and verify it does not contain `remaining setup fields`.
+- [x] §1A-CONV-FU-04: Save managed checkpoint, commit with directive prefix, push `agent-work/s1a-conv-fu-04`, and deliver the mandatory single inline closeout package with publish gate.
