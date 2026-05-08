@@ -399,3 +399,5 @@
 - [x] §1A-CONV: Add read-only Project Memory UI viewer scoped to selected Project and preserve Diagnostics tab unchanged
 - [x] §1A-CONV: Add focused behavioral and contract tests for all ten invariants without modifying locked functional tests
 - [x] §1A-CONV: Run all seven validation gates, generate closeout proofs, commit with `[PORTAL-P3-S1A-CONV-XX]`, push, and create a Manus Project publish gate
+
+- [ ] §1A-CONV follow-up: Verify repo/local parity and whether auto setup via chat is actually wired beyond display; fix any display-only chat onboarding gap if confirmed.
