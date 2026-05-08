@@ -214,6 +214,20 @@ const resolveApiUrl = () =>
     ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
     : "https://forge.manus.im/v1/chat/completions";
 
+export class LLMProviderHttpError extends Error {
+  readonly status: number;
+  readonly statusText: string;
+  readonly body: string;
+
+  constructor(status: number, statusText: string, body: string) {
+    super(`LLM invoke failed: ${status} ${statusText} – ${body}`);
+    this.name = "LLMProviderHttpError";
+    this.status = status;
+    this.statusText = statusText;
+    this.body = body;
+  }
+}
+
 const assertApiKey = () => {
   if (!ENV.forgeApiKey) {
     throw new Error("OPENAI_API_KEY is not configured");
@@ -323,9 +337,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(
-      `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
-    );
+    throw new LLMProviderHttpError(response.status, response.statusText, errorText);
   }
 
   return (await response.json()) as InvokeResult;

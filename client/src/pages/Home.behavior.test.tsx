@@ -1932,7 +1932,9 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(screen.getByTestId("manus-style-composer")).toHaveTextContent(/Architect, help me set up this project conversationally/i);
 
     await user.click(screen.getByTestId("section1a-conv-credentials-drawer-open"));
-    expect(screen.getByTestId("section1a-conv-credentials-drawer")).toBeInTheDocument();
+    const credentialsPanel = screen.getByTestId("section1a-conv-credentials-drawer");
+    expect(credentialsPanel).toBeInTheDocument();
+    expect(credentialsPanel.closest('[role="dialog"]')).toBeInTheDocument();
     expect(screen.getByText("Credentials Drawer")).toBeInTheDocument();
     expect(screen.getByText("Token values stay in Manus env vars. This view shows provider status and env var names only.")).toBeInTheDocument();
     expect(screen.getByText("CLAUDE_API_KEY")).toBeInTheDocument();
@@ -1980,7 +1982,10 @@ describe("Home v2 task-first workspace behavior", () => {
     const liveTasks = screen.getByTestId("section1a-conv-live-tasks");
     expect(within(liveTasks).getByText("Newest live task")).toBeInTheDocument();
     expect(within(liveTasks).getByText("Older live task")).toBeInTheDocument();
-    expect(screen.getByTestId("section1a-conv-archived-tasks")).toHaveTextContent("Archived planning task");
+    const archivedTasks = screen.getByTestId("section1a-conv-archived-tasks");
+    expect(archivedTasks).toHaveTextContent("Archived planning task");
+    await user.click(within(archivedTasks).getByTestId("section1a-conv-task-restore"));
+    expect(updateTaskStatusMock).toHaveBeenCalledWith({ taskId: 12, status: "active" });
     expect(liveTasks.textContent?.indexOf("Newest live task")).toBeLessThan(liveTasks.textContent?.indexOf("Older live task") ?? Number.MAX_SAFE_INTEGER);
 
     await user.click(within(liveTasks).getAllByTestId("section1a-conv-task-rename")[0]);

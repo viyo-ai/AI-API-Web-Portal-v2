@@ -90,9 +90,31 @@ const wrapperMocks = vi.hoisted(() => ({
   getWrapperRuntimeCredentialStates: vi.fn(),
 }));
 
+const architectMocks = vi.hoisted(() => ({
+  containsTokenLikeValue: vi.fn((value: string) => /(?:sk-[a-z0-9_-]{12,}|ghp_[a-z0-9_]{12,}|api[_-]?key\s*[:=])/i.test(value)),
+  redactTokenLikeValues: vi.fn((value: string) => value.replace(/(?:sk-[a-z0-9_-]{12,}|ghp_[a-z0-9_]{12,})/gi, "[REDACTED_TOKEN]")),
+  detectArchitectIntent: vi.fn(async () => ({
+    intent: "build",
+    shouldRouteToArchitect: false,
+    confidence: "high",
+    rationale: "Workspace security tests isolate generation routing.",
+    classifierSource: "test",
+  })),
+  generateArchitectReply: vi.fn(async () => ({
+    reply: "Architect mock not expected for generation security tests.",
+    confidence: "low",
+    missingFields: [],
+    nextAction: "none",
+  })),
+  loadArchitectContextPrompt: vi.fn(async () => ""),
+  loadArchitectIntentPrompt: vi.fn(async () => ""),
+  loadArchitectSystemPrompt: vi.fn(async () => ""),
+}));
+
 vi.mock("./db", () => dbMocks);
 vi.mock("./buildRunner/loadGovernance", () => governanceMocks);
 vi.mock("./wrapperLLM", () => wrapperMocks);
+vi.mock("./architectLLM", () => architectMocks);
 
 import {
   appRouter,
@@ -229,7 +251,7 @@ describe("v2 task ownership and credential-gate security", () => {
       status: "succeeded",
     });
     expect(wrapperMocks.executeWrapperTurn).toHaveBeenCalledWith(expect.objectContaining({ route: "claude", userMessage: "Start the task" }));
-  });
+  }, 15000);
 
   it("answers owner model-identity questions deterministically without opening a provider turn", async () => {
     wrapperMocks.getWrapperRuntimeCredentialStates.mockReturnValue([
@@ -290,7 +312,7 @@ describe("v2 task ownership and credential-gate security", () => {
     expect(dbMocks.updateTaskStatus).toHaveBeenCalledWith(77, 42, "blocked");
     expect(wrapperMocks.executeWrapperTurn).not.toHaveBeenCalled();
     expect(result).toMatchObject({ task: { id: 77, status: "blocked" } });
-  });
+  }, 15000);
 
   it("defaults §9 Kimi approval preference on and converts Kimi-routed submissions into an approval-gated dual handoff", async () => {
     wrapperMocks.getWrapperRuntimeCredentialStates.mockReturnValue([

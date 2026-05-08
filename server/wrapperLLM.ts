@@ -15,6 +15,7 @@ import { clearTurnStopRequest, getTurnStopRequest } from "./wrapperLLM/stop-regi
 import type { GlobalMemory, Skill, Task, TaskEvent, TaskFile } from "../drizzle/schema";
 import type { ResolvedSkillLoadReason } from "./db";
 import { enforceGovernanceBudget, renderGovernanceBlock, type GovernanceLoadResult } from "./buildRunner/loadGovernance";
+import { classifyProviderFailure, providerFailureOwnerMessage, type ProviderFailureProvider } from "./providerErrorMessages";
 
 export const CLAUDE_DEFAULT_MODEL = process.env.CLAUDE_MODEL || "claude-opus-4-7";
 export const CLAUDE_ADAPTIVE_THINKING_CONFIG = { type: "adaptive" } as const;
@@ -512,6 +513,36 @@ export function resolveEffectiveRoute(route: 'claude' | 'kimi', credentialStates
   return 'dual';
 }
 
+async function runKimiExecutionWithProviderRetry(input: WrapperExecutionInput, contextJson: string, claudePlan: string | undefined, governanceBlock = "") {
+  try {
+    return await runKimiExecution(input, contextJson, claudePlan, governanceBlock);
+  } catch (error) {
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    const failure = classifyProviderFailure("kimi", rawMessage);
+    const retryDelaySec = failure.retryAfterSec;
+    if (failure.kind !== "rate_limited" || typeof retryDelaySec !== "number") throw error;
+
+    await appendTaskEvent({
+      taskId: input.task.id,
+      ownerUserId: input.ownerUserId,
+      actor: "wrapper",
+      eventType: "status",
+      status: "blocked",
+      content: providerFailureOwnerMessage(failure),
+      metadataJson: serializeJson({ turnId: input.turnId, route: input.route, providerFailure: failure, retryScheduled: true }),
+    });
+    await new Promise((resolve) => setTimeout(resolve, Math.min(retryDelaySec, 2) * 1000));
+
+    try {
+      return await runKimiExecution(input, contextJson, claudePlan, governanceBlock);
+    } catch (retryError) {
+      const retryRawMessage = retryError instanceof Error ? retryError.message : String(retryError);
+      const retryFailure = classifyProviderFailure("kimi", retryRawMessage);
+      throw new Error(providerFailureOwnerMessage(retryFailure, { retryExhausted: true }));
+    }
+  }
+}
+
 export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<WrapperExecutionResult> {
   const context = buildContext(input);
   const contextJson = serializeJson(context);
@@ -568,6 +599,8 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
     metadataJson: serializeJson({ turnId: input.turnId, route: input.route, context }),
   });
 
+  let activeProvider: ProviderFailureProvider = input.route === "kimi" ? "kimi" : "anthropic";
+
   try {
     await updateTurnState(input.turnId, input.ownerUserId, "model_calling", input.route, serializeJson(input.credentialStates));
     await appendTaskEvent({
@@ -591,6 +624,7 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
     if (beforeModelStop) return { route: input.route, finalAnswer: beforeModelStop };
 
     if ((input.route === "claude" || input.route === "dual") && !input.approvedClaudePlan) {
+      activeProvider = "anthropic";
       claudePlan = await runClaudePlan(input, contextJson, await buildGovernanceBlockForProvider("claude"));
       await appendTaskEvent({
         taskId: input.task.id,
@@ -653,7 +687,8 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
           approvalResolvedAt: Date.now(),
         });
       }
-      kimiResult = await runKimiExecution(input, contextJson, claudePlan, await buildGovernanceBlockForProvider("kimi"));
+      activeProvider = "kimi";
+      kimiResult = await runKimiExecutionWithProviderRetry(input, contextJson, claudePlan, await buildGovernanceBlockForProvider("kimi"));
       await appendTaskEvent({
         taskId: input.task.id,
         ownerUserId: input.ownerUserId,
@@ -670,6 +705,7 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
     await updateTurnState(input.turnId, input.ownerUserId, "model_review", input.route, serializeJson(input.credentialStates));
 
     if (input.route === "dual") {
+      activeProvider = "anthropic";
       claudeReview = await runClaudeReview(input, contextJson, claudePlan, kimiResult, await buildGovernanceBlockForProvider("claude"));
       await appendTaskEvent({
         taskId: input.task.id,
@@ -714,9 +750,10 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
       finalAnswer,
     };
   } catch (error) {
-      const rawMessage = error instanceof Error ? error.message : "Unknown Wrapper LLM execution error";
-      const message = rawMessage === "Kimi returned an empty response." ? "Kimi did not return usable text for this turn. No silent fallback was used; retry the message after checking Cloudflare Workers AI, or send it with #claude for a Claude-only planning/review pass." : rawMessage;
-      await failTurn(input.turnId, input.ownerUserId, "MODEL_EXECUTION_FAILED", message, "failed");
+    const rawMessage = error instanceof Error ? error.message : "Unknown Wrapper LLM execution error";
+    const providerFailure = classifyProviderFailure(activeProvider, rawMessage);
+    const message = providerFailureOwnerMessage(providerFailure, { retryExhausted: providerFailure.provider === "kimi" && providerFailure.kind === "rate_limited" });
+    await failTurn(input.turnId, input.ownerUserId, "MODEL_EXECUTION_FAILED", message, "failed");
     await updateTaskStatus(input.task.id, input.ownerUserId, "error");
     await appendTaskEvent({
       taskId: input.task.id,
@@ -725,7 +762,7 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
       eventType: "error",
       status: "failed",
       content: message,
-      metadataJson: serializeJson({ turnId: input.turnId, route: input.route, rawProviderError: rawMessage }),
+      metadataJson: serializeJson({ turnId: input.turnId, route: input.route, providerFailure, rawProviderError: rawMessage }),
     });
     throw error;
   }

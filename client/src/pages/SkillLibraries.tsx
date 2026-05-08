@@ -342,10 +342,12 @@ export default function SkillLibrariesPanel() {
       sourceMetadata: { sessionId: crypto.randomUUID(), builtAt: new Date().toISOString(), modelUsed: "claude-opus-4-7" },
     } as any) as SkillRecord;
     setSelectedSkill(created);
+    await utils.skills.list.invalidate();
+    await skillsQuery.refetch();
     setShowAiDialog(false);
     setAiDraft(null);
     setAiMessages(buildWithAiStarter);
-    toast.success("Built with AI skill saved.");
+    toast.success("Built with AI skill saved and added to the library.");
   }
 
   async function saveDetailDraft() {
