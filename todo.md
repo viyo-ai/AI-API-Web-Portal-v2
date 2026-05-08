@@ -451,3 +451,4 @@
 - [x] §PORTAL-FIX-01 Component 3: add wrapper-layer provider error mapping without schema, provider, dependency, prompt, buildTargets.create, or frozen Architect file changes.
 - [x] §PORTAL-FIX-01 tests: add required regression tests, provider mapping tests, composer notice test, Kimi rate-limit retry test, and run FU-01/FU-02/FU-04/FU-05 contracts unchanged.
 - [x] §PORTAL-FIX-01 closeout: rerun FU-01 byte-equal proof, commit with `[PORTAL-FIX-01-XX]` prefix, push, save Manus Project gate, and deliver required inline closeout.
+- [x] Fix duplicate React key warning on `/?from_webdev=1` where two rendered children use key `1`, then validate the home page browser console is clean.

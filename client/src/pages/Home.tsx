@@ -2426,13 +2426,16 @@ export default function Home() {
                   {allFiles.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-[#cfcfc8] bg-[#fbfaf7] p-4 text-xs leading-5 text-[#6d6d65]">The all-files index is empty because no real task or global files have been recorded yet.<Button type="button" variant="outline" onClick={() => openUploadPicker("global")} className="mt-3 w-full rounded-xl border-[#d9d8d1] bg-white text-xs">Upload reusable file</Button></div>
                   ) : (
-                    allFiles.slice(0, 10).map((file) => (
-                      <a key={file.id} href={file.storageUrl} target="_blank" rel="noreferrer" className="block rounded-xl border border-[#deded8] bg-[#fbfaf7] p-2 text-xs text-[#5d5d55] hover:border-sky-200" aria-label={`Open or download ${file.relativePath}`}>
+                    allFiles.slice(0, 10).map((file) => {
+                      const fileScopeKey = file.scope === "global" || file.taskId === null ? "global" : `task-${file.taskId ?? "unknown"}`;
+                      return (
+                      <a key={`${fileScopeKey}-${file.id}`} href={file.storageUrl} target="_blank" rel="noreferrer" className="block rounded-xl border border-[#deded8] bg-[#fbfaf7] p-2 text-xs text-[#5d5d55] hover:border-sky-200" aria-label={`Open or download ${file.relativePath}`}>
                         <span className="font-semibold text-[#30302b]">{file.relativePath}</span>
                         <p className="mt-1 text-[#77766e]">{file.scope === "global" || file.taskId === null ? "Global Files" : `Task #${file.taskId ?? "unknown"}`} · {compactDate(file.createdAt)}</p>
                         <p className="mt-1 flex items-center gap-1 text-[#77766e]"><Download className="h-3 w-3" /> Open or download from the recorded storage link.</p>
                       </a>
-                    ))
+                      );
+                    })
                   )}
                 </CardContent>
               </Card>

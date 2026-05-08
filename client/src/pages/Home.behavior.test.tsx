@@ -1619,6 +1619,23 @@ describe("Home v2 task-first workspace behavior", () => {
     expect(screen.getByText(/Global Files ·/i)).toBeInTheDocument();
   });
 
+  it("renders merged task and global files with colliding database IDs without duplicate key warnings", async () => {
+    mockTaskFiles = [{ ...mockTaskFiles[0], id: 1, taskId: 7, relativePath: "docs/task-file.md", storageUrl: "/manus-storage/docs/task-file.md" }];
+    mockGlobalFiles = [{ ...mockGlobalFiles[0], id: 1, taskId: null, scope: "global", relativePath: "global-files/global-file.md", storageUrl: "/manus-storage/global-files/global-file.md" }];
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      render(<Home />);
+
+      await screen.findAllByText("Implement v2 shell");
+      expect(screen.getAllByRole("link", { name: /open or download docs\/task-file\.md/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole("link", { name: /open or download global-files\/global-file\.md/i }).length).toBeGreaterThan(0);
+      expect(consoleErrorSpy.mock.calls.filter((call) => call.some((arg) => String(arg).includes("Encountered two children with the same key")))).toEqual([]);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
   it("uploads selected files into Global Files without attaching them to the selected task", async () => {
     const user = userEvent.setup();
     render(<Home />);
