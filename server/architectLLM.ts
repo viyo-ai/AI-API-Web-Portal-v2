@@ -363,16 +363,6 @@ function parseArchitectReplyResponse(result: InvokeResult): ArchitectReplyDecisi
   return decision;
 }
 
-export function buildArchitectReply(params: {
-  message: string;
-  intent: ArchitectIntentDecision;
-  hasBuildTarget?: boolean;
-}) {
-  if (params.intent.tokenRedactionRequired || containsTokenLikeValue(params.message)) {
-    return "I can help with credentials, but token values must stay in a Manus environment variable. Please provide only the env var name so I can continue safely.";
-  }
-  return ARCHITECT_REPLY_FALLBACK;
-}
 
 export async function generateArchitectReply(
   options: ArchitectReplyGeneratorOptions

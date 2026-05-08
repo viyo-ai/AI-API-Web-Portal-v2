@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import {
-  buildArchitectReply,
   containsTokenLikeValue,
   detectArchitectIntent,
   loadArchitectIntentPrompt,
@@ -135,22 +134,12 @@ describe("§1A-CONV Architect and project-memory contracts", () => {
     expect(validateArchitectSetupFields({ ...parsed, githubTokenEnvVar: "BUILD_TARGET_GITHUB_TOKEN" })).toEqual([]);
   });
 
-  it("keeps token values out of Architect replies and redacts GitHub token prefixes", async () => {
+  it("redacts GitHub token prefixes before any Architect prompt or validation path can use them", () => {
     const tokenValue = `${"github"}_pat_11AAABBBBBCCCCCDDDDDEEEEEFFFFF`;
 
     expect(containsTokenLikeValue(`Use ${tokenValue} for GitHub`)).toBe(true);
     expect(redactTokenLikeValues(`Use ${tokenValue} for GitHub`)).toBe("Use [redacted-token-value] for GitHub");
 
-    const reply = buildArchitectReply({
-      message: `My token is ${tokenValue}`,
-      intent: await detectArchitectIntent("token changed", { invoke: mockIntentInvoke({ intent: "credentials", shouldRouteToArchitect: true }) }),
-      hasBuildTarget: true,
-    });
-
-    expect(reply).toContain("Manus environment variable");
-    expect(reply).toContain("env var name");
-    expect(reply).not.toContain(tokenValue);
-    expect(reply).not.toMatch(new RegExp(`${"github"}_pat_[A-Za-z0-9_\\-]+`));
   });
 
   it("ships prompt artifacts that define role boundaries, intent routing, and approval safety", () => {
