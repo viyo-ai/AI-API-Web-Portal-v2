@@ -425,3 +425,17 @@
 
 - [x] §1A-CONV-FU-04-XX: Delete unreachable `buildArchitectReply` from `server/architectLLM.ts` and confirm no production references remain.
 - [x] §1A-CONV-FU-04-XX: Run cleanup validation gates, commit with `[PORTAL-P3-S1A-CONV-FU-04-XX]` prefix, push the branch, save checkpoint, and deliver the short inline Product Owner summary.
+
+- [ ] Live QA pass: browser-test project Git connection, file-system/task folder behavior, multi-thread Kimi and Claude chat, skill creation/loading/usage, and report pass/fail findings.
+- [x] Fix setup wizard completion so successful GitHub connection and review paths always send valid `initialBuildBranch`, `protectedBranches`, and validation-command defaults that satisfy backend contracts.
+- [x] Fix stale provider recovery-note rendering so an older failed/empty provider event does not remain visible under a later successful Kimi/Claude turn.
+- [x] Improve composer/send control accessibility stability so route tests, Architect prompts, and keyboard/assistive interactions do not target shifted Diagnostics controls.
+- [x] Produce `.taskmaster/docs/ingestion-evidence/PORTAL_PHASE_3_DIRECTIVE-S1A-CONV-FU-05-ingestion.md` before code changes with `PORTAL-P3-S1A-CONV-FU-05-HR-XX` constraints and invariant coverage.
+- [x] Implement FU-05 wizard default normalization in the wizard input layer only, preserving `buildTargets.completeWizard` and chat-path `buildTargets.create` behavior.
+- [x] Implement FU-05 stale recovery-note UI suppression while preserving the underlying audit/event record.
+- [x] Implement FU-05 composer send-control stability with `data-testid`, `aria-label`, `Cmd/Ctrl+Enter`, tooltip copy, and stable keyboard tab order across inspector tabs.
+- [x] Add or extend regression coverage for `INV-FU-05-01` through `INV-FU-05-08`, including the requested wizard, stale-note, and composer behavioral tests.
+- [x] Run FU-05 validation gates: `pnpm check`, targeted section/architect tests, wizard/composer behavior tests, full `pnpm test --run`, and `pnpm build`.
+- [x] Re-run the FU-01 byte-equal proof or available equivalent and confirm the chat-path `buildTargets.create` record remains unchanged.
+- [x] Create a conventional commit on `agent-work/s1a-conv-fu-05`, save a Manus checkpoint, and deliver the mandated FU-05 closeout package with the full commit URL.
+- [x] FU-05 lean closeout: skip heavy closeout and deliver only commit URL, validation gate table, three short defect diff hunks, test count delta, FU-01 byte-equal proof rerun confirmation, and boundary statement.

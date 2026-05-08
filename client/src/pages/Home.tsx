@@ -17,7 +17,12 @@ import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import {
   WIZARD_CONNECTION_SUCCESS,
+  WIZARD_PREFIX_ADDED_NOTE,
   WIZARD_PROJECT_CONNECTED_SUCCESS,
+  defaultWizardInitialBranch,
+  normalizeWizardInitialBranch,
+  normalizeWizardProtectedBranches,
+  normalizeWizardValidationCommands,
   validateWizardRepoLink,
   validateWizardTokenEnvVarName,
   wizardConnectionResultMessage,
@@ -376,6 +381,38 @@ function ownerEventBody(event: ThreadEvent) {
   return ownerFacingText(event.content);
 }
 
+function eventTurnId(event: ThreadEvent | undefined) {
+  if (!event?.metadataJson) return null;
+  try {
+    const metadata = JSON.parse(event.metadataJson) as { turnId?: unknown; turn_id?: unknown };
+    const rawTurnId = metadata.turnId ?? metadata.turn_id;
+    const numericTurnId = typeof rawTurnId === "number" ? rawTurnId : Number(rawTurnId);
+    return Number.isFinite(numericTurnId) ? numericTurnId : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasLaterSuccessfulProviderEventForSameTurn(event: ThreadEvent, events: ThreadEvent[]) {
+  const failedTurnId = eventTurnId(event);
+  if (failedTurnId === null) return false;
+  const failedAt = eventTimestamp(event);
+  return events.some((candidate) => {
+    if (eventTurnId(candidate) !== failedTurnId) return false;
+    if (!isOwnerVisibleEvent(candidate)) return false;
+    if (candidate.status !== "completed") return false;
+    return eventTimestamp(candidate) > failedAt || (eventTimestamp(candidate) === failedAt && candidate.id > event.id);
+  });
+}
+
+function latestActionableProviderFailure(events: ThreadEvent[]) {
+  const newestTechnicalEvents = events.filter((event) => !isOwnerVisibleEvent(event)).sort(newestFirst);
+  return newestTechnicalEvents.find((event) => {
+    if (event.status !== "failed" && event.status !== "blocked") return false;
+    return !hasLaterSuccessfulProviderEventForSameTurn(event, events);
+  });
+}
+
 function ownerProviderFailureMessage(event: ThreadEvent | undefined) {
   if (!event) return null;
   const content = event.content.toLowerCase();
@@ -421,7 +458,7 @@ export default function Home() {
   const [wizardRepoUrl, setWizardRepoUrl] = useState("");
   const [wizardTokenEnvVar, setWizardTokenEnvVar] = useState("VIYO_GITHUB_TOKEN");
   const [wizardBaseBranch, setWizardBaseBranch] = useState("main");
-  const [wizardInitialBranch, setWizardInitialBranch] = useState("claude-kimi-work");
+  const [wizardInitialBranch, setWizardInitialBranch] = useState(defaultWizardInitialBranch("Workshop repo"));
   const [wizardProtectedBranches, setWizardProtectedBranches] = useState("main");
   const [wizardValidationCommands, setWizardValidationCommands] = useState("");
   const [wizardServiceChecks, setWizardServiceChecks] = useState("");
@@ -517,7 +554,7 @@ export default function Home() {
   const events = ((selectedThread?.events ?? []) as ThreadEvent[]);
   const ownerVisibleEvents = useMemo(() => events.filter(isOwnerVisibleEvent).sort(oldestFirst), [events]);
   const technicalEvents = useMemo(() => events.filter((event) => !isOwnerVisibleEvent(event)).sort(newestFirst), [events]);
-  const latestProviderFailure = useMemo(() => technicalEvents.find((event) => event.status === "failed" || event.status === "blocked"), [technicalEvents]);
+  const latestProviderFailure = useMemo(() => latestActionableProviderFailure(events), [events]);
   const providerFailureCopy = ownerProviderFailureMessage(latestProviderFailure);
   const taskFiles = (taskFilesQuery.data ?? []) as TaskFileRecord[];
   const attachedGlobalFiles = (attachedGlobalFilesQuery.data ?? []) as AttachedGlobalFileRecord[];
@@ -694,10 +731,11 @@ export default function Home() {
   }
 
   function applyWizardRecommendation(recommendation: ProjectWizardRecommendation) {
+    const normalizedInitialBranch = normalizeWizardInitialBranch(recommendation.branchStrategy.value.initialBuildBranch, wizardDisplayName);
     setWizardBaseBranch(recommendation.defaultBaseBranch.value);
-    setWizardInitialBranch(recommendation.branchStrategy.value.initialBuildBranch);
-    setWizardProtectedBranches(recommendation.branchStrategy.value.protectedBranches.join(","));
-    setWizardValidationCommands(recommendation.validationCommands.value.join("\n"));
+    setWizardInitialBranch(normalizedInitialBranch.value);
+    setWizardProtectedBranches(normalizeWizardProtectedBranches(recommendation.branchStrategy.value.protectedBranches.join(","), recommendation.defaultBaseBranch.value).join(","));
+    setWizardValidationCommands(normalizeWizardValidationCommands(recommendation.validationCommands.value.join("\n")).join("\n"));
     setWizardServiceChecks(recommendation.serviceChecks.value.join("\n"));
     setWizardGovernanceFiles(recommendation.projectRuleBooks.value);
     setWizardAgentEnvMap(formatEnvMapForInput(recommendation.environmentVariables.value));
@@ -774,9 +812,13 @@ export default function Home() {
       toast.warning(message);
       return;
     }
-    const protectedBranches = wizardProtectedBranches.split(",").map((value) => value.trim()).filter(Boolean);
-    const validationCommands = wizardValidationCommands.split("\n").map((value) => value.trim()).filter(Boolean);
+    const normalizedInitialBranch = normalizeWizardInitialBranch(wizardInitialBranch, wizardDisplayName);
+    const protectedBranches = normalizeWizardProtectedBranches(wizardProtectedBranches, wizardBaseBranch);
+    const validationCommands = normalizeWizardValidationCommands(wizardValidationCommands);
     const serviceChecks = wizardServiceChecks.split("\n").map((value) => value.trim()).filter(Boolean);
+    if (normalizedInitialBranch.value !== wizardInitialBranch.trim()) setWizardInitialBranch(normalizedInitialBranch.value);
+    if (protectedBranches.join(",") !== wizardProtectedBranches.trim()) setWizardProtectedBranches(protectedBranches.join(","));
+    if (validationCommands.join("\n") !== wizardValidationCommands.trim()) setWizardValidationCommands(validationCommands.join("\n"));
     const governanceFiles = normalizedWizardGovernanceRows();
     const errors = governanceValidationErrors(governanceFiles);
     if (errors.length > 0) {
@@ -797,7 +839,7 @@ export default function Home() {
         repoUrl: wizardRepoUrl.trim(),
         githubTokenEnvVar: wizardTokenEnvVar.trim(),
         defaultBaseBranch: wizardBaseBranch.trim() || "main",
-        initialBuildBranch: wizardInitialBranch.trim() || "portal-wizard-setup",
+        initialBuildBranch: normalizedInitialBranch.value,
         protectedBranches,
         validationCommands,
         serviceChecks,
@@ -1513,7 +1555,8 @@ export default function Home() {
                       <div className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="setup-wizard-review-card">
                         <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#30302b]">First workspace name</p><Badge variant="outline" className={`rounded-full text-[10px] ${confidenceTone(wizardAnalysis.recommendation.branchStrategy.confidence)}`}>{wizardAnalysis.recommendation.branchStrategy.confidence}</Badge></div>
                         <p className="mt-1 text-[11px] leading-4 text-[#77766e]">{wizardAnalysis.recommendation.branchStrategy.rationale}</p>
-                        <Input value={wizardInitialBranch} onChange={(event) => updateWizardTextField(setWizardInitialBranch, event.target.value)} placeholder="claude-kimi-work" className="mt-2 h-8 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                        <Input value={wizardInitialBranch} onChange={(event) => updateWizardTextField(setWizardInitialBranch, event.target.value)} placeholder="agent-work/workshop-repo" className="mt-2 h-8 rounded-xl border-[#d9d8d1] bg-white text-xs" />
+                        {wizardInitialBranch.trim() && !wizardInitialBranch.trim().startsWith("agent-work/") ? <p role="note" className="mt-2 text-[11px] leading-4 text-sky-800">{WIZARD_PREFIX_ADDED_NOTE}</p> : null}
                       </div>
 
                       <div className="rounded-2xl border border-[#deded8] bg-white p-3" data-testid="setup-wizard-review-card">
@@ -2110,10 +2153,16 @@ export default function Home() {
                 onChange={(event) => setComposerText(event.target.value)}
                 onKeyDown={handleComposerKeyDown}
                 placeholder="Send message to the task..."
+                id="task-message-composer"
                 aria-label="Task message"
+                aria-describedby="task-composer-send-help"
+                aria-controls="section8-send-or-queue-button"
+                aria-keyshortcuts="Enter"
+                data-testid="section8-task-message-composer"
                 className="max-h-36 min-h-11 flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm leading-6 shadow-none focus-visible:ring-0"
               />
-              <Button type="button" onClick={handleSendMessage} disabled={submitMessage.isPending || !composerText.trim() || isQueueFull} className={`mb-1 h-9 shrink-0 rounded-full px-3 text-white hover:bg-black ${hasActiveGeneration ? "w-auto bg-sky-700 hover:bg-sky-800" : "w-9 bg-[#1f1f1f] p-0"}`} aria-label={hasActiveGeneration ? "Queue message" : "Send message"} data-testid="section8-send-or-queue-button">
+              <p id="task-composer-send-help" className="sr-only">Press Enter in the task message composer or activate the stable send button to submit the current task message. Press Shift and Enter to add a line break.</p>
+              <Button type="button" id="section8-send-or-queue-button" onClick={handleSendMessage} disabled={submitMessage.isPending || !composerText.trim() || isQueueFull} className={`mb-1 h-9 shrink-0 rounded-full px-3 text-white hover:bg-black ${hasActiveGeneration ? "w-auto bg-sky-700 hover:bg-sky-800" : "w-9 bg-[#1f1f1f] p-0"}`} aria-label={hasActiveGeneration ? "Queue message for task" : "Send message to task"} aria-controls="task-message-composer" aria-describedby="task-composer-send-help" aria-keyshortcuts="Enter" data-testid="section8-send-or-queue-button">
                 {submitMessage.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : hasActiveGeneration ? <span className="text-xs font-semibold">Queue</span> : <SendHorizontal className="h-4 w-4" />}
               </Button>
             </div>

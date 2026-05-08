@@ -13,6 +13,13 @@ export const WIZARD_CONNECTION_SUCCESS = "Connected. Read access confirmed.";
 export const WIZARD_PROJECT_CONNECTED_SUCCESS =
   "Your Project is connected. You can start a new task whenever you’re ready.";
 
+export const WIZARD_INITIAL_BRANCH_PREFIX = "agent-work/";
+
+export const WIZARD_DEFAULT_VALIDATION_COMMANDS = ["pnpm check", "pnpm test", "pnpm build"];
+
+export const WIZARD_PREFIX_ADDED_NOTE =
+  "For safety, this Project will save the first workspace branch under agent-work/.";
+
 const TOKEN_VALUE_RE = /(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+)/g;
 
 export type WizardConnectionStatus =
@@ -56,4 +63,55 @@ export function wizardConnectionFailureMessage(status: WizardConnectionStatus, f
 export function wizardConnectionResultMessage(result: { status?: WizardConnectionStatus; message?: string | null } | null | undefined) {
   if (result?.status === "ok") return WIZARD_CONNECTION_SUCCESS;
   return wizardConnectionFailureMessage(result?.status ?? "unknown", result?.message);
+}
+
+function sanitizeWizardBranchSegment(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9/_-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^[-/]+|[-/]+$/g, "");
+}
+
+export function defaultWizardInitialBranch(displayName: string) {
+  const slug = sanitizeWizardBranchSegment(displayName) || "workshop-repo";
+  return `${WIZARD_INITIAL_BRANCH_PREFIX}${slug}`;
+}
+
+export function normalizeWizardInitialBranch(value: string, displayName: string) {
+  const cleanValue = sanitizeWizardBranchSegment(value);
+  if (!cleanValue) {
+    return { value: defaultWizardInitialBranch(displayName), prefixAdded: false, defaulted: true };
+  }
+  if (cleanValue.startsWith(WIZARD_INITIAL_BRANCH_PREFIX)) {
+    return { value: cleanValue, prefixAdded: false, defaulted: false };
+  }
+  return { value: `${WIZARD_INITIAL_BRANCH_PREFIX}${cleanValue}`, prefixAdded: true, defaulted: false };
+}
+
+export function normalizeWizardProtectedBranches(value: string, defaultBaseBranch: string) {
+  const fallbackBranch = sanitizeWizardBranchSegment(defaultBaseBranch) || "main";
+  const cleanValue = value.trim();
+  if (!cleanValue) return [fallbackBranch];
+
+  const fromJson = cleanValue.startsWith("[");
+  if (fromJson) {
+    try {
+      const parsed = JSON.parse(cleanValue);
+      if (!Array.isArray(parsed)) return [fallbackBranch];
+      const branches = parsed.map((branch) => sanitizeWizardBranchSegment(String(branch))).filter(Boolean);
+      return branches.length ? Array.from(new Set(branches)) : [fallbackBranch];
+    } catch {
+      return [fallbackBranch];
+    }
+  }
+
+  const branches = cleanValue.split(",").map((branch) => sanitizeWizardBranchSegment(branch)).filter(Boolean);
+  return branches.length ? Array.from(new Set(branches)) : [fallbackBranch];
+}
+
+export function normalizeWizardValidationCommands(value: string) {
+  const commands = value.split("\n").map((command) => command.trim()).filter(Boolean);
+  return commands.length ? commands : WIZARD_DEFAULT_VALIDATION_COMMANDS;
 }
