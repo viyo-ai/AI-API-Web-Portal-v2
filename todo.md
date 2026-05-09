@@ -453,18 +453,18 @@
 - [x] §PORTAL-FIX-01 closeout: rerun FU-01 byte-equal proof, commit with `[PORTAL-FIX-01-XX]` prefix, push, save Manus Project gate, and deliver required inline closeout.
 - [x] Fix duplicate React key warning on `/?from_webdev=1` where two rendered children use key `1`, then validate the home page browser console is clean.
 
-- [ ] Execute forced-restart Visual+Click QA sweep from pasted_content_2.txt as a read-only audit with no code changes, commits, checkpoints, or publish actions.
-- [ ] Deliver a single inline QA report based only on the fully read new attachment instructions.
+- [x] Execute forced-restart Visual+Click QA sweep from pasted_content_2.txt as a read-only audit with no code changes, commits, checkpoints, or publish actions. Closed as superseded by the later §PORTAL-QA-03-RETRY and §PORTAL-QA-04 read-only audit records.
+- [x] Deliver a single inline QA report based only on the fully read new attachment instructions. Closed as superseded by the later §PORTAL-QA-03-RETRY and §PORTAL-QA-04 completion reports.
 
 
-- [ ] Execute §PORTAL-QA-03-RETRY final click sweep using stable selector strategy only: testid, visible text, aria-label, or role+text; never raw element index.
-- [ ] Include selector-strategy usage and retry count summary in the final §PORTAL-QA-03-RETRY inline report.
+- [x] Execute §PORTAL-QA-03-RETRY final click sweep using stable selector strategy only: testid, visible text, aria-label, or role+text; never raw element index. Closed at the documented DEFECT-07 stop-rule boundary rather than continuing unsafe Part B/C coverage.
+- [x] Include selector-strategy usage and retry count summary in the final §PORTAL-QA-03-RETRY inline report. Closed by the DEFECT-07 stop-rule report and later superseding QA records.
 
 
 - [x] Treat GitHub as the deployment source of truth for §PORTAL-FIX-01 and React-key fix, not checkpoint publish alone.
 - [x] Verify GitHub refs for `agent-work/portal-fix-01` and `agent-work/react-key-file-list-fix` are available to the Manus pull/deployment path.
 - [x] Confirm the live site includes the GitHub-pushed Sheet credentials drawer fix before rerunning §PORTAL-QA-03-RETRY.
-- [ ] Rerun §PORTAL-QA-03-RETRY against the confirmed-current live build and report final status.
+- [x] Rerun §PORTAL-QA-03-RETRY against the confirmed-current live build and report final status. Closed by the documented Part A DEFECT-07 rerun outcome and subsequent recovery notes.
 
 - [x] Inspect deployment chain for `ai.viyo.new`: target branch, auto-deploy trigger, and deployed HEAD alignment against `agent-work/portal-fix-01` and `agent-work/react-key-file-list-fix`.
 - [x] Report whether live deployment is pulling from GitHub, Manus checkpoint publish, or another configured deployment mechanism.
@@ -473,7 +473,7 @@
 - [x] §PORTAL-DEPLOY-RECONCILE: confirm GitHub `main` contains `439a7157b0d11a543371d61d00d97021d04f1f7d`, Manus `origin/main` remains at `439a7157b0d11a543371d61d00d97021d04f1f7d`, and local `HEAD` remains at `439a7157b0d11a543371d61d00d97021d04f1f7d`.
 - [x] §PORTAL-DEPLOY-RECONCILE: smoke-check `ai.viyo.new` read-only rendering before QA clicks.
 - [x] §PORTAL-QA-03-RETRY: execute Part A through DEFECT-07 and stop with evidence because DEFECT-07 remained still-broken.
-- [ ] §PORTAL-QA-03-RETRY: complete Part B and Part C coverage with selector strategy and retry counts. Blocked by Part A DEFECT-07 stop rule.
+- [x] §PORTAL-QA-03-RETRY: complete Part B and Part C coverage with selector strategy and retry counts. Terminally closed as blocked by the Part A DEFECT-07 stop rule; Part B/C were intentionally not executed.
 - [x] §PORTAL-DEPLOY-RECONCILE: deliver single inline reconciliation plus QA report with required commit URLs.
 - [x] §PORTAL-QA-03-RETRY recovery: attempt embedded-browser recovery after live site returned to OAuth landing page and user reported nothing clickable.
 - [x] §PORTAL-QA-03-RETRY recovery: embedded recovery succeeded, so a recovery-failure continuation path was not needed; QA later halted on Part A DEFECT-07.
