@@ -238,6 +238,22 @@ export default function SkillLibrariesPanel() {
   const deleteSkillMutation = trpc.skills.delete.useMutation({ onSuccess: () => utils.skills.list.invalidate() });
   const githubPreviewMutation = trpc.skills.previewGithubImport.useMutation();
   const githubImportMutation = trpc.skills.importGithubSelected.useMutation({ onSuccess: () => utils.skills.list.invalidate() });
+  const taskSkillInput = useMemo(() => ({ taskId: testTaskId ?? 1 }), [testTaskId]);
+  const taskSkillsQuery = trpc.skills.listForTask.useQuery(taskSkillInput, { enabled: Boolean(testTaskId) });
+  const pickForTaskMutation = trpc.skills.pickForTask.useMutation({
+    onSuccess: async () => {
+      await utils.skills.listForTask.invalidate(taskSkillInput);
+      toast.success("Skill attached to this task. It will load in the next AI turn.");
+    },
+    onError: (error) => toast.error(error.message),
+  });
+  const removeForTaskMutation = trpc.skills.removeForTask.useMutation({
+    onSuccess: async () => {
+      await utils.skills.listForTask.invalidate(taskSkillInput);
+      toast.success("Skill removed from this task.");
+    },
+    onError: (error) => toast.error(error.message),
+  });
 
   const skills = (skillsQuery.data ?? []) as SkillRecord[];
   const filteredSkills = useMemo(() => {
@@ -254,6 +270,19 @@ export default function SkillLibrariesPanel() {
   }, [enabledFilter, officialOnly, scopeFilter, search, skills, sourceFilter]);
 
   const selectedTask = (tasksQuery.data ?? []).find((task: any) => task.id === testTaskId);
+  const selectedTaskSkills = (taskSkillsQuery.data?.skills ?? []) as SkillRecord[];
+  const isSelectedSkillAttached = Boolean(selectedSkill && selectedTaskSkills.some((skill) => skill.id === selectedSkill.id));
+  const taskSkillActionPending = pickForTaskMutation.isPending || removeForTaskMutation.isPending;
+
+  function attachSelectedSkillToTask() {
+    if (!selectedSkill || !testTaskId) return;
+    pickForTaskMutation.mutate({ taskId: testTaskId, skillId: selectedSkill.id } as any);
+  }
+
+  function removeSelectedSkillFromTask() {
+    if (!selectedSkill || !testTaskId) return;
+    removeForTaskMutation.mutate({ taskId: testTaskId, skillId: selectedSkill.id, reason: "Owner removed from skill detail" } as any);
+  }
 
   async function createParsedSkill(parsed: ParsedSkillFile) {
     const payload: SkillPayload = {
@@ -475,8 +504,19 @@ export default function SkillLibrariesPanel() {
                   <div className="rounded-2xl border border-[#ecebe4] bg-[#fbfaf7] p-4"><p className="text-sm font-semibold">Scope</p><p className="mt-1 text-sm text-[#66665f]">{scopeLabels[detail?.scope ?? "manual-only"]}. To change scope, edit the skill content and loading settings.</p></div>
                   <div className="rounded-2xl border border-[#ecebe4] bg-[#fbfaf7] p-4"><p className="text-sm font-semibold">Source</p><p className="mt-1 text-sm text-[#66665f]">{sourceLabels[detail?.source ?? "created"]} {detail?.sourceMetadata ? `· ${JSON.stringify(detail.sourceMetadata)}` : ""}</p></div>
                   <div className="md:col-span-2 rounded-2xl border border-sky-100 bg-sky-50/60 p-4">
-                    <div className="flex flex-wrap items-center gap-3"><Label>Test on a task</Label><select value={testTaskId ?? ""} onChange={(event) => setTestTaskId(event.target.value ? Number(event.target.value) : null)} className="h-9 rounded-xl border border-[#d9d8d1] bg-white px-3 text-sm"><option value="">Pick a task</option>{(tasksQuery.data ?? []).map((task: any) => <option key={task.id} value={task.id}>{task.title}</option>)}</select></div>
-                    {selectedTask ? <pre className="mt-3 max-h-52 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-3 text-xs text-[#45453e]">{`Skill preview for task: ${selectedTask.title}\n\n<skill name=\"${detail?.name}\" scope=\"${scopeLabels[detail?.scope ?? "manual-only"]}\">\n${detail?.content}\n</skill>`}</pre> : null}
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Label>Test on a task</Label>
+                      <select value={testTaskId ?? ""} onChange={(event) => setTestTaskId(event.target.value ? Number(event.target.value) : null)} className="h-9 rounded-xl border border-[#d9d8d1] bg-white px-3 text-sm"><option value="">Pick a task</option>{(tasksQuery.data ?? []).map((task: any) => <option key={task.id} value={task.id}>{task.title}</option>)}</select>
+                      {selectedTask ? (
+                        isSelectedSkillAttached ? (
+                          <Button type="button" variant="outline" className="rounded-xl bg-white" onClick={removeSelectedSkillFromTask} disabled={taskSkillActionPending}>{taskSkillActionPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Remove from task</Button>
+                        ) : (
+                          <Button type="button" className="rounded-xl bg-[#1f1f1f] text-white hover:bg-black" onClick={attachSelectedSkillToTask} disabled={taskSkillActionPending}>{taskSkillActionPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Attach to task</Button>
+                        )
+                      ) : null}
+                    </div>
+                    {selectedTask ? <p className="mt-2 text-xs text-[#4d6484]">{isSelectedSkillAttached ? "Attached: this skill will be included in the next AI turn for this task." : "Attach this skill to make it available to the selected task's next AI turn."}</p> : null}
+                    {selectedTask ? <pre className="mt-3 max-h-52 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-3 text-xs text-[#45453e]">{`Skill preview for task: ${selectedTask.title}\n\n<skill name="${detail?.name}" scope="${scopeLabels[detail?.scope ?? "manual-only"]}">\n${detail?.content}\n</skill>`}</pre> : null}
                   </div>
                 </CardContent>
               </Card>
@@ -492,7 +532,7 @@ export default function SkillLibrariesPanel() {
                 {detail?.scope === "global" ? <p>This skill loads automatically on every task in every project.</p> : null}
                 {detail?.scope === "task-type" ? <div><p>This skill loads when you create a task of these kinds.</p><div className="mt-3 grid gap-2 sm:grid-cols-2">{Object.entries(taskTypeLabels).map(([key, label]) => <label key={key} className="flex items-center gap-2 rounded-xl border p-3"><Checkbox checked={(detail.taskTypes ?? []).includes(key as SkillTaskType)} onCheckedChange={(checked) => { const current = new Set(detail.taskTypes ?? []); checked ? current.add(key as SkillTaskType) : current.delete(key as SkillTaskType); setDetailDraft({ ...detail, taskTypes: Array.from(current) }); }} />{label}</label>)}</div></div> : null}
                 {detail?.scope === "file-pattern" ? <div><p>This skill loads automatically when the AI works with files matching these patterns.</p><div className="mt-3 space-y-2">{(detail.filePatterns ?? []).map((pattern, index) => <Input key={`${pattern}-${index}`} value={pattern} onChange={(event) => { const next = [...(detail.filePatterns ?? [])]; next[index] = event.target.value; setDetailDraft({ ...detail, filePatterns: next }); }} className="rounded-xl" />)}<Button type="button" variant="outline" onClick={() => setDetailDraft({ ...detail, filePatterns: [...(detail.filePatterns ?? []), "src/**"] })} className="rounded-xl bg-white">Add pattern</Button></div></div> : null}
-                {detail?.scope === "manual-only" ? <p>This skill only loads when you pick it from a task's Skills panel.</p> : null}
+                {detail?.scope === "manual-only" ? <p>This skill only loads when you attach it to a task from the task test control or another task Skills panel.</p> : null}
               </CardContent></Card>
             </TabsContent>
           </Tabs>

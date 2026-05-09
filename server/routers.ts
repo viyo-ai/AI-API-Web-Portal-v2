@@ -1570,6 +1570,11 @@ async function runGenerationTurn(input: {
     listMemoryByCategory(input.ownerUserId, undefined, 20),
     listTaskFiles(input.task.id, input.ownerUserId, 200),
   ]);
+  const resolvedSkills = await resolveSkillsForTask({
+    task: input.task,
+    ownerUserId: input.ownerUserId,
+    files,
+  });
 
   try {
     await executeWrapperTurn({
@@ -1583,6 +1588,7 @@ async function runGenerationTurn(input: {
       memory,
       files,
       governance,
+      skills: resolvedSkills.skills,
       requireApprovalBeforeKimi: requiresKimiApproval,
     });
   } catch {
@@ -1630,6 +1636,11 @@ async function resumeApprovedKimiTurn(input: {
     listMemoryByCategory(input.ownerUserId, undefined, 20),
     listTaskFiles(input.task.id, input.ownerUserId, 200),
   ]);
+  const resolvedSkills = await resolveSkillsForTask({
+    task: input.task,
+    ownerUserId: input.ownerUserId,
+    files,
+  });
 
   try {
     await executeWrapperTurn({
@@ -1643,6 +1654,7 @@ async function resumeApprovedKimiTurn(input: {
       memory,
       files,
       governance,
+      skills: resolvedSkills.skills,
       approvedClaudePlan: turn.approvalPlanContent,
       requireApprovalBeforeKimi: false,
     });

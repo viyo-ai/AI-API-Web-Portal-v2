@@ -24,6 +24,7 @@ const dbMocks = vi.hoisted(() => ({
   listTasksForOwner: vi.fn(),
   listTurnsForTask: vi.fn(),
   listQueuedMessages: vi.fn(),
+  resolveSkillsForTask: vi.fn(),
   markQueuedMessagesProcessing: vi.fn(),
   markQueuedMessagesSent: vi.fn(),
   enqueueTaskMessage: vi.fn(),
@@ -185,6 +186,7 @@ describe("v2 task ownership and credential-gate security", () => {
     dbMocks.listGlobalFilesForOwner.mockResolvedValue([]);
     dbMocks.listExpiredAwaitingApprovalTurns.mockResolvedValue([]);
     dbMocks.listQueuedMessages.mockResolvedValue([]);
+    dbMocks.resolveSkillsForTask.mockResolvedValue({ skills: [], taskType: "other" });
     dbMocks.autoAttachRootGlobalFiles.mockResolvedValue({ attached: [], missing: [] });
     dbMocks.markQueuedMessagesProcessing.mockResolvedValue([]);
     dbMocks.markQueuedMessagesSent.mockResolvedValue(undefined);
@@ -250,7 +252,79 @@ describe("v2 task ownership and credential-gate security", () => {
       eventType: "route_decision",
       status: "succeeded",
     });
-    expect(wrapperMocks.executeWrapperTurn).toHaveBeenCalledWith(expect.objectContaining({ route: "claude", userMessage: "Start the task" }));
+    expect(dbMocks.resolveSkillsForTask).toHaveBeenCalledWith({
+      task: expect.objectContaining({ id: 77, ownerUserId: 42 }),
+      ownerUserId: 42,
+      files: [],
+    });
+    expect(wrapperMocks.executeWrapperTurn).toHaveBeenCalledWith(expect.objectContaining({ route: "claude", userMessage: "Start the task", skills: [] }));
+  }, 15000);
+
+  it("passes attached task skills through to wrapper execution so uploaded skill instructions can reach invokeLLM", async () => {
+    const attachedSkill = {
+      id: 901,
+      ownerUserId: 42,
+      slug: "qa-skill-loader-probe",
+      name: "qa-skill-loader-probe",
+      description: "QA diagnostic skill.",
+      scope: "manual-only",
+      content: "When invoked, reply with ARTICHOKE_VERIFIED_2026 followed by the current ISO timestamp.",
+      taskTypes: [],
+      filePatterns: [],
+      enabled: true,
+      version: "1.0.0",
+      source: "uploaded",
+      sourceMetadata: null,
+      createdAt: 1777998000000,
+      updatedAt: 1777998000000,
+      loadReason: { type: "manual" },
+      displayTag: "Manual pick",
+    };
+    wrapperMocks.getWrapperRuntimeCredentialStates.mockReturnValue([
+      { provider: "claude", status: "configured", configured: true, reason: "Claude configured." },
+      { provider: "kimi", status: "configured", configured: true, reason: "Kimi configured." },
+    ]);
+    dbMocks.getTaskForOwner.mockResolvedValue(ownedTask);
+    dbMocks.resolveSkillsForTask.mockResolvedValueOnce({ skills: [attachedSkill], taskType: "other" });
+    wrapperMocks.executeWrapperTurn.mockResolvedValue({ route: "claude", finalAnswer: "ARTICHOKE_VERIFIED_2026 2026-05-09T16:00:00Z" });
+    const caller = appRouter.createCaller(createContext(42));
+
+    await caller.orchestration.submitMessage({ taskId: 77, message: "Invoke qa-skill-loader-probe", routeMode: "claude" });
+
+    expect(dbMocks.resolveSkillsForTask).toHaveBeenCalledWith({
+      task: expect.objectContaining({ id: 77, ownerUserId: 42 }),
+      ownerUserId: 42,
+      files: [],
+    });
+    expect(wrapperMocks.executeWrapperTurn).toHaveBeenCalledWith(expect.objectContaining({
+      route: "claude",
+      userMessage: "Invoke qa-skill-loader-probe",
+      skills: [expect.objectContaining({
+        slug: "qa-skill-loader-probe",
+        content: expect.stringContaining("ARTICHOKE_VERIFIED_2026"),
+        loadReason: { type: "manual" },
+      })],
+    }));
+  }, 15000);
+
+  it("passes an empty skills array to wrapper execution when no task skills resolve", async () => {
+    wrapperMocks.getWrapperRuntimeCredentialStates.mockReturnValue([
+      { provider: "claude", status: "configured", configured: true, reason: "Claude configured." },
+      { provider: "kimi", status: "configured", configured: true, reason: "Kimi configured." },
+    ]);
+    dbMocks.getTaskForOwner.mockResolvedValue(ownedTask);
+    dbMocks.resolveSkillsForTask.mockResolvedValueOnce({ skills: [], taskType: "other" });
+    wrapperMocks.executeWrapperTurn.mockResolvedValue({ route: "claude", finalAnswer: "No attached skill." });
+    const caller = appRouter.createCaller(createContext(42));
+
+    await caller.orchestration.submitMessage({ taskId: 77, message: "Start without an attached skill", routeMode: "claude" });
+
+    expect(dbMocks.resolveSkillsForTask).toHaveBeenCalledWith(expect.objectContaining({
+      task: expect.objectContaining({ id: 77, ownerUserId: 42 }),
+      ownerUserId: 42,
+      files: [],
+    }));
+    expect(wrapperMocks.executeWrapperTurn).toHaveBeenCalledWith(expect.objectContaining({ skills: [] }));
   }, 15000);
 
   it("answers owner model-identity questions deterministically without opening a provider turn", async () => {
@@ -365,11 +439,17 @@ describe("v2 task ownership and credential-gate security", () => {
       status: "succeeded",
       content: expect.stringContaining("Owner approved Kimi handoff"),
     }));
+    expect(dbMocks.resolveSkillsForTask).toHaveBeenCalledWith({
+      task: expect.objectContaining({ id: 77, ownerUserId: 42 }),
+      ownerUserId: 42,
+      files: [],
+    });
     expect(wrapperMocks.executeWrapperTurn).toHaveBeenCalledWith(expect.objectContaining({
       turnId: 777,
       route: "dual",
       approvedClaudePlan: "Stored Claude plan for Kimi.",
       requireApprovalBeforeKimi: false,
+      skills: [],
     }));
   });
 

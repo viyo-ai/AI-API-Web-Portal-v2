@@ -502,3 +502,21 @@
 - [x] §PORTAL-FIX-02: add behavioral test proving natural turn completion hides Stop and re-enables send.
 
 - [x] §PORTAL-UX-NAV-01: reduce cramped left navigation and right task-inspector layout by widening/spacing navigation areas, improving text truncation, and preserving responsive behavior shown in the supplied screenshot.
+
+- [x] §PORTAL-QA-04: run read-only skill invocation verification for Claude route, Kimi route, and Auto dual route using real clicks, pre/post DOM, console, network, screenshots, and AI Activity evidence.
+- [x] §PORTAL-QA-04: deliver a single inline report with provider verdicts, verbatim replies, AI Activity skill-field excerpts or absence, final verdict, and no code changes, commits, checkpoints, or publish actions.
+
+- [x] §PORTAL-QA-04: run updated read-only skill invocation verification from Pasted_content_25.txt, including Test 0 direct-instruction gate, Claude route, Kimi route, and Auto dual route, with real clicks, pre/post DOM, console capture, network capture, screenshots, and AI Activity evidence.
+- [x] §PORTAL-QA-04: create or confirm the in-app `qa-skill-loader-probe` test skill if available through the portal UI, without Manus-side skill loading, code changes, commits, checkpoints, or publish actions.
+- [x] §PORTAL-QA-04: deliver a single inline report with provider verdicts, verbatim replies, AI Activity skill-field excerpts or absence, and final verdict.
+
+- [x] §PORTAL-QA-04: Upload `qa-skill-loader-probe` through the deployed portal and verify the `ARTICHOKE_VERIFIED_2026` invocation behavior across Claude, Kimi K2.6, and Auto routes without code changes, commits, or checkpoints.
+
+- [x] §PORTAL-QA-04: Provide the long-form completion report as a Markdown file attachment rather than only as an inline chat comment.
+
+- [x] §PORTAL-FIX-03: Create branch `agent-work/portal-fix-03` from current GitHub `main` HEAD `677f6e5` and keep commit prefix `[PORTAL-FIX-03-XX]`.
+- [x] §PORTAL-FIX-03: Diagnose the skill-attachment binding layer for per-task attachments, always-on injection, route-context population, and the `Test on a task` control before writing fix code.
+- [x] §PORTAL-FIX-03: Report the one-line root cause finding before writing fix code, and STOP if schema or migration work is required.
+- [x] §PORTAL-FIX-03: Apply only the minimal permitted skill-loader wiring fix after the diagnosis gate if no schema stop is triggered.
+- [x] §PORTAL-FIX-03: Add tests proving attached skill content containing `ARTICHOKE_VERIFIED_2026` reaches `invokeLLM` and that attachment lookup returns attached skills or empty as appropriate.
+- [x] §PORTAL-FIX-03: Run validation gates, commit, push, merge to `main`, confirm GitHub/local/Manus main alignment, save Manus Project gate, and deliver closeout in the requested format.
