@@ -111,3 +111,17 @@ Product Owner boundary: §4 Branch Isolation remains paused. No §4 implementati
 | Automated validation | Passed | `pnpm check`, `pnpm test -- --run`, and `pnpm build` completed successfully after the final §4 implementation repair. |
 
 Product Owner boundary: §4 is complete for acceptance review. Phase 2 is not being declared complete, and §8 Composer Queue/Stop remains paused until Product Owner approval explicitly authorizes the next section.
+
+## T73 Complete — Studio Editing Router
+
+T73 is complete for Product Owner review. The implementation is intentionally bounded to the existing wrapper routing and §9 handoff architecture: Studio-class image or visual-editing directives are classified before provider execution, routed to Kimi K2.6 for implementation drafting, surfaced through the existing owner approval gate, and reviewed by Claude Opus 4.7 with the required §9 `code-review-protocol` skill metadata. No database schema, UI surface, deployment pipeline, or unrelated build-runner architecture was changed.
+
+| T73 acceptance area | Result | Evidence |
+|---|---|---|
+| Studio classification | Passed | `server/wrapperLLM.ts` exports deterministic Studio directive detection while preserving OpenAI routing for normal non-Studio messages. |
+| Kimi execution route | Passed | `server/routers.ts` forces Studio directives to Kimi execution after OpenAI classification and records Studio metadata in the route-decision event. |
+| §9 owner approval and verifier handoff | Passed | The existing approval gate is reused for Studio turns, and Claude verifier review receives the `code-review-protocol` skill metadata with explicit Studio verifier requirements. |
+| Regression coverage | Passed | `server/aiRouting.provider-adapters.test.ts` adds a Studio route integration test covering OpenAI classification, owner approval surfacing, Kimi execution, and Claude §9 verifier review; `server/workspace.security.test.ts` mock exports were updated to preserve existing security coverage. |
+| Automated validation | Passed with scoped caveat | `pnpm check`, `vitest run server/workspace.security.test.ts server/aiRouting.provider-adapters.test.ts`, and `pnpm build` passed. An unrestricted `pnpm test` run still reports pre-existing environment/schema smoke-test failures, including live provider credential checks, GitHub token validation, and the v2 schema startup table assertion; those failures were not introduced by T73 and are outside this bounded router patch. |
+
+Product Owner boundary: T73 is ready for review as a router/verifier patch only. No new Studio UI, media-generation runtime, database migration, or deployment publication was started in this change set.

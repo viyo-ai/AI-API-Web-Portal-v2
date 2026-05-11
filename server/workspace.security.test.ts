@@ -65,6 +65,7 @@ const wrapperMocks = vi.hoisted(() => ({
   CLAUDE_OWNER_MODEL_LABEL: "Claude Opus 4.7",
   KIMI_K26_CLOUDFLARE_MODEL: "@cf/moonshotai/kimi-k2.6",
   KIMI_OWNER_MODEL_LABEL: "Kimi K2.6",
+  STUDIO_CODE_REVIEW_PROTOCOL_SKILL_SLUG: "code-review-protocol",
   orchestrateWithOpenAI: vi.fn(async (message: string) => {
     // Default: route planning requests to Claude, building to Kimi
     if (message.toLowerCase().includes('plan') || message.toLowerCase().includes('architecture')) {
@@ -74,6 +75,14 @@ const wrapperMocks = vi.hoisted(() => ({
       return { route: 'kimi', reasoning: 'Building request detected' };
     }
     return { route: 'claude', reasoning: 'Default to Claude for unclear intent' };
+  }),
+  classifyStudioDirective: vi.fn((message: string) => {
+    const normalized = message.toLowerCase();
+    const isStudioDirective = normalized.includes("portal studio") || normalized.includes("studio core loop") || normalized.includes("edit the image");
+    return {
+      isStudioDirective,
+      reason: isStudioDirective ? "Requests Studio-class image or visual asset editing." : null,
+    };
   }),
   resolveEffectiveRoute: vi.fn((route: string, credentialStates: any[]) => {
     const claudeConfigured = credentialStates.some((s: any) => s.provider === "claude" && s.configured);

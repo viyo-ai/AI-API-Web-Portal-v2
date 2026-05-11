@@ -123,7 +123,9 @@ import { getUserWorkspaceRoot } from "./terminal";
 import {
   CLAUDE_DEFAULT_MODEL,
   CLAUDE_OWNER_MODEL_LABEL,
+  STUDIO_CODE_REVIEW_PROTOCOL_SKILL_SLUG,
   buildClaudeMessagesRequestBody,
+  classifyStudioDirective,
   orchestrateWithOpenAI,
   executeWrapperTurn,
   getWrapperRuntimeCredentialStates,
@@ -964,6 +966,8 @@ export type WrapperRouteDecision = {
   credentialStates: CredentialState[];
   isRunnable: boolean;
   reason: string;
+  isStudioDirective?: boolean;
+  studioDirectiveReason?: string | null;
 };
 
 export function detectRouteOverride(message: string): {
@@ -1064,18 +1068,31 @@ export async function resolveWrapperRoute(
   preferredRoute: RouteMode = "auto"
 ): Promise<WrapperRouteDecision> {
   const override = detectRouteOverride(message);
+  const studioDirective = classifyStudioDirective(message);
   let requestedRoute =
     override.route === "auto" ? preferredRoute : override.route;
   const credentialStates = getRuntimeCredentialStates();
+  let routingReason: string | null = null;
 
-  // If route is auto and no explicit tag was used, use OpenAI to determine optimal provider
+  // If route is auto and no explicit tag was used, use OpenAI to determine optimal provider.
+  // Studio-class directives remain explicitly classified as Kimi execution work, with Claude
+  // verification enforced downstream by the wrapper execution path.
   if (requestedRoute === "auto" && !override.forcedByTag) {
     const decision = await orchestrateWithOpenAI(message);
+    const routeDecision = studioDirective.isStudioDirective ? "kimi" : decision.route;
     const effectiveRoute = resolveEffectiveRoute(
-      decision.route,
+      routeDecision,
       credentialStates
     );
     requestedRoute = effectiveRoute;
+    routingReason = studioDirective.isStudioDirective
+      ? `Studio-class directive classified for Kimi execution with Claude §9 verifier. OpenAI router reasoning: ${decision.reasoning}`
+      : null;
+  }
+
+  if (studioDirective.isStudioDirective && requestedRoute !== "kimi") {
+    requestedRoute = "kimi";
+    routingReason = `Studio-class directive classified for Kimi execution with Claude §9 verifier. ${studioDirective.reason}`;
   }
 
   const requiredProviders = providersRequiredForRoute(requestedRoute);
@@ -1092,9 +1109,12 @@ export async function resolveWrapperRoute(
       credentialStates,
       isRunnable: false,
       reason:
-        requestedRoute === "auto"
+        routingReason ??
+        (requestedRoute === "auto"
           ? `AUTO first-message initialization requires both Claude Opus 4.7 via the Claude API and Kimi K2.6 via Cloudflare Workers AI. Missing credentials: ${missing.join(", ")}. Task creation alone does not call providers.`
-          : `Route ${requestedRoute.toUpperCase()} is unavailable because missing credentials: ${missing.join(", ")}.`,
+          : `Route ${requestedRoute.toUpperCase()} is unavailable because missing credentials: ${missing.join(", ")}.`),
+      isStudioDirective: studioDirective.isStudioDirective,
+      studioDirectiveReason: studioDirective.reason,
     };
   }
 
@@ -1104,7 +1124,9 @@ export async function resolveWrapperRoute(
     forcedByTag: override.forcedByTag,
     credentialStates,
     isRunnable: true,
-    reason: `Route ${requestedRoute.toUpperCase()} is credential-ready.`,
+    reason: routingReason ?? `Route ${requestedRoute.toUpperCase()} is credential-ready.`,
+    isStudioDirective: studioDirective.isStudioDirective,
+    studioDirectiveReason: studioDirective.reason,
   };
 }
 
@@ -1471,8 +1493,9 @@ async function runGenerationTurn(input: {
 
   const preference = await getUserPreference(input.ownerUserId);
   let effectiveRouteForTurn = decision.effectiveRoute;
+  const isStudioDirective = decision.isStudioDirective === true;
   const requiresKimiApproval =
-    (preference.alwaysRequireKimiApproval || input.forceKimiApproval === true) &&
+    (isStudioDirective || preference.alwaysRequireKimiApproval || input.forceKimiApproval === true) &&
     (effectiveRouteForTurn === "kimi" || effectiveRouteForTurn === "dual");
   if (requiresKimiApproval && effectiveRouteForTurn === "kimi") {
     effectiveRouteForTurn = "dual";
@@ -1509,6 +1532,9 @@ async function runGenerationTurn(input: {
       effectiveRoute: effectiveRouteForTurn,
       approvalGateEnabled: requiresKimiApproval,
       defaultApprovalPreference: preference.alwaysRequireKimiApproval,
+      isStudioDirective,
+      studioDirectiveReason: decision.studioDirectiveReason,
+      verifierSkillSlug: isStudioDirective ? STUDIO_CODE_REVIEW_PROTOCOL_SKILL_SLUG : null,
     }),
   });
 
@@ -1575,6 +1601,23 @@ async function runGenerationTurn(input: {
     ownerUserId: input.ownerUserId,
     files,
   });
+  let wrapperSkills = resolvedSkills.skills;
+  if (isStudioDirective && !wrapperSkills.some(skill => skill.slug === STUDIO_CODE_REVIEW_PROTOCOL_SKILL_SLUG)) {
+    const codeReviewProtocolSkill = await getSkillBySlugForOwner(
+      STUDIO_CODE_REVIEW_PROTOCOL_SKILL_SLUG,
+      input.ownerUserId
+    );
+    if (codeReviewProtocolSkill) {
+      wrapperSkills = [
+        ...wrapperSkills,
+        {
+          ...codeReviewProtocolSkill,
+          loadReason: { kind: "picked" as const },
+          displayTag: "Studio verifier: §9",
+        },
+      ];
+    }
+  }
 
   try {
     await executeWrapperTurn({
@@ -1588,8 +1631,10 @@ async function runGenerationTurn(input: {
       memory,
       files,
       governance,
-      skills: resolvedSkills.skills,
+      skills: wrapperSkills,
       requireApprovalBeforeKimi: requiresKimiApproval,
+      isStudioDirective,
+      studioDirectiveReason: decision.studioDirectiveReason ?? undefined,
     });
   } catch {
     // executeWrapperTurn already persists the failed turn, task status, and timeline error.

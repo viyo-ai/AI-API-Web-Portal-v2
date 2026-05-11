@@ -520,3 +520,6 @@
 - [x] §PORTAL-FIX-03: Apply only the minimal permitted skill-loader wiring fix after the diagnosis gate if no schema stop is triggered.
 - [x] §PORTAL-FIX-03: Add tests proving attached skill content containing `ARTICHOKE_VERIFIED_2026` reaches `invokeLLM` and that attachment lookup returns attached skills or empty as appropriate.
 - [x] §PORTAL-FIX-03: Run validation gates, commit, push, merge to `main`, confirm GitHub/local/Manus main alignment, save Manus Project gate, and deliver closeout in the requested format.
+
+- [x] T73 Studio Editing Router: classify Studio-class image/visual editing directives additively, force Kimi K2.6 execution, require owner approval via the existing §9 handoff gate, and enforce Claude Opus 4.7 §9 verifier review with the `code-review-protocol` skill metadata.
+- [x] T73 Studio Editing Router validation: pass `pnpm check`, targeted provider-adapter/workspace security route tests, and `pnpm build`; document that the unrestricted full suite still contains pre-existing environment/schema smoke-test failures unrelated to the bounded Studio router patch.

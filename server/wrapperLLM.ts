@@ -22,6 +22,7 @@ export const CLAUDE_ADAPTIVE_THINKING_CONFIG = { type: "adaptive" } as const;
 export const KIMI_K26_CLOUDFLARE_MODEL = "@cf/moonshotai/kimi-k2.6";
 export const CLAUDE_OWNER_MODEL_LABEL = "Claude Opus 4.7";
 export const KIMI_OWNER_MODEL_LABEL = "Kimi K2.6";
+export const STUDIO_CODE_REVIEW_PROTOCOL_SKILL_SLUG = "code-review-protocol";
 
 export type RuntimeCredentialState = {
   provider: CredentialProvider;
@@ -44,6 +45,8 @@ export type WrapperExecutionInput = {
   skills?: Array<Skill & { loadReason: ResolvedSkillLoadReason; displayTag: string }>;
   requireApprovalBeforeKimi?: boolean;
   approvedClaudePlan?: string;
+  isStudioDirective?: boolean;
+  studioDirectiveReason?: string;
 };
 
 export type WrapperExecutionResult = {
@@ -98,6 +101,30 @@ function serializeJson(value: unknown) {
 
 function normalizeModelText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+export type StudioDirectiveClassification = {
+  isStudioDirective: boolean;
+  reason: string | null;
+};
+
+export function classifyStudioDirective(message: string): StudioDirectiveClassification {
+  const trimmed = message.trim();
+  if (!trimmed) return { isStudioDirective: false, reason: null };
+
+  const studioSignals: Array<{ pattern: RegExp; reason: string }> = [
+    { pattern: /\b(?:portal\s+)?studio\b/i, reason: "Mentions Portal Studio or Studio routing explicitly." },
+    { pattern: /\bstudio\s+(?:core\s+)?loop\b/i, reason: "Mentions the Studio Core Loop." },
+    { pattern: /\b(?:image|photo|picture|asset|poster|banner|mockup|screenshot)\s+(?:edit|editing|revision|replace|remove|retouch|inpaint|outpaint|upscale|translate)\b/i, reason: "Requests Studio-class image or visual asset editing." },
+    { pattern: /\b(?:edit|replace|remove|translate|retouch|inpaint|outpaint|upscale)\s+(?:the\s+)?(?:image|photo|picture|asset|poster|banner|mockup|screenshot)\b/i, reason: "Requests an edit operation against a visual artifact." },
+    { pattern: /\b(?:add|remove|replace|translate)\s+text\s+(?:in|on|from)\s+(?:the\s+)?(?:image|photo|picture|asset|poster|banner|mockup|screenshot)\b/i, reason: "Requests text modification inside a visual Studio artifact." },
+    { pattern: /\b(?:design|visual|creative)\s+(?:canvas|studio|editor|editing)\b/i, reason: "Requests a Studio-class visual editing surface or flow." },
+  ];
+
+  const match = studioSignals.find(signal => signal.pattern.test(trimmed));
+  return match
+    ? { isStudioDirective: true, reason: match.reason }
+    : { isStudioDirective: false, reason: null };
 }
 
 function getClaudeApiKey() {
@@ -287,6 +314,13 @@ function buildContext(input: WrapperExecutionInput) {
     memory,
     files,
     skills,
+    studioDirective: input.isStudioDirective
+      ? {
+          isStudioDirective: true,
+          reason: input.studioDirectiveReason ?? "Studio-class directive detected.",
+          routePolicy: "OpenAI router classification, Kimi K2.6 execution, Claude Opus 4.7 §9 verifier review.",
+        }
+      : undefined,
   };
 }
 
@@ -297,6 +331,12 @@ function renderSkillBlock(skills: WrapperExecutionInput["skills"] = []) {
     return `Skill ${index + 1}: ${skill.name} v${skill.version} [${skill.displayTag}]\nSlug: ${skill.slug}\nScope: ${skill.scope}\nInstructions:\n${body}`;
   });
   return `AI Skill instructions loaded for this task. Follow these reusable owner-approved instructions after the project rule books and before the user's turn-specific request.\n\n${lines.join("\n\n---\n\n")}`;
+}
+
+function renderStudioVerifierProtocolBlock(input: WrapperExecutionInput) {
+  if (!input.isStudioDirective) return "";
+  const hasLoadedSkill = (input.skills ?? []).some(skill => skill.slug === STUDIO_CODE_REVIEW_PROTOCOL_SKILL_SLUG);
+  return `Studio-class verifier requirement: this turn was classified as a Studio directive (${input.studioDirectiveReason ?? "Studio-class directive detected."}). The required verifier path is OpenAI router → Kimi K2.6 executor → Claude Opus 4.7 verifier. Enforce §9 code-review-protocol for this verifier pass; required skill slug: ${STUDIO_CODE_REVIEW_PROTOCOL_SKILL_SLUG}; skill library load status: ${hasLoadedSkill ? "loaded" : "mandatory inline enforcement"}. Review Kimi's output before any final answer, identify correctness/safety gaps, and do not approve execution work that violates owner approval, code-review, or production-readiness requirements.`;
 }
 
 function baseSystemPrompt(role: "claude_planner" | "kimi_executor" | "claude_reviewer", governanceBlock = "", skillBlock = "") {
@@ -337,7 +377,7 @@ async function runKimiExecution(input: WrapperExecutionInput, contextJson: strin
 }
 
 async function runClaudeReview(input: WrapperExecutionInput, contextJson: string, claudePlan: string | undefined, kimiResult: string | undefined, governanceBlock = "") {
-  const skillBlock = renderSkillBlock(input.skills);
+  const skillBlock = [renderSkillBlock(input.skills), renderStudioVerifierProtocolBlock(input)].filter(Boolean).join("\n\n");
   return invokeClaude([
     { role: "system", content: baseSystemPrompt("claude_reviewer", governanceBlock, skillBlock) },
     {
@@ -376,6 +416,7 @@ export async function orchestrateWithOpenAI(userMessage: string): Promise<{ rout
 
 - Claude Opus 4.7: Best for planning, architecture, design, analysis, decision-making, and strategic thinking
 - Kimi K2.6: Best for code writing, implementation, debugging, optimization, and execution
+- Studio-class directives: image-edit directives, Studio Core Loop directives, and future Studio project-editing directives MUST be classified as Kimi execution work. The downstream verifier will route Kimi output through Claude Opus 4.7 with §9 code-review-protocol enforcement.
 
 Analyze the user's message and decide which provider is best suited. Respond with ONLY a JSON object (no markdown, no extra text):
 {"route": "claude" or "kimi", "reasoning": "brief explanation"}`,
@@ -435,6 +476,7 @@ async function orchestrateWithManusForgeLLM(userMessage: string): Promise<{ rout
 
 - Claude Opus 4.7: Best for planning, architecture, design, analysis, decision-making, and strategic thinking
 - Kimi K2.6: Best for code writing, implementation, debugging, optimization, and execution
+- Studio-class directives: image-edit directives, Studio Core Loop directives, and future Studio project-editing directives MUST be classified as Kimi execution work. The downstream verifier will route Kimi output through Claude Opus 4.7 with §9 code-review-protocol enforcement.
 
 Analyze the user's message and decide which provider is best suited. Respond with ONLY a JSON object (no markdown, no extra text):
 {"route": "claude" or "kimi", "reasoning": "brief explanation"}`,
@@ -619,6 +661,8 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
     let claudePlan: string | undefined;
     let kimiResult: string | undefined;
     let claudeReview: string | undefined;
+    const requiresKimiExecution = input.route === "kimi" || input.route === "dual" || input.isStudioDirective === true;
+    const requiresClaudeReview = input.route === "dual" || input.isStudioDirective === true;
 
     const beforeModelStop = await stopIfRequested("before model calls");
     if (beforeModelStop) return { route: input.route, finalAnswer: beforeModelStop };
@@ -675,7 +719,7 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
       claudePlan = input.approvedClaudePlan;
     }
 
-    if (input.route === "kimi" || input.route === "dual") {
+    if (requiresKimiExecution) {
       if (input.route === "dual" && input.approvedClaudePlan) {
         await updateTurnApprovalState({
           turnId: input.turnId,
@@ -704,7 +748,7 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
 
     await updateTurnState(input.turnId, input.ownerUserId, "model_review", input.route, serializeJson(input.credentialStates));
 
-    if (input.route === "dual") {
+    if (requiresClaudeReview) {
       activeProvider = "anthropic";
       claudeReview = await runClaudeReview(input, contextJson, claudePlan, kimiResult, await buildGovernanceBlockForProvider("claude"));
       await appendTaskEvent({
