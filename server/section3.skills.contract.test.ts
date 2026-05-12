@@ -77,6 +77,27 @@ describe("rewritten Section 3 Skill Libraries contracts", () => {
     expect(source).toContain("grid gap-4 xl:grid-cols-2");
   });
 
+  it("defaults the Skill Library list to All and separates Custom from Official views", () => {
+    const source = readFileSync(path.resolve(process.cwd(), "client/src/pages/SkillLibraries.tsx"), "utf8");
+    expect(source).toContain('useState<"all" | "custom" | "official">("all")');
+    expect(source).toContain('libraryView === "official" && !skill.isOfficial');
+    expect(source).toContain('libraryView === "custom" && skill.isOfficial');
+    expect(source).toContain('`All ${skills.length}`');
+    expect(source).toContain('`Custom ${customSkillCount}`');
+    expect(source).toContain('`Official ${officialSkillCount}`');
+    expect(source).not.toContain("officialOnly");
+  });
+
+  it("reveals uploaded or replaced custom skills when filters would hide saved skills", () => {
+    const source = readFileSync(path.resolve(process.cwd(), "client/src/pages/SkillLibraries.tsx"), "utf8");
+    expect(source).toContain("function revealFullLibrary()");
+    expect(source).toContain('setLibraryView("all")');
+    expect(source).toContain('setSourceFilter("all")');
+    expect(source).toContain("No skills match these filters.");
+    expect(source).toContain("Show all skills");
+    expect(source).toContain("Skill replaced and shown in your library.");
+  });
+
   it("keeps accepted §3A vocabulary and Section 2 Project rule book UI while adding Skill Libraries", () => {
     const home = readFileSync(path.resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
     const skillsPanel = readFileSync(path.resolve(process.cwd(), "client/src/pages/SkillLibraries.tsx"), "utf8");

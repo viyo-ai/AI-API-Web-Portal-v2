@@ -203,7 +203,7 @@ export default function SkillLibrariesPanel() {
   const utils = trpc.useUtils();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [search, setSearch] = useState("");
-  const [officialOnly, setOfficialOnly] = useState(false);
+  const [libraryView, setLibraryView] = useState<"all" | "custom" | "official">("all");
   const [enabledFilter, setEnabledFilter] = useState<"all" | "enabled" | "disabled">("all");
   const [scopeFilter, setScopeFilter] = useState<SkillScope | "all">("all");
   const [sourceFilter, setSourceFilter] = useState<SkillSource | "all">("all");
@@ -256,10 +256,14 @@ export default function SkillLibrariesPanel() {
   });
 
   const skills = (skillsQuery.data ?? []) as SkillRecord[];
+  const customSkillCount = skills.filter((skill) => !skill.isOfficial).length;
+  const officialSkillCount = skills.filter((skill) => skill.isOfficial).length;
+  const hasActiveListFilters = Boolean(search.trim()) || libraryView !== "all" || enabledFilter !== "all" || scopeFilter !== "all" || sourceFilter !== "all";
   const filteredSkills = useMemo(() => {
     const term = search.trim().toLowerCase();
     return skills.filter((skill) => {
-      if (officialOnly && !skill.isOfficial) return false;
+      if (libraryView === "official" && !skill.isOfficial) return false;
+      if (libraryView === "custom" && skill.isOfficial) return false;
       if (enabledFilter === "enabled" && !skill.enabled) return false;
       if (enabledFilter === "disabled" && skill.enabled) return false;
       if (scopeFilter !== "all" && skill.scope !== scopeFilter) return false;
@@ -267,7 +271,15 @@ export default function SkillLibrariesPanel() {
       if (!term) return true;
       return [skill.name, skill.slug, skill.description ?? ""].join(" ").toLowerCase().includes(term);
     });
-  }, [enabledFilter, officialOnly, scopeFilter, search, skills, sourceFilter]);
+  }, [enabledFilter, libraryView, scopeFilter, search, skills, sourceFilter]);
+
+  function revealFullLibrary() {
+    setLibraryView("all");
+    setEnabledFilter("all");
+    setScopeFilter("all");
+    setSourceFilter("all");
+    setSearch("");
+  }
 
   const selectedTask = (tasksQuery.data ?? []).find((task: any) => task.id === testTaskId);
   const selectedTaskSkills = (taskSkillsQuery.data?.skills ?? []) as SkillRecord[];
@@ -296,11 +308,13 @@ export default function SkillLibrariesPanel() {
     };
     try {
       const created = await createSkillMutation.mutateAsync(payload as any) as SkillRecord;
+      revealFullLibrary();
       setSelectedSkill(created);
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes("already exists")) {
+        revealFullLibrary();
         setPendingDuplicate(parsed);
         return false;
       }
@@ -558,7 +572,13 @@ export default function SkillLibrariesPanel() {
                 <div><Label>Source type</Label><select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value as any)} className="mt-2 h-9 w-full rounded-xl border px-3 text-sm"><option value="all">All sources</option>{Object.entries(sourceLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></div>
               </PopoverContent></Popover>
               <div className="relative"><Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[#8a8980]" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search skills" className="h-10 w-64 rounded-xl bg-white pl-9" /></div>
-              <Button variant={officialOnly ? "default" : "outline"} onClick={() => setOfficialOnly((value) => !value)} className="rounded-full bg-white data-[state=open]:bg-white">Official</Button>
+              <div className="flex rounded-full border border-[#dddcd5] bg-white p-1" aria-label="Skill library view filter">
+                {(["all", "custom", "official"] as const).map((view) => (
+                  <Button key={view} type="button" variant={libraryView === view ? "default" : "ghost"} size="sm" onClick={() => setLibraryView(view)} className="h-8 rounded-full px-3 text-xs capitalize">
+                    {view === "all" ? `All ${skills.length}` : view === "custom" ? `Custom ${customSkillCount}` : `Official ${officialSkillCount}`}
+                  </Button>
+                ))}
+              </div>
               <DropdownMenu><DropdownMenuTrigger asChild><Button className="rounded-xl bg-[#1f1f1f] text-white hover:bg-black"><Plus className="mr-2 h-4 w-4" />Add</Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-80 rounded-2xl bg-white p-2">
                 <DropdownMenuLabel>Add a skill</DropdownMenuLabel>
                 <DropdownMenuItem className="items-start gap-3 rounded-xl p-3" onSelect={() => setShowAiDialog(true)}><Bot className="mt-0.5 h-5 w-5" /><span><span className="block font-medium">Build with AI</span><span className="block text-xs text-muted-foreground">Build a skill through conversation</span></span></DropdownMenuItem>
@@ -573,8 +593,9 @@ export default function SkillLibrariesPanel() {
             {skillsQuery.isLoading ? <div className="rounded-3xl bg-white p-8 text-center text-[#66665f]">Loading skills...</div> : filteredSkills.length === 0 ? (
               <div className="flex min-h-[420px] flex-col items-center justify-center rounded-3xl border border-dashed border-[#cfcfc8] bg-white/70 p-10 text-center">
                 <Sparkles className="mb-4 h-12 w-12 text-[#b7b5aa]" />
-                <h2 className="text-xl font-semibold text-[#30302b]">No skills yet.</h2>
-                <p className="mt-2 max-w-md text-sm leading-6 text-[#66665f]">Tap + Add to create your first one. Skills tell your AI assistant how to behave on every task.</p>
+                <h2 className="text-xl font-semibold text-[#30302b]">{skills.length > 0 && hasActiveListFilters ? "No skills match these filters." : "No skills yet."}</h2>
+                <p className="mt-2 max-w-md text-sm leading-6 text-[#66665f]">{skills.length > 0 && hasActiveListFilters ? "Your skill library has saved skills, but the current view or filters are hiding them. Switch to All or clear the filters to see uploaded custom skills." : "Tap + Add to create your first one. Skills tell your AI assistant how to behave on every task."}</p>
+                {skills.length > 0 && hasActiveListFilters ? <Button type="button" variant="outline" className="mt-4 rounded-xl bg-white" onClick={revealFullLibrary}>Show all skills</Button> : null}
               </div>
             ) : <div className="grid gap-4 xl:grid-cols-2">{filteredSkills.map(renderCard)}</div>}
           </ScrollArea>
@@ -591,7 +612,7 @@ export default function SkillLibrariesPanel() {
 
       <Dialog open={Boolean(pendingDuplicate)} onOpenChange={(open) => { if (!open) setPendingDuplicate(null); }}>
         <DialogContent className="rounded-3xl bg-white"><DialogHeader><DialogTitle>Replace existing skill?</DialogTitle><DialogDescription>{pendingDuplicate ? `A skill with slug '${pendingDuplicate.skill.slug}' already exists. Replace it or create a new copy?` : ""}</DialogDescription></DialogHeader>
-          <DialogFooter><Button variant="outline" className="rounded-xl bg-white" onClick={async () => { if (!pendingDuplicate) return; await createParsedSkill({ ...pendingDuplicate, skill: { ...pendingDuplicate.skill, slug: `${pendingDuplicate.skill.slug}-${Date.now()}` } }); setPendingDuplicate(null); }}>Create as new copy</Button><Button className="rounded-xl bg-[#1f1f1f] text-white hover:bg-black" onClick={async () => { if (!pendingDuplicate) return; await replaceBySlugMutation.mutateAsync(pendingDuplicate.skill as any); setPendingDuplicate(null); toast.success("Skill replaced."); }}>Replace existing</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" className="rounded-xl bg-white" onClick={async () => { if (!pendingDuplicate) return; await createParsedSkill({ ...pendingDuplicate, skill: { ...pendingDuplicate.skill, slug: `${pendingDuplicate.skill.slug}-${Date.now()}` } }); setPendingDuplicate(null); }}>Create as new copy</Button><Button className="rounded-xl bg-[#1f1f1f] text-white hover:bg-black" onClick={async () => { if (!pendingDuplicate) return; const replaced = await replaceBySlugMutation.mutateAsync(pendingDuplicate.skill as any) as SkillRecord; revealFullLibrary(); setSelectedSkill(replaced); setPendingDuplicate(null); toast.success("Skill replaced and shown in your library."); }}>Replace existing</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

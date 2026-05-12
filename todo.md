@@ -523,3 +523,10 @@
 
 - [x] T73 Studio Editing Router: classify Studio-class image/visual editing directives additively, force Kimi K2.6 execution, require owner approval via the existing §9 handoff gate, and enforce Claude Opus 4.7 §9 verifier review with the `code-review-protocol` skill metadata.
 - [x] T73 Studio Editing Router validation: pass `pnpm check`, targeted provider-adapter/workspace security route tests, and `pnpm build`; document that the unrestricted full suite still contains pre-existing environment/schema smoke-test failures unrelated to the bounded Studio router patch.
+
+- [x] Provide the completed §PORTAL-QA-05 production audit report as a downloadable Markdown file.
+
+- [x] Confirm with source evidence whether initiating a new task causes the chat to load governance files, and identify whether loading occurs at task creation or message submission.
+
+- [x] §PORTAL-FIX-04: Fix Skills Library visibility bug where an uploaded skill slug is detected as existing on re-upload but the uploaded skill is missing from the visible list, including regression coverage for list/filter behavior.
+- [x] §PORTAL-FIX-04: Clarify and correct the Skills Library Official filter so it does not hide uploaded custom skills by default and clearly communicates official versus custom skill views.
