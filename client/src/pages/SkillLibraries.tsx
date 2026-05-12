@@ -224,7 +224,7 @@ export default function SkillLibrariesPanel() {
   const [testTaskId, setTestTaskId] = useState<number | null>(null);
   const [detailDraft, setDetailDraft] = useState<SkillRecord | null>(null);
 
-  const skillListInput = useMemo(() => ({ includeDisabled: true, includeOfficial: true, limit: 300 }), []);
+  const skillListInput = useMemo(() => ({ includeDisabled: true, includeOfficial: true, limit: 200 }), []);
   const skillsQuery = trpc.skills.list.useQuery(skillListInput);
   const officialCatalogQuery = trpc.skills.officialCatalog.useQuery({ limit: 200 });
   const tasksQuery = trpc.tasks.list.useQuery({ includeArchived: false, limit: 100 });

@@ -530,3 +530,7 @@
 
 - [x] §PORTAL-FIX-04: Fix Skills Library visibility bug where an uploaded skill slug is detected as existing on re-upload but the uploaded skill is missing from the visible list, including regression coverage for list/filter behavior.
 - [x] §PORTAL-FIX-04: Clarify and correct the Skills Library Official filter so it does not hide uploaded custom skills by default and clearly communicates official versus custom skill views.
+
+- [x] §PORTAL-FIX-04B: Reopen Skills Library visibility bug where `/skills` shows All 0 / Custom 0 / Official 0 even though duplicate upload detection finds an existing skill slug; fix the backend/list contract so existing uploaded skills appear in the visible list.
+
+- [x] §PORTAL-FIX-03: fix Skills Library visibility when uploaded custom skills are persisted but not rendered, including the `skills.list` client/server limit contract and the Product Owner's `/skills` dedicated-page suggestion.

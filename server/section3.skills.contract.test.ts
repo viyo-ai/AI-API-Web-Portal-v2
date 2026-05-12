@@ -98,6 +98,21 @@ describe("rewritten Section 3 Skill Libraries contracts", () => {
     expect(source).toContain("Skill replaced and shown in your library.");
   });
 
+  it("keeps the Skills Library list query within the server validation limit so custom uploads render", () => {
+    const skillsPanel = readFileSync(path.resolve(process.cwd(), "client/src/pages/SkillLibraries.tsx"), "utf8");
+    const router = readFileSync(path.resolve(process.cwd(), "server/routers.ts"), "utf8");
+    expect(skillsPanel).toContain("includeOfficial: true, limit: 200");
+    expect(skillsPanel).not.toContain("includeOfficial: true, limit: 300");
+    expect(router).toContain("includeOfficial: z.boolean().default(true)");
+    expect(router).toContain("limit: z.number().int().min(1).max(200).default(200)");
+  });
+
+  it("registers a dedicated /skills page for direct Skill Libraries access", () => {
+    const app = readFileSync(path.resolve(process.cwd(), "client/src/App.tsx"), "utf8");
+    expect(app).toContain('import SkillLibraries from "./pages/SkillLibraries"');
+    expect(app).toContain('<Route path={"/skills"} component={SkillLibraries} />');
+  });
+
   it("keeps accepted §3A vocabulary and Section 2 Project rule book UI while adding Skill Libraries", () => {
     const home = readFileSync(path.resolve(process.cwd(), "client/src/pages/Home.tsx"), "utf8");
     const skillsPanel = readFileSync(path.resolve(process.cwd(), "client/src/pages/SkillLibraries.tsx"), "utf8");
