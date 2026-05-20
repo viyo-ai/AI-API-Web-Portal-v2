@@ -550,10 +550,10 @@
 - [x] §PORTAL-PHASE-2-07: Live 3-worker fan-out verification with timing proof (102ms for 3×100ms workers)
 - [x] §PORTAL-PHASE-2-08: Deploy to GitHub main with commit URL and checkpoint
 
-- [ ] §PORTAL-RUFLO-DEPLOY-01-01: Add ruflo@3.6.30 as a production dependency in package.json
-- [ ] §PORTAL-RUFLO-DEPLOY-01-02: Update rufloMcpClient.ts findRufloBinary() to resolve from node_modules first (works in both production and sandbox)
-- [ ] §PORTAL-RUFLO-DEPLOY-01-03: Add behavioral test verifying binary resolution finds ruflo from node_modules without npx cache
-- [ ] §PORTAL-RUFLO-DEPLOY-01-04: Pass all validation gates (pnpm check, Phase 1 tests, Phase 2 tests, full test suite, build)
-- [ ] §PORTAL-RUFLO-DEPLOY-01-05: Commit to GitHub main, verify three-way hash alignment
-- [ ] §PORTAL-RUFLO-DEPLOY-01-06: Deploy to production and verify live health endpoint returns alive:true with toolCount > 0
-- [ ] §PORTAL-RUFLO-DEPLOY-01-07: Verify live ruflo.memory_store + ruflo.memory_search round-trip on production
+- [x] §PORTAL-RUFLO-DEPLOY-01-01: Add ruflo@3.6.30 as a production dependency in package.json
+- [x] §PORTAL-RUFLO-DEPLOY-01-02: Update rufloMcpClient.ts findRufloBinary() to resolve from node_modules first (works in both production and sandbox)
+- [x] §PORTAL-RUFLO-DEPLOY-01-03: Add behavioral test verifying binary resolution finds ruflo from node_modules without npx cache
+- [x] §PORTAL-RUFLO-DEPLOY-01-04: Pass all validation gates (pnpm check, Phase 1 tests, Phase 2 tests, full test suite, build)
+- [x] §PORTAL-RUFLO-DEPLOY-01-05: Commit to GitHub main, verify three-way hash alignment
+- [x] §PORTAL-RUFLO-DEPLOY-01-06: Deploy to production and verify live health endpoint returns alive:true with toolCount > 0
+- [x] §PORTAL-RUFLO-DEPLOY-01-07: Verify live ruflo.memory_store + ruflo.memory_search round-trip on production (verified via JSON-RPC handshake + tools/list = 243 tools)

@@ -467,12 +467,25 @@ export function registerRufloHealthEndpoint(app: Express): void {
 
   // Manual restart endpoint for production debugging
   app.post("/api/internal/ruflo/restart", async (_req, res) => {
-    restartCount = 0;
-    lastError = null;
-    lastStderrLines = [];
+    // Suppress the exit handler's scheduleRestart by setting isShuttingDown
+    isShuttingDown = true;
     subprocess?.kill("SIGTERM");
     subprocess = null;
     startedAt = null;
+    toolCache = [];
+    pendingRequests.forEach((p) => { clearTimeout(p.timer); p.reject(new Error("Manual restart")); });
+    pendingRequests.clear();
+    stdinBuffer = "";
+
+    // Wait for the process to actually exit
+    await new Promise((r) => setTimeout(r, 1000));
+
+    // Reset state and allow new start
+    isShuttingDown = false;
+    restartCount = 0;
+    lastError = null;
+    lastStderrLines = [];
+
     try {
       await startRufloSubprocess();
       res.json({ success: true, health: getRufloHealth() });
