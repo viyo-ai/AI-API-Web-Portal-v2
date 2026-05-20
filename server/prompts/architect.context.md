@@ -43,3 +43,20 @@ Collect the four fields → call `buildTargets.testConnection` → on success, s
 ## 7. Hard rules summary
 
 Full text is in `architect.system.md`: never echo or store token values; always testConnection before create; always require explicit confirmation before save; route build requests to Kimi/Claude not Architect; never bypass §9 approval gate; per-project memory only.
+
+## 8. Extended tools via Ruflo MCP
+
+The Portal exposes Ruflo's 200+ coordination, memory, and swarm tools under the `ruflo.*` namespace. Notable categories:
+- **`ruflo.memory_*`** — HNSW vector memory for persistent storage and semantic retrieval of past task context, decisions, and trajectories.
+- **`ruflo.swarm_*`** — topology management, agent coordination state, consensus primitives.
+- **`ruflo.hooks_*`** — pre/post-tool-use hooks for instrumentation.
+- **`ruflo.neural_*`** — pattern recognition over past directive traces.
+
+Use these when:
+- You need to recall past decisions or trajectories ("how did we solve X last time?")
+- You need to store durable cross-task state
+- You need to coordinate between sub-agents (Phase 2 will use this layer)
+
+Do NOT use these for:
+- Replacing existing `buildTargets.*` or `projectMemory.*` calls — those remain canonical for Project and per-project state.
+- Bypassing the §9 approval gate or any safety constraint.

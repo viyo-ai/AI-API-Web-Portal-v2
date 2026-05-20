@@ -9,6 +9,7 @@ import { appRouter, startKimiApprovalTimeoutCleanup } from "../routers";
 import { registerTerminalWebSocket } from "../terminal";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { registerRufloHealthEndpoint, startRufloSubprocess, stopRufloSubprocess } from "../rufloMcpClient";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -38,7 +39,13 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
   registerOAuthRoutes(app);
+  registerRufloHealthEndpoint(app);
   startKimiApprovalTimeoutCleanup();
+
+  // Start Ruflo MCP subprocess (non-blocking, Portal continues if Ruflo fails)
+  startRufloSubprocess().catch((err) => {
+    console.error(`[ruflo-mcp] Initial startup failed (Portal continues without Ruflo): ${err instanceof Error ? err.message : err}`);
+  });
   // tRPC API
   app.use(
     "/api/trpc",
@@ -64,6 +71,16 @@ async function startServer() {
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
   });
+
+  // Graceful shutdown
+  const shutdown = async () => {
+    console.log("[server] Shutting down...");
+    await stopRufloSubprocess();
+    server.close();
+    process.exit(0);
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 }
 
 startServer().catch(console.error);
