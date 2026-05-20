@@ -103,6 +103,8 @@ let subprocess: ChildProcess | null = null;
 let startedAt: number | null = null;
 let restartCount = 0;
 let lastError: string | null = null;
+let lastStderrLines: string[] = [];
+const MAX_STDERR_LINES = 20;
 let toolCache: RufloToolDefinition[] = [];
 let requestIdCounter = 1;
 let pendingRequests = new Map<number, { resolve: (v: JsonRpcResponse) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
@@ -234,7 +236,11 @@ export async function startRufloSubprocess(): Promise<void> {
     subprocess.stderr!.on("data", (chunk: Buffer) => {
       // Log stderr but don't treat as fatal — Ruflo may emit warnings
       const text = chunk.toString("utf-8").trim();
-      if (text) console.error(`[ruflo-mcp stderr] ${text}`);
+      if (text) {
+        console.error(`[ruflo-mcp stderr] ${text}`);
+        lastStderrLines.push(text);
+        if (lastStderrLines.length > MAX_STDERR_LINES) lastStderrLines.shift();
+      }
     });
 
     subprocess.on("exit", (code, signal) => {
@@ -454,8 +460,25 @@ export function registerRufloHealthEndpoint(app: Express): void {
         binaryExists,
         cwd: process.cwd(),
         nodeModulesRufloExists: existsSync(resolve(process.cwd(), "node_modules", "ruflo", "bin", "ruflo.js")),
+        lastStderr: lastStderrLines.slice(-10),
       },
     });
+  });
+
+  // Manual restart endpoint for production debugging
+  app.post("/api/internal/ruflo/restart", async (_req, res) => {
+    restartCount = 0;
+    lastError = null;
+    lastStderrLines = [];
+    subprocess?.kill("SIGTERM");
+    subprocess = null;
+    startedAt = null;
+    try {
+      await startRufloSubprocess();
+      res.json({ success: true, health: getRufloHealth() });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e), lastStderr: lastStderrLines.slice(-10) });
+    }
   });
 }
 
