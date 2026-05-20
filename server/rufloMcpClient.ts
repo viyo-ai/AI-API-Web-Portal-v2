@@ -493,6 +493,22 @@ export function registerRufloHealthEndpoint(app: Express): void {
       res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e), lastStderr: lastStderrLines.slice(-10) });
     }
   });
+
+  // Direct tool call endpoint for production verification
+  app.post("/api/internal/ruflo/call", async (req, res) => {
+    const { tool, args } = req.body as { tool?: string; args?: Record<string, unknown> };
+    if (!tool) {
+      res.status(400).json({ error: "Missing 'tool' in request body" });
+      return;
+    }
+    try {
+      const toolName = tool.startsWith("ruflo.") ? tool.replace(/^ruflo\./, "") : tool;
+      const result = await callRufloTool(toolName, args ?? {});
+      res.json({ success: true, result });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
 }
 
 // ─── Test Helpers (exported for behavioral tests) ──────────────────────────────
