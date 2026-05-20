@@ -63,7 +63,7 @@ export function findRufloBinary(): string {
 
 const MAX_RESTART_RETRIES = 5;
 const BASE_BACKOFF_MS = 1000;
-const STARTUP_TIMEOUT_MS = 10_000;
+const STARTUP_TIMEOUT_MS = 30_000;
 const JSONRPC_VERSION = "2.0" as const;
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -434,12 +434,28 @@ export function getRufloToolSummaryForPrompt(): string {
 }
 
 // ─── Express Health Endpoint Registration ──────────────────────────────────────
-
 export function registerRufloHealthEndpoint(app: Express): void {
   app.get("/api/internal/ruflo/health", (_req, res) => {
     const health = getRufloHealth();
+    // Add diagnostic info for production debugging
+    let binaryPath: string | null = null;
+    let binaryExists = false;
+    try {
+      binaryPath = findRufloBinary();
+      binaryExists = existsSync(binaryPath);
+    } catch (e) {
+      binaryPath = e instanceof Error ? e.message : String(e);
+    }
     const statusCode = health.alive ? 200 : 503;
-    res.status(statusCode).json(health);
+    res.status(statusCode).json({
+      ...health,
+      diagnostics: {
+        binaryPath,
+        binaryExists,
+        cwd: process.cwd(),
+        nodeModulesRufloExists: existsSync(resolve(process.cwd(), "node_modules", "ruflo", "bin", "ruflo.js")),
+      },
+    });
   });
 }
 
