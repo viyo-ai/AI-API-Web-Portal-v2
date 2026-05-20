@@ -29,20 +29,21 @@ const RUFLO_ENV: Record<string, string> = {
 // ─── Ruflo Binary Resolution ──────────────────────────────────────────────────
 
 /**
- * Locate the ruflo binary. Checks:
- * 1. Local node_modules (if installed as a dep)
- * 2. npx cache (from prior npx ruflo@latest runs)
- * 3. Falls back to requiring npx at runtime
+ * Locate the ruflo binary. Resolution order:
+ * 1. node_modules/ruflo/bin/ruflo.js (production — installed as a dependency)
+ * 2. npx cache (legacy sandbox fallback)
+ *
+ * The production path is the primary mechanism. ruflo@3.6.30 is pinned in
+ * package.json so `pnpm install` places it in node_modules on every build.
+ * The npx cache fallback exists only for backward compatibility with sandbox
+ * environments that pre-date the dependency addition.
  */
-function findRufloBinary(): string {
-  // Check local node_modules
-  const localBin = resolve(process.cwd(), "node_modules", ".bin", "ruflo");
-  if (existsSync(localBin)) return localBin;
-
+export function findRufloBinary(): string {
+  // Primary: node_modules dependency (works in production and sandbox)
   const localPkg = resolve(process.cwd(), "node_modules", "ruflo", "bin", "ruflo.js");
   if (existsSync(localPkg)) return localPkg;
 
-  // Check npx cache directories
+  // Fallback: npx cache (sandbox-only legacy path)
   const homeDir = process.env.HOME || "/home/ubuntu";
   const npxCacheBase = join(homeDir, ".npm", "_npx");
   try {
@@ -55,8 +56,9 @@ function findRufloBinary(): string {
     // npx cache not available
   }
 
-  // Fallback: use npx (may trigger download)
-  throw new Error("Ruflo binary not found. Run 'npx ruflo@3.6.30 --help' once to cache it.");
+  throw new Error(
+    "Ruflo binary not found. Ensure ruflo@3.6.30 is in package.json dependencies."
+  );
 }
 
 const MAX_RESTART_RETRIES = 5;

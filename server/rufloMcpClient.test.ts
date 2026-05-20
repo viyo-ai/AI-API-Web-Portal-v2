@@ -244,3 +244,42 @@ describe("dispatchToolCall integration contract", () => {
     }
   });
 });
+
+// ─── INV-DEPLOY-01: Binary resolution finds ruflo from node_modules ──────────
+
+import { findRufloBinary } from "./rufloMcpClient";
+import { existsSync, statSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+describe("INV-DEPLOY-01: Binary resolution without npx cache", () => {
+  it("findRufloBinary resolves to node_modules/ruflo/bin/ruflo.js", () => {
+    const binary = findRufloBinary();
+
+    // Must resolve to a path containing ruflo/bin/ruflo.js
+    expect(binary).toContain("ruflo");
+    expect(binary).toContain("bin");
+    expect(binary).toMatch(/ruflo\.js$/);
+
+    // The resolved path must actually exist and be a file
+    expect(existsSync(binary)).toBe(true);
+    const stat = statSync(binary);
+    expect(stat.isFile()).toBe(true);
+  });
+
+  it("findRufloBinary prefers node_modules over npx cache when both exist", () => {
+    const binary = findRufloBinary();
+    const expectedPrimary = resolve(process.cwd(), "node_modules", "ruflo", "bin", "ruflo.js");
+
+    // When node_modules/ruflo exists (as it does after pnpm install),
+    // the function MUST return the node_modules path, not the npx cache path
+    expect(binary).toBe(expectedPrimary);
+  });
+
+  it("resolved ruflo binary is executable by Node.js (shebang check)", () => {
+    const binary = findRufloBinary();
+    const content = readFileSync(binary, "utf-8");
+
+    // Must have Node.js shebang — confirms it's a valid Node script
+    expect(content.startsWith("#!/usr/bin/env node")).toBe(true);
+  });
+});
