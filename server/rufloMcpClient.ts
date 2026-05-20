@@ -12,6 +12,8 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
+import { resolve, join } from "node:path";
 import type { Express } from "express";
 
 // ─── Configuration ─────────────────────────────────────────────────────────────
@@ -23,6 +25,39 @@ const RUFLO_ENV: Record<string, string> = {
   CLAUDE_FLOW_MAX_AGENTS: "8",
   CLAUDE_FLOW_MEMORY_BACKEND: "sqljs",
 };
+
+// ─── Ruflo Binary Resolution ──────────────────────────────────────────────────
+
+/**
+ * Locate the ruflo binary. Checks:
+ * 1. Local node_modules (if installed as a dep)
+ * 2. npx cache (from prior npx ruflo@latest runs)
+ * 3. Falls back to requiring npx at runtime
+ */
+function findRufloBinary(): string {
+  // Check local node_modules
+  const localBin = resolve(process.cwd(), "node_modules", ".bin", "ruflo");
+  if (existsSync(localBin)) return localBin;
+
+  const localPkg = resolve(process.cwd(), "node_modules", "ruflo", "bin", "ruflo.js");
+  if (existsSync(localPkg)) return localPkg;
+
+  // Check npx cache directories
+  const homeDir = process.env.HOME || "/home/ubuntu";
+  const npxCacheBase = join(homeDir, ".npm", "_npx");
+  try {
+    const dirs = readdirSync(npxCacheBase);
+    for (const dir of dirs) {
+      const candidate = join(npxCacheBase, dir, "node_modules", "ruflo", "bin", "ruflo.js");
+      if (existsSync(candidate)) return candidate;
+    }
+  } catch {
+    // npx cache not available
+  }
+
+  // Fallback: use npx (may trigger download)
+  throw new Error("Ruflo binary not found. Run 'npx ruflo@3.6.30 --help' once to cache it.");
+}
 
 const MAX_RESTART_RETRIES = 5;
 const BASE_BACKOFF_MS = 1000;
@@ -143,11 +178,13 @@ function spawnRufloProcess(): ChildProcess {
   delete env.CLAUDE_API_KEY;
   delete env.OPENAI_API_KEY;
 
-  const child = spawn("npx", ["ruflo@latest", "mcp", "start"], {
+  // Use the cached ruflo binary directly to avoid npx version resolution issues
+  // with alpha releases that have invalid semver in their dependency trees.
+  const rufloBin = findRufloBinary();
+  const child = spawn("node", [rufloBin, "mcp", "start"], {
     env,
     stdio: ["pipe", "pipe", "pipe"],
     cwd: process.cwd(),
-    shell: true,
   });
 
   return child;
