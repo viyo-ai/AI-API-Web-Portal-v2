@@ -534,3 +534,18 @@
 - [x] §PORTAL-FIX-04B: Reopen Skills Library visibility bug where `/skills` shows All 0 / Custom 0 / Official 0 even though duplicate upload detection finds an existing skill slug; fix the backend/list contract so existing uploaded skills appear in the visible list.
 
 - [x] §PORTAL-FIX-03: fix Skills Library visibility when uploaded custom skills are persisted but not rendered, including the `skills.list` client/server limit contract and the Product Owner's `/skills` dedicated-page suggestion.
+
+- [x] §PORTAL-PHASE-1-01: Implement rufloMcpClient.ts subprocess lifecycle manager (spawn, JSON-RPC 2.0, crash restart, health endpoint)
+- [x] §PORTAL-PHASE-1-02: Wire tool surface exposure in wrapperLLM.ts (ruflo.* namespace, dispatchToolCall routing, system prompt injection)
+- [x] §PORTAL-PHASE-1-03: Update architect.context.md with Ruflo tools section (categories, usage guidelines, prohibition rules)
+- [x] §PORTAL-PHASE-1-04: Write INV-P1 behavioral tests (rufloMcpClient.test.ts) covering all 6 invariants
+- [x] §PORTAL-PHASE-1-05: Pass all validation gates (pnpm check, existing contract tests, build)
+
+- [x] §PORTAL-PHASE-2-01: Implement parallelWorkers.ts — WorkerSpec, WorkerResult types, runParallelWorkers lifecycle primitive
+- [x] §PORTAL-PHASE-2-02: Implement aggregateWorkerResults — reads Ruflo memory, Claude aggregation, token sanitization
+- [x] §PORTAL-PHASE-2-03: Wire parallel fan-out into executeWrapperTurn (additive path, parallelSpecs parameter)
+- [x] §PORTAL-PHASE-2-04: Update architect.context.md Section 9 with parallel worker fan-out documentation
+- [x] §PORTAL-PHASE-2-05: Write INV-P2-01 through INV-P2-10 behavioral tests (parallelWorkers.test.ts)
+- [x] §PORTAL-PHASE-2-06: Pass all validation gates (pnpm check, all contract tests, build)
+- [x] §PORTAL-PHASE-2-07: Live 3-worker fan-out verification with timing proof (102ms for 3×100ms workers)
+- [x] §PORTAL-PHASE-2-08: Deploy to GitHub main with commit URL and checkpoint
