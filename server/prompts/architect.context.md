@@ -60,3 +60,47 @@ Use these when:
 Do NOT use these for:
 - Replacing existing `buildTargets.*` or `projectMemory.*` calls — those remain canonical for Project and per-project state.
 - Bypassing the §9 approval gate or any safety constraint.
+
+## 9. Parallel Worker Fan-Out (§PORTAL-PHASE-2)
+
+The wrapper now supports parallel multi-agent execution. When a task requires independent subtasks that can run concurrently, the orchestrator can dispatch N workers simultaneously.
+
+### How it works
+
+1. **Decomposition:** The orchestrator (or a planning LLM) breaks a directive into independent `WorkerSpec` objects, each with a `workerId`, `role`, `subtaskPrompt`, and `outputKey`.
+2. **Fan-out:** All workers execute in parallel via `Promise.all`. Each worker invokes the LLM independently with its own system prompt and subtask.
+3. **Persistence:** Each worker's output is stored in Ruflo memory at `{parentTaskId}:{workerId}:{outputKey}` for cross-task retrieval.
+4. **Aggregation:** After all workers complete (or timeout), Claude synthesizes a single merged response from all outputs.
+5. **§9 gate:** The approval gate fires ONCE on the aggregated output — not per-worker. This preserves the existing approval semantics.
+
+### Worker roles
+
+| Role | Purpose |
+|------|---------|
+| `executor` | Writes implementation code |
+| `architect` | Designs structure and contracts |
+| `reviewer` | Provides critical review and improvements |
+| `adversary` | Finds edge cases, security issues, failure modes |
+| `curator` | Organizes and summarizes information |
+
+### Constraints
+
+- **One worker's failure does not abort others.** Failed/timed-out workers are surfaced in the aggregation.
+- **Per-worker timeout:** 5 minutes default. Workers that exceed this are marked `timeout`.
+- **Token sanitization:** All worker outputs are scanned for token-like values and redacted before storage or aggregation.
+- **No new API keys consumed.** Workers use the same LLM credentials as the existing wrapper pipeline.
+- **Approval gate fires once** at aggregation, not per-worker. This is invariant INV-P2-06.
+
+### When to use parallel fan-out
+
+- Multi-file code generation where files are independent
+- Research tasks that can be split by topic
+- Code review + adversarial testing + implementation in parallel
+- Any directive that explicitly requests "do X, Y, Z simultaneously"
+
+### When NOT to use parallel fan-out
+
+- Sequential dependencies (B depends on A's output)
+- Single-file edits
+- Conversational responses
+- Tasks requiring real-time coordination between agents (use Ruflo swarm tools instead)

@@ -17,6 +17,7 @@ import type { ResolvedSkillLoadReason } from "./db";
 import { enforceGovernanceBudget, renderGovernanceBlock, type GovernanceLoadResult } from "./buildRunner/loadGovernance";
 import { classifyProviderFailure, providerFailureOwnerMessage, type ProviderFailureProvider } from "./providerErrorMessages";
 import { callRufloTool, getRufloHealth, getRufloToolSummaryForPrompt, isRufloTool, stripRufloPrefix } from "./rufloMcpClient";
+import { runParallelWorkers, aggregateWorkerResults, type WorkerSpec } from "./parallelWorkers";
 
 export const CLAUDE_DEFAULT_MODEL = process.env.CLAUDE_MODEL || "claude-opus-4-7";
 export const CLAUDE_ADAPTIVE_THINKING_CONFIG = { type: "adaptive" } as const;
@@ -48,6 +49,7 @@ export type WrapperExecutionInput = {
   approvedClaudePlan?: string;
   isStudioDirective?: boolean;
   studioDirectiveReason?: string;
+  parallelSpecs?: WorkerSpec[];
 };
 
 export type WrapperExecutionResult = {
@@ -641,6 +643,12 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
   const initialStop = await stopIfRequested("before context assembly");
   if (initialStop) return { route: input.route, finalAnswer: initialStop };
 
+  // ─── §PORTAL-PHASE-2: Parallel fan-out path (additive) ───────────────────
+  if (input.parallelSpecs && input.parallelSpecs.length > 0) {
+    return executeParallelFanOut(input);
+  }
+  // ─── End parallel fan-out check ──────────────────────────────────────────
+
   await updateTurnState(input.turnId, input.ownerUserId, "context_assembly", input.route, serializeJson(input.credentialStates));
   await appendTaskEvent({
     taskId: input.task.id,
@@ -821,6 +829,108 @@ export async function executeWrapperTurn(input: WrapperExecutionInput): Promise<
     });
     throw error;
   }
+}
+
+// ─── §PORTAL-PHASE-2: Parallel Fan-Out Execution ─────────────────────────────
+
+/**
+ * Execute a parallel fan-out turn. Called when input.parallelSpecs is non-empty.
+ * Runs N workers in parallel, aggregates results, pipes through §9 approval gate
+ * if any worker has role=executor and requireApprovalBeforeKimi is set.
+ */
+async function executeParallelFanOut(input: WrapperExecutionInput): Promise<WrapperExecutionResult> {
+  const specs = input.parallelSpecs!;
+
+  await updateTurnState(input.turnId, input.ownerUserId, "context_assembly", input.route, serializeJson(input.credentialStates));
+  await appendTaskEvent({
+    taskId: input.task.id,
+    ownerUserId: input.ownerUserId,
+    actor: "wrapper",
+    eventType: "status",
+    status: "running",
+    content: `Parallel fan-out initiated: ${specs.length} workers [${specs.map(s => s.workerId).join(", ")}].`,
+    metadataJson: serializeJson({ turnId: input.turnId, route: input.route, workerCount: specs.length, workerIds: specs.map(s => s.workerId) }),
+  });
+
+  await updateTurnState(input.turnId, input.ownerUserId, "model_calling", input.route, serializeJson(input.credentialStates));
+
+  // Run all workers in parallel
+  const workerResults = await runParallelWorkers(input.task.id, specs);
+
+  await appendTaskEvent({
+    taskId: input.task.id,
+    ownerUserId: input.ownerUserId,
+    actor: "wrapper",
+    eventType: "status",
+    status: "succeeded",
+    content: `Parallel workers completed: ${workerResults.filter(r => r.status === "completed").length}/${specs.length} succeeded.`,
+    metadataJson: serializeJson({ turnId: input.turnId, workerResults: workerResults.map(r => ({ workerId: r.workerId, status: r.status, durationMs: r.durationMs })) }),
+  });
+
+  // Aggregate results
+  await updateTurnState(input.turnId, input.ownerUserId, "model_review", input.route, serializeJson(input.credentialStates));
+
+  const aggregation = await aggregateWorkerResults(input.task.id, workerResults, input.userMessage);
+
+  await appendTaskEvent({
+    taskId: input.task.id,
+    ownerUserId: input.ownerUserId,
+    actor: "claude",
+    eventType: "model_result",
+    status: "succeeded",
+    content: aggregation.mergedOutput,
+    metadataJson: serializeJson({ turnId: input.turnId, aggregationDurationMs: aggregation.aggregationDurationMs, failedWorkers: aggregation.failedWorkers, timedOutWorkers: aggregation.timedOutWorkers }),
+  });
+
+  // §9 approval gate fires ONCE at aggregation (INV-P2-06)
+  const hasExecutorWorker = specs.some(s => s.role === "executor");
+  if (hasExecutorWorker && input.requireApprovalBeforeKimi) {
+    await updateTurnApprovalState({
+      turnId: input.turnId,
+      ownerUserId: input.ownerUserId,
+      state: "awaiting_approval",
+      approvalStatus: "awaiting_owner",
+      approvalPlanContent: aggregation.mergedOutput,
+      approvalDecisionMessage: null,
+      approvalRequestedAt: Date.now(),
+      approvalResolvedAt: null,
+    });
+    await updateTaskStatus(input.task.id, input.ownerUserId, "active");
+    await appendTaskEvent({
+      taskId: input.task.id,
+      ownerUserId: input.ownerUserId,
+      actor: "wrapper",
+      eventType: "status",
+      status: "blocked",
+      content: "Parallel fan-out aggregation complete. Awaiting owner approval before commit.",
+      metadataJson: serializeJson({ turnId: input.turnId, route: input.route, approvalStatus: "awaiting_owner", workerCount: specs.length }),
+    });
+    return {
+      route: input.route,
+      finalAnswer: aggregation.mergedOutput,
+      awaitingApproval: true,
+    };
+  }
+
+  // No approval required — complete the turn
+  await updateTurnState(input.turnId, input.ownerUserId, "persisting_output", input.route, serializeJson(input.credentialStates));
+  await appendTaskEvent({
+    taskId: input.task.id,
+    ownerUserId: input.ownerUserId,
+    actor: "wrapper",
+    eventType: "status",
+    status: "succeeded",
+    content: "Parallel fan-out completed and aggregated. Persisting output.",
+    metadataJson: serializeJson({ turnId: input.turnId, route: input.route }),
+  });
+
+  await completeTurn(input.turnId, input.ownerUserId);
+  await updateTaskStatus(input.task.id, input.ownerUserId, "active");
+
+  return {
+    route: input.route,
+    finalAnswer: aggregation.mergedOutput,
+  };
 }
 
 // ─── Ruflo Tool-Call Dispatch ──────────────────────────────────────────────────
